@@ -289,20 +289,24 @@ public final class KeyboardInputHandler: ObservableObject {
             return nil
 
         // Escape
+        // Note: keyChar must be 0 for special keys so libatari800 uses keyCode
         case MacKeyCode.escape:
-            return (0x1B, AtariKeyCode.escape, shift, control)
+            return (0, AtariKeyCode.escape, shift, control)
 
         // Return/Enter
+        // Note: keyChar must be 0 for special keys so libatari800 uses keyCode
         case MacKeyCode.return, MacKeyCode.keypadEnter:
-            return (0x9B, AtariKeyCode.return, shift, control)
+            return (0, AtariKeyCode.return, shift, control)
 
         // Tab
+        // Note: keyChar must be 0 for special keys so libatari800 uses keyCode
         case MacKeyCode.tab:
-            return (0x7F, AtariKeyCode.tab, shift, control)
+            return (0, AtariKeyCode.tab, shift, control)
 
         // Backspace/Delete
+        // Note: keyChar must be 0 for special keys so libatari800 uses keyCode
         case MacKeyCode.delete:
-            return (0x7E, AtariKeyCode.backspace, shift, control)
+            return (0, AtariKeyCode.backspace, shift, control)
 
         // Arrow keys
         case MacKeyCode.upArrow:
