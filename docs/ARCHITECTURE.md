@@ -154,7 +154,8 @@ The GUI can send unsolicited events (breakpoint hits, emulator stopped). The CLI
 ```
 EVENT:breakpoint $600A
 * Breakpoint hit at $600A
-  A=$4F X=$00 Y=$03 S=$F7 P=N.....C
+  A=$4F X=$00 Y=$03 S=$F7 P=$A3
+  Flags: N.....ZC
 [monitor] $600A>
 ```
 
@@ -242,8 +243,9 @@ struct AudioRingBuffer {
 ```
 Atari800State {
     magic: [UInt8; 4] = "ATTC"
-    version: UInt16
-    timestamp: UInt64
+    version: UInt8
+    flags: UInt8
+    reserved: [UInt8; 10]
     
     // CPU State
     cpu: {
@@ -279,7 +281,8 @@ libatari800 likely has its own state save format. We'll use that for the emulato
 ```swift
 struct StateFile: Codable {
     let magic: String = "ATTC"
-    let version: Int = 1
+    let version: UInt8 = 1
+    let flags: UInt8 = 0
     let timestamp: Date
     let libatari800State: Data  // Opaque blob from libatari800
     let mountedDisks: [MountedDisk]

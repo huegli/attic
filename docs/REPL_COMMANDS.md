@@ -118,8 +118,8 @@ Stopped at $E480
 **Examples:**
 ```
 [monitor] $E477> r
-  A=$00 X=$00 Y=$00 S=$FF P=$32 PC=$E477
-  Flags: ..I..Z.
+  A=$00 X=$00 Y=$00 S=$FF P=$26 PC=$E477
+  Flags: .....IZ.
 
 [monitor] $E477> r A=$50
   A=$50 X=$00 Y=$00 S=$FF P=$32 PC=$E477

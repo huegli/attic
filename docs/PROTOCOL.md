@@ -121,6 +121,19 @@ CMD:reset warm
 OK:reset warm
 ```
 
+#### status
+Get emulator status.
+```
+CMD:status
+OK:status running PC=$E477 D1=/path/to/disk.atr D2=(none) BP=$600A,$602F
+```
+
+Status fields:
+- `running` or `paused` - emulator state
+- `PC=$XXXX` - current program counter
+- `D1=...` through `D8=...` - mounted disk paths or `(none)`
+- `BP=...` - comma-separated breakpoint addresses or `(none)`
+
 ### Memory Operations
 
 #### read

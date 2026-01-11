@@ -185,22 +185,6 @@ EXAMPLES:
   attic --socket /tmp/attic-1234.sock  Connect to existing GUI
 ```
 
-### Startup Behavior
-
-**Normal Mode (default):**
-1. Check for existing GUI socket in `/tmp/attic-*.sock`
-2. If not found, launch `AtticGUI` as subprocess
-3. Wait up to 5 seconds for socket to appear
-4. Connect to socket
-5. Enter REPL loop with BASIC mode default
-
-**Headless Mode (`--headless`):**
-1. Load ROMs from bundle
-2. Initialize libatari800 directly
-3. Initialize audio (unless `--silent`)
-4. Enter REPL loop
-5. No Metal rendering
-
 ### REPL Prompt Format
 
 Prompts must be recognizable by Emacs comint:
@@ -290,9 +274,9 @@ Using a combination of libatari800's native format and our metadata:
 ┌──────────────────────────────────┐
 │ Header (16 bytes)                │
 │   Magic: "ATTC" (4 bytes)        │
-│   Version: UInt32 (4 bytes)      │
-│   Flags: UInt32 (4 bytes)        │
-│   Reserved: (4 bytes)            │
+│   Version: UInt8 (1 byte)        │
+│   Flags: UInt8 (1 byte)          │
+│   Reserved: (10 bytes)           │
 ├──────────────────────────────────┤
 │ Metadata (JSON, length-prefixed) │
 │   - Timestamp                    │
