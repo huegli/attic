@@ -120,6 +120,9 @@ public enum AtticError: Error, LocalizedError {
     /// The emulator is not initialized.
     case notInitialized
 
+    /// Emulator initialization failed.
+    case initializationFailed(String)
+
     /// A socket communication error occurred.
     case socketError(String)
 
@@ -144,6 +147,8 @@ public enum AtticError: Error, LocalizedError {
             return "Memory access error: \(reason)"
         case .notInitialized:
             return "Emulator not initialized"
+        case .initializationFailed(let reason):
+            return "Emulator initialization failed: \(reason)"
         case .socketError(let reason):
             return "Socket error: \(reason)"
         case .invalidCommand(let cmd, let suggestion):

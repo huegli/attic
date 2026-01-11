@@ -81,7 +81,13 @@ let package = Package(
         .target(
             name: "AtticCore",
             dependencies: ["CAtari800"],
-            path: "Sources/AtticCore"
+            path: "Sources/AtticCore",
+            linkerSettings: [
+                // Link against the local libatari800.a static library
+                .unsafeFlags(["-L", "Libraries/libatari800/lib"]),
+                // Also need to link zlib which libatari800 depends on
+                .linkedLibrary("z")
+            ]
         ),
 
         // =================================================================

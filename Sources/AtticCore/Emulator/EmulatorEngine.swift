@@ -30,29 +30,32 @@
 //     let regs = await engine.getRegisters()
 //     print(regs.formatted)
 //
-//     // Step through code
-//     let result = await engine.step(count: 5)
-//
 // =============================================================================
 
 import Foundation
 
 /// The running state of the emulator.
-public enum EmulatorState: Sendable {
+///
+/// This enum tracks what the emulator is currently doing, which affects
+/// what operations are valid. For example, you can only step when paused.
+public enum EmulatorRunState: Sendable, Equatable {
     /// Emulator is running at full speed.
     case running
 
-    /// Emulator is paused (can be stepped).
+    /// Emulator is paused (can be stepped or inspected).
     case paused
 
-    /// Emulator hit a breakpoint.
+    /// Emulator hit a breakpoint and stopped.
     case breakpoint(address: UInt16)
 
-    /// Emulator is not initialized.
+    /// Emulator is not initialized (no ROMs loaded).
     case uninitialized
 }
 
 /// Result of stepping the emulator.
+///
+/// Contains information about what happened during stepping, including
+/// the final register state and whether any breakpoints were hit.
 public struct StepResult: Sendable {
     /// The CPU registers after stepping.
     public let registers: CPURegisters
@@ -65,6 +68,9 @@ public struct StepResult: Sendable {
 
     /// The breakpoint address, if one was hit.
     public let breakpointAddress: UInt16?
+
+    /// The frame result from the last executed frame.
+    public let frameResult: FrameResult
 }
 
 /// Thread-safe emulator controller using Swift's actor model.
@@ -75,6 +81,14 @@ public struct StepResult: Sendable {
 ///
 /// This is the primary interface for controlling the emulator from both
 /// the CLI and GUI.
+///
+/// Key Responsibilities:
+/// - Initialize and manage the emulator lifecycle
+/// - Execute frames with input handling
+/// - Provide thread-safe memory and register access
+/// - Manage breakpoints for debugging
+/// - Handle state save/restore
+///
 public actor EmulatorEngine {
     // =========================================================================
     // MARK: - Properties
@@ -83,40 +97,67 @@ public actor EmulatorEngine {
     /// The underlying C library wrapper.
     private let wrapper: LibAtari800Wrapper
 
-    /// Current emulator state.
-    private(set) public var state: EmulatorState = .uninitialized
+    /// Current emulator run state.
+    private(set) public var state: EmulatorRunState = .uninitialized
+
+    /// Current input state, updated each frame.
+    private var inputState = InputState()
 
     /// Set of active breakpoint addresses.
     private var breakpoints: Set<UInt16> = []
 
+    /// Original bytes at breakpoint locations (for BRK injection).
+    private var breakpointOriginalBytes: [UInt16: UInt8] = [:]
+
     /// Whether the emulation loop should continue running.
     private var shouldRun: Bool = false
 
+    /// Frame counter for timing.
+    private var frameCount: UInt64 = 0
+
     /// Callback invoked when a breakpoint is hit.
     /// Set this to be notified asynchronously of breakpoint events.
-    public var onBreakpointHit: ((UInt16, CPURegisters) async -> Void)?
+    public var onBreakpointHit: (@Sendable (UInt16, CPURegisters) async -> Void)?
+
+    /// Callback invoked after each frame for screen updates.
+    public var onFrameComplete: (@Sendable ([UInt8]) async -> Void)?
 
     // =========================================================================
     // MARK: - Initialization
     // =========================================================================
 
     /// Creates a new EmulatorEngine instance.
+    ///
+    /// The engine is created in an uninitialized state. Call `initialize(romPath:)`
+    /// before using emulation functions.
     public init() {
         self.wrapper = LibAtari800Wrapper()
     }
 
     /// Initializes the emulator with ROMs from the specified path.
     ///
+    /// This loads the Atari OS and BASIC ROMs and prepares the emulator
+    /// for execution. After initialization, the emulator is in a paused state.
+    ///
     /// - Parameter romPath: URL to the directory containing ROM files.
+    ///   The directory should contain ATARIXL.ROM and ATARIBAS.ROM.
     /// - Throws: AtticError if initialization fails.
     public func initialize(romPath: URL) async throws {
         try wrapper.initialize(romPath: romPath)
         state = .paused
+        frameCount = 0
     }
 
     /// Returns true if the emulator has been initialized.
     public var isInitialized: Bool {
         wrapper.isInitialized
+    }
+
+    /// Shuts down the emulator and releases resources.
+    public func shutdown() {
+        shouldRun = false
+        wrapper.shutdown()
+        state = .uninitialized
     }
 
     // =========================================================================
@@ -126,7 +167,8 @@ public actor EmulatorEngine {
     /// Starts or resumes emulation.
     ///
     /// The emulator will run at approximately 60fps until paused or a
-    /// breakpoint is hit.
+    /// breakpoint is hit. Call `runLoop()` in a background task to actually
+    /// execute frames.
     public func resume() async {
         guard wrapper.isInitialized else { return }
         shouldRun = true
@@ -135,7 +177,7 @@ public actor EmulatorEngine {
 
     /// Pauses emulation.
     ///
-    /// The emulator stops after completing the current instruction.
+    /// The emulator stops after completing the current frame.
     public func pause() async {
         shouldRun = false
         if case .running = state {
@@ -143,16 +185,29 @@ public actor EmulatorEngine {
         }
     }
 
-    /// Performs a reset.
+    /// Performs a reset (reboot).
     ///
     /// - Parameter cold: If true, performs a cold reset (power cycle).
     ///                   If false, performs a warm reset (RESET key).
     public func reset(cold: Bool) async {
-        wrapper.reset(cold: cold)
         if cold {
-            // Clear breakpoints on cold reset (optional behavior)
-            // breakpoints.removeAll()
+            // Cold reset - reboot without any file
+            wrapper.reboot(with: nil)
+        } else {
+            // Warm reset - libatari800 doesn't have a separate warm reset,
+            // so we save state, reboot, and we could restore partial state
+            // For now, just reboot
+            wrapper.reboot(with: nil)
         }
+        state = .paused
+    }
+
+    /// Reboots the emulator with an optional file to load.
+    ///
+    /// - Parameter filePath: Path to a file to load (ATR, XEX, etc.), or nil for plain boot.
+    public func reboot(with filePath: String? = nil) async {
+        wrapper.reboot(with: filePath)
+        state = .paused
     }
 
     /// Executes the emulation loop.
@@ -163,60 +218,154 @@ public actor EmulatorEngine {
     /// Usage:
     ///
     ///     Task {
+    ///         await engine.resume()
     ///         await engine.runLoop()
     ///     }
     ///
     public func runLoop() async {
-        while shouldRun {
-            // Execute one frame
-            wrapper.executeFrame()
+        guard wrapper.isInitialized else { return }
 
-            // Check for breakpoints (simplified - real implementation would
-            // check during execution, not after)
+        while shouldRun {
+            // Execute one frame with current input
+            var input = inputState
+            let result = wrapper.executeFrame(input: &input)
+
+            frameCount += 1
+
+            // Check frame result for special conditions
+            switch result {
+            case .breakpoint:
+                let pc = wrapper.getRegisters().pc
+                shouldRun = false
+                state = .breakpoint(address: pc)
+                let regs = wrapper.getRegisters()
+                await onBreakpointHit?(pc, regs)
+                return
+
+            case .cpuCrash:
+                shouldRun = false
+                state = .paused
+                return
+
+            case .notInitialized, .error:
+                shouldRun = false
+                state = .paused
+                return
+
+            case .ok:
+                break
+            }
+
+            // Check for software breakpoints
             let pc = wrapper.getRegisters().pc
             if breakpoints.contains(pc) {
                 shouldRun = false
                 state = .breakpoint(address: pc)
                 let regs = wrapper.getRegisters()
                 await onBreakpointHit?(pc, regs)
-                break
+                return
             }
 
-            // Yield to allow other operations
-            await Task.yield()
+            // Notify frame complete for display update
+            if let callback = onFrameComplete {
+                let frameBuffer = wrapper.getFrameBufferBGRA()
+                await callback(frameBuffer)
+            }
+
+            // Yield to allow other operations and maintain ~60fps
+            // In a real implementation, you'd use a display link or precise timing
+            try? await Task.sleep(nanoseconds: 16_666_667)  // ~60fps
         }
     }
 
-    /// Steps the emulator by a specified number of instructions.
+    /// Executes a single frame of emulation.
     ///
-    /// - Parameter count: Number of instructions to execute (default 1).
-    /// - Returns: StepResult containing register state and execution info.
-    public func step(count: Int = 1) async -> StepResult {
-        var totalCycles = 0
-        var hitBreakpoint = false
-        var breakpointAddr: UInt16? = nil
+    /// This is useful for headless operation or when you want to control
+    /// frame timing externally.
+    ///
+    /// - Returns: The frame execution result.
+    @discardableResult
+    public func executeFrame() async -> FrameResult {
+        guard wrapper.isInitialized else { return .notInitialized }
 
-        for _ in 0..<count {
-            let cycles = wrapper.step()
-            totalCycles += cycles
+        var input = inputState
+        let result = wrapper.executeFrame(input: &input)
+        frameCount += 1
 
+        if result == .breakpoint {
             let pc = wrapper.getRegisters().pc
-            if breakpoints.contains(pc) {
-                hitBreakpoint = true
-                breakpointAddr = pc
-                state = .breakpoint(address: pc)
-                break
-            }
+            state = .breakpoint(address: pc)
         }
 
-        let regs = wrapper.getRegisters()
+        return result
+    }
 
-        return StepResult(
-            registers: regs,
-            cyclesExecuted: totalCycles,
-            breakpointHit: hitBreakpoint,
-            breakpointAddress: breakpointAddr
-        )
+    /// Returns the current frame count since initialization.
+    public var currentFrameCount: UInt64 {
+        frameCount
+    }
+
+    // =========================================================================
+    // MARK: - Input Handling
+    // =========================================================================
+
+    /// Updates the current input state.
+    ///
+    /// The input state is applied on the next frame execution.
+    ///
+    /// - Parameter input: The new input state.
+    public func setInput(_ input: InputState) {
+        self.inputState = input
+    }
+
+    /// Gets the current input state.
+    public func getInput() -> InputState {
+        inputState
+    }
+
+    /// Sends a key press event.
+    ///
+    /// - Parameters:
+    ///   - keyChar: ATASCII character code.
+    ///   - keyCode: Internal Atari key code.
+    ///   - shift: Shift key state.
+    ///   - control: Control key state.
+    public func pressKey(keyChar: UInt8, keyCode: UInt8, shift: Bool = false, control: Bool = false) {
+        inputState.keyChar = keyChar
+        inputState.keyCode = keyCode
+        inputState.shift = shift
+        inputState.control = control
+    }
+
+    /// Releases all key input.
+    public func releaseKey() {
+        inputState.keyChar = 0
+        inputState.keyCode = 0
+        inputState.shift = false
+        inputState.control = false
+    }
+
+    /// Sets console key states (START, SELECT, OPTION).
+    public func setConsoleKeys(start: Bool = false, select: Bool = false, option: Bool = false) {
+        inputState.start = start
+        inputState.select = select
+        inputState.option = option
+    }
+
+    /// Sets joystick state.
+    ///
+    /// - Parameters:
+    ///   - port: Joystick port (0 or 1).
+    ///   - direction: Direction bits (4-bit, RLDU format).
+    ///   - trigger: Trigger button state.
+    public func setJoystick(port: Int, direction: UInt8, trigger: Bool) {
+        if port == 0 {
+            inputState.joystick0 = direction
+            inputState.trigger0 = trigger
+        } else if port == 1 {
+            inputState.joystick1 = direction
+            inputState.trigger1 = trigger
+        }
     }
 
     // =========================================================================
@@ -281,6 +430,9 @@ public actor EmulatorEngine {
 
     /// Sets a breakpoint at the specified address.
     ///
+    /// Breakpoints cause the emulator to pause when the PC reaches the
+    /// specified address.
+    ///
     /// - Parameter address: The address to break at.
     /// - Returns: True if the breakpoint was set, false if it already existed.
     @discardableResult
@@ -301,6 +453,7 @@ public actor EmulatorEngine {
     /// Clears all breakpoints.
     public func clearAllBreakpoints() {
         breakpoints.removeAll()
+        breakpointOriginalBytes.removeAll()
     }
 
     /// Returns all active breakpoint addresses.
@@ -308,18 +461,76 @@ public actor EmulatorEngine {
         Array(breakpoints).sorted()
     }
 
+    /// Checks if an address has a breakpoint set.
+    public func hasBreakpoint(at address: UInt16) -> Bool {
+        breakpoints.contains(address)
+    }
+
     // =========================================================================
     // MARK: - Frame Buffer & Audio
     // =========================================================================
 
-    /// Returns a copy of the current frame buffer.
+    /// Returns the current frame buffer in BGRA format.
+    ///
+    /// The buffer is 384 x 240 pixels, 4 bytes per pixel (BGRA).
     public func getFrameBuffer() -> [UInt8] {
-        wrapper.getFrameBuffer()
+        wrapper.getFrameBufferBGRA()
     }
 
-    /// Returns audio samples from the last frame.
-    public func getAudioSamples() -> [Float] {
-        wrapper.getAudioSamples()
+    /// Returns a pointer to the raw screen buffer (indexed colors).
+    ///
+    /// This is the original Atari screen data before palette conversion.
+    /// Use `getFrameBuffer()` for display-ready BGRA data.
+    public func getScreenPointer() -> UnsafePointer<UInt8>? {
+        wrapper.getScreenPointer()
+    }
+
+    /// Returns audio buffer information.
+    ///
+    /// - Returns: Tuple containing pointer to audio data and sample count.
+    public func getAudioBuffer() -> (pointer: UnsafePointer<UInt8>?, count: Int) {
+        wrapper.getAudioBuffer()
+    }
+
+    /// Returns the audio samples as a byte array.
+    ///
+    /// This method copies the audio data into a Swift array, which is Sendable
+    /// and can safely be passed across actor boundaries. Use this method when
+    /// accessing audio from a different actor context.
+    ///
+    /// - Returns: Array of audio bytes (format depends on audioConfiguration).
+    public func getAudioSamples() -> [UInt8] {
+        let (pointer, count) = wrapper.getAudioBuffer()
+        guard let pointer = pointer, count > 0 else { return [] }
+        return Array(UnsafeBufferPointer(start: pointer, count: count))
+    }
+
+    /// Returns the audio configuration.
+    public func getAudioConfiguration() -> AudioConfiguration {
+        wrapper.audioConfiguration
+    }
+
+    // =========================================================================
+    // MARK: - Disk Management
+    // =========================================================================
+
+    /// Mounts a disk image to the specified drive.
+    ///
+    /// - Parameters:
+    ///   - drive: Drive number (1-8).
+    ///   - path: Path to the ATR file.
+    ///   - readOnly: If true, mount as read-only.
+    /// - Returns: true if successful.
+    @discardableResult
+    public func mountDisk(drive: Int, path: String, readOnly: Bool = false) -> Bool {
+        wrapper.mountDisk(drive: drive, path: path, readOnly: readOnly)
+    }
+
+    /// Unmounts the disk from the specified drive.
+    ///
+    /// - Parameter drive: Drive number (1-8).
+    public func unmountDisk(drive: Int) {
+        wrapper.unmountDisk(drive: drive)
     }
 
     // =========================================================================
@@ -328,17 +539,107 @@ public actor EmulatorEngine {
 
     /// Saves the current emulator state.
     ///
-    /// - Returns: The serialized state data.
-    /// - Throws: AtticError if saving fails.
-    public func saveState() async throws -> Data {
-        try wrapper.saveState()
+    /// - Returns: The emulator state snapshot.
+    public func saveState() -> EmulatorState {
+        wrapper.saveState()
     }
 
-    /// Loads a previously saved state.
+    /// Restores a previously saved state.
     ///
-    /// - Parameter data: The serialized state data.
+    /// - Parameter state: The state to restore.
+    public func restoreState(_ state: EmulatorState) {
+        wrapper.restoreState(state)
+    }
+
+    /// Saves the current state to a file.
+    ///
+    /// - Parameter url: The file URL to save to.
+    /// - Throws: AtticError if saving fails.
+    public func saveState(to url: URL) throws {
+        let state = wrapper.saveState()
+
+        // Create file format: magic + version + tags + flags + data
+        var fileData = Data()
+
+        // Magic bytes "ATTC"
+        fileData.append(contentsOf: [0x41, 0x54, 0x54, 0x43])
+
+        // Version (UInt8)
+        fileData.append(1)
+
+        // Serialize state
+        // Tags (32 bytes)
+        var tags = state.tags
+        withUnsafeBytes(of: &tags) { fileData.append(contentsOf: $0) }
+
+        // Flags (8 bytes)
+        var flags = state.flags
+        withUnsafeBytes(of: &flags) { fileData.append(contentsOf: $0) }
+
+        // State data
+        fileData.append(contentsOf: state.data)
+
+        do {
+            try fileData.write(to: url)
+        } catch {
+            throw AtticError.stateSaveFailed(error.localizedDescription)
+        }
+    }
+
+    /// Loads a state from a file.
+    ///
+    /// - Parameter url: The file URL to load from.
     /// - Throws: AtticError if loading fails.
-    public func loadState(_ data: Data) async throws {
-        try wrapper.loadState(data)
+    public func loadState(from url: URL) throws {
+        let fileData: Data
+        do {
+            fileData = try Data(contentsOf: url)
+        } catch {
+            throw AtticError.stateLoadFailed(error.localizedDescription)
+        }
+
+        // Validate magic bytes
+        guard fileData.count > 5,
+              fileData[0] == 0x41,  // A
+              fileData[1] == 0x54,  // T
+              fileData[2] == 0x54,  // T
+              fileData[3] == 0x43   // C
+        else {
+            throw AtticError.stateLoadFailed("Invalid state file format")
+        }
+
+        // Check version
+        let version = fileData[4]
+        guard version == 1 else {
+            throw AtticError.stateLoadFailed("Unsupported state file version: \(version)")
+        }
+
+        // Parse state
+        var state = EmulatorState()
+
+        // Read tags (32 bytes starting at offset 5)
+        let tagsData = fileData.subdata(in: 5..<37)
+        tagsData.withUnsafeBytes { ptr in
+            state.tags.size = ptr.load(fromByteOffset: 0, as: UInt32.self)
+            state.tags.cpu = ptr.load(fromByteOffset: 4, as: UInt32.self)
+            state.tags.pc = ptr.load(fromByteOffset: 8, as: UInt32.self)
+            state.tags.baseRam = ptr.load(fromByteOffset: 12, as: UInt32.self)
+            state.tags.antic = ptr.load(fromByteOffset: 16, as: UInt32.self)
+            state.tags.gtia = ptr.load(fromByteOffset: 20, as: UInt32.self)
+            state.tags.pia = ptr.load(fromByteOffset: 24, as: UInt32.self)
+            state.tags.pokey = ptr.load(fromByteOffset: 28, as: UInt32.self)
+        }
+
+        // Read flags (8 bytes starting at offset 37)
+        let flagsData = fileData.subdata(in: 37..<45)
+        flagsData.withUnsafeBytes { ptr in
+            state.flags.selfTestEnabled = ptr.load(fromByteOffset: 0, as: UInt8.self) != 0
+            state.flags.frameCount = ptr.load(fromByteOffset: 4, as: UInt32.self)
+        }
+
+        // Read state data (rest of file)
+        state.data = Array(fileData.suffix(from: 45))
+
+        wrapper.restoreState(state)
     }
 }

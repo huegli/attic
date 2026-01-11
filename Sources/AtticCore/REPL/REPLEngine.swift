@@ -153,8 +153,7 @@ public actor REPLEngine {
 
         case .saveState(let path):
             do {
-                let data = try await emulator.saveState()
-                try data.write(to: URL(fileURLWithPath: path))
+                try await emulator.saveState(to: URL(fileURLWithPath: path))
                 return "State saved to \(path)"
             } catch {
                 return "Error saving state: \(error.localizedDescription)"
@@ -162,8 +161,7 @@ public actor REPLEngine {
 
         case .loadState(let path):
             do {
-                let data = try Data(contentsOf: URL(fileURLWithPath: path))
-                try await emulator.loadState(data)
+                try await emulator.loadState(from: URL(fileURLWithPath: path))
                 return "State loaded from \(path)"
             } catch {
                 return "Error loading state: \(error.localizedDescription)"
@@ -192,12 +190,17 @@ public actor REPLEngine {
             return "Running"
 
         case .step(let count):
-            let result = await emulator.step(count: count)
-            var output = formatRegisters(result.registers)
-            if result.breakpointHit, let addr = result.breakpointAddress {
-                output += "\n* Breakpoint hit at $\(String(format: "%04X", addr))"
+            // libatari800 doesn't support instruction-level stepping,
+            // so we execute frames instead. Each "step" executes one frame.
+            for _ in 0..<count {
+                let result = await emulator.executeFrame()
+                if result == .breakpoint {
+                    let regs = await emulator.getRegisters()
+                    return formatRegisters(regs) + "\n* Breakpoint hit at $\(String(format: "%04X", regs.pc))"
+                }
             }
-            return output
+            let regs = await emulator.getRegisters()
+            return formatRegisters(regs)
 
         case .pause:
             await emulator.pause()

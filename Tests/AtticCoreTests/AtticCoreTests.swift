@@ -363,4 +363,513 @@ final class AtticErrorTests: XCTestCase {
         XCTAssertTrue(desc.contains("xyz"))
         XCTAssertFalse(desc.contains("suggestion"))
     }
+
+    /// Test error description for initializationFailed.
+    func test_errorDescription_initializationFailed() {
+        let error = AtticError.initializationFailed("Test init error")
+        let desc = error.errorDescription ?? ""
+
+        XCTAssertTrue(desc.contains("initialization"))
+        XCTAssertTrue(desc.contains("Test init error"))
+    }
+}
+
+// =============================================================================
+// MARK: - AtariScreen Constants Tests
+// =============================================================================
+
+/// Tests for AtariScreen constants.
+final class AtariScreenTests: XCTestCase {
+    /// Test screen dimensions are correct for Atari display.
+    func test_dimensions_correct() {
+        XCTAssertEqual(AtariScreen.width, 384)
+        XCTAssertEqual(AtariScreen.height, 240)
+    }
+
+    /// Test pixel count matches dimensions.
+    func test_pixelCount_matchesDimensions() {
+        XCTAssertEqual(AtariScreen.pixelCount, AtariScreen.width * AtariScreen.height)
+        XCTAssertEqual(AtariScreen.pixelCount, 92160)
+    }
+
+    /// Test BGRA buffer size is correct.
+    func test_bgraBufferSize_correctForPixels() {
+        // 4 bytes per pixel (BGRA)
+        XCTAssertEqual(AtariScreen.bgraBufferSize, AtariScreen.pixelCount * 4)
+        XCTAssertEqual(AtariScreen.bgraBufferSize, 368640)
+    }
+}
+
+// =============================================================================
+// MARK: - InputState Tests
+// =============================================================================
+
+/// Tests for the InputState struct.
+final class InputStateTests: XCTestCase {
+    /// Test default initialization.
+    func test_init_defaultValues() {
+        let input = InputState()
+
+        XCTAssertEqual(input.keyChar, 0)
+        XCTAssertEqual(input.keyCode, 0)
+        XCTAssertFalse(input.shift)
+        XCTAssertFalse(input.control)
+        XCTAssertFalse(input.start)
+        XCTAssertFalse(input.select)
+        XCTAssertFalse(input.option)
+    }
+
+    /// Test joystick default values (centered).
+    func test_init_joystickCentered() {
+        let input = InputState()
+
+        // 0x0F means all directions released (RLDU bits all set)
+        XCTAssertEqual(input.joystick0, 0x0F)
+        XCTAssertEqual(input.joystick1, 0x0F)
+    }
+
+    /// Test trigger default values (not pressed).
+    func test_init_triggersReleased() {
+        let input = InputState()
+
+        XCTAssertFalse(input.trigger0)
+        XCTAssertFalse(input.trigger1)
+    }
+
+    /// Test modifying input state.
+    func test_mutation_keyboardInput() {
+        var input = InputState()
+
+        input.keyChar = 65  // 'A'
+        input.shift = true
+        input.control = true
+
+        XCTAssertEqual(input.keyChar, 65)
+        XCTAssertTrue(input.shift)
+        XCTAssertTrue(input.control)
+    }
+
+    /// Test modifying console keys.
+    func test_mutation_consoleKeys() {
+        var input = InputState()
+
+        input.start = true
+        input.select = true
+        input.option = true
+
+        XCTAssertTrue(input.start)
+        XCTAssertTrue(input.select)
+        XCTAssertTrue(input.option)
+    }
+
+    /// Test modifying joystick state.
+    func test_mutation_joystick() {
+        var input = InputState()
+
+        // Joystick up (bit 0 clear)
+        input.joystick0 = 0x0E
+        input.trigger0 = true
+
+        XCTAssertEqual(input.joystick0, 0x0E)
+        XCTAssertTrue(input.trigger0)
+    }
+}
+
+// =============================================================================
+// MARK: - FrameResult Tests
+// =============================================================================
+
+/// Tests for the FrameResult enum.
+final class FrameResultTests: XCTestCase {
+    /// Test all cases exist and are distinct.
+    func test_allCases() {
+        let cases: [FrameResult] = [.ok, .notInitialized, .breakpoint, .cpuCrash, .error]
+
+        // Verify all cases are distinct
+        for (i, case1) in cases.enumerated() {
+            for (j, case2) in cases.enumerated() {
+                if i == j {
+                    XCTAssertEqual(String(describing: case1), String(describing: case2))
+                } else {
+                    XCTAssertNotEqual(String(describing: case1), String(describing: case2))
+                }
+            }
+        }
+    }
+
+    /// Test FrameResult is Sendable (compile-time check, just verify usage).
+    func test_sendable() {
+        let result: FrameResult = .ok
+        // If this compiles, FrameResult is Sendable
+        Task {
+            let _ = result
+        }
+    }
+}
+
+// =============================================================================
+// MARK: - AudioConfiguration Tests
+// =============================================================================
+
+/// Tests for the AudioConfiguration struct.
+final class AudioConfigurationTests: XCTestCase {
+    /// Test typical configuration values.
+    func test_init_typicalValues() {
+        let config = AudioConfiguration(sampleRate: 44100, channels: 1, sampleSize: 16)
+
+        XCTAssertEqual(config.sampleRate, 44100)
+        XCTAssertEqual(config.channels, 1)
+        XCTAssertEqual(config.sampleSize, 16)
+    }
+
+    /// Test stereo configuration.
+    func test_init_stereo() {
+        let config = AudioConfiguration(sampleRate: 48000, channels: 2, sampleSize: 16)
+
+        XCTAssertEqual(config.channels, 2)
+    }
+
+    /// Test 8-bit audio.
+    func test_init_8bit() {
+        let config = AudioConfiguration(sampleRate: 22050, channels: 1, sampleSize: 8)
+
+        XCTAssertEqual(config.sampleSize, 8)
+    }
+}
+
+// =============================================================================
+// MARK: - StateTags Tests
+// =============================================================================
+
+/// Tests for the StateTags struct.
+final class StateTagsTests: XCTestCase {
+    /// Test default initialization.
+    func test_init_defaultValues() {
+        let tags = StateTags()
+
+        XCTAssertEqual(tags.size, 0)
+        XCTAssertEqual(tags.cpu, 0)
+        XCTAssertEqual(tags.pc, 0)
+        XCTAssertEqual(tags.baseRam, 0)
+        XCTAssertEqual(tags.antic, 0)
+        XCTAssertEqual(tags.gtia, 0)
+        XCTAssertEqual(tags.pia, 0)
+        XCTAssertEqual(tags.pokey, 0)
+    }
+
+    /// Test custom values.
+    func test_init_customValues() {
+        var tags = StateTags()
+        tags.size = 1000
+        tags.cpu = 100
+        tags.pc = 106
+        tags.baseRam = 200
+
+        XCTAssertEqual(tags.size, 1000)
+        XCTAssertEqual(tags.cpu, 100)
+        XCTAssertEqual(tags.pc, 106)
+        XCTAssertEqual(tags.baseRam, 200)
+    }
+}
+
+// =============================================================================
+// MARK: - StateFlags Tests
+// =============================================================================
+
+/// Tests for the StateFlags struct.
+final class StateFlagsTests: XCTestCase {
+    /// Test default initialization.
+    func test_init_defaultValues() {
+        let flags = StateFlags()
+
+        XCTAssertFalse(flags.selfTestEnabled)
+        XCTAssertEqual(flags.frameCount, 0)
+    }
+
+    /// Test custom values.
+    func test_init_customValues() {
+        var flags = StateFlags()
+        flags.selfTestEnabled = true
+        flags.frameCount = 12345
+
+        XCTAssertTrue(flags.selfTestEnabled)
+        XCTAssertEqual(flags.frameCount, 12345)
+    }
+}
+
+// =============================================================================
+// MARK: - EmulatorState Tests
+// =============================================================================
+
+/// Tests for the EmulatorState struct.
+final class EmulatorStateTests: XCTestCase {
+    /// Test default initialization.
+    func test_init_defaultValues() {
+        let state = EmulatorState()
+
+        XCTAssertTrue(state.data.isEmpty)
+        XCTAssertEqual(state.tags.size, 0)
+        XCTAssertFalse(state.flags.selfTestEnabled)
+    }
+
+    /// Test state with data.
+    func test_stateWithData() {
+        var state = EmulatorState()
+        state.data = [1, 2, 3, 4, 5]
+        state.tags.size = 5
+        state.tags.cpu = 0
+        state.tags.pc = 6
+        state.flags.frameCount = 100
+
+        XCTAssertEqual(state.data.count, 5)
+        XCTAssertEqual(state.tags.size, 5)
+        XCTAssertEqual(state.flags.frameCount, 100)
+    }
+}
+
+// =============================================================================
+// MARK: - LibAtari800Wrapper Tests (No ROM Required)
+// =============================================================================
+
+/// Tests for LibAtari800Wrapper that don't require ROM files.
+final class LibAtari800WrapperTests: XCTestCase {
+    /// Test wrapper initialization creates uninitialized state.
+    func test_init_notInitialized() {
+        let wrapper = LibAtari800Wrapper()
+
+        XCTAssertFalse(wrapper.isInitialized)
+    }
+
+    /// Test memory access returns nil/empty when not initialized.
+    func test_memoryAccess_notInitialized() {
+        let wrapper = LibAtari800Wrapper()
+
+        XCTAssertNil(wrapper.getMemoryPointer())
+        XCTAssertEqual(wrapper.readMemory(at: 0x0000), 0)
+        XCTAssertTrue(wrapper.readMemoryBlock(at: 0x0000, count: 16).isEmpty)
+    }
+
+    /// Test screen access returns nil when not initialized.
+    func test_screenAccess_notInitialized() {
+        let wrapper = LibAtari800Wrapper()
+
+        XCTAssertNil(wrapper.getScreenPointer())
+    }
+
+    /// Test frame buffer returns zeros when not initialized.
+    func test_frameBuffer_notInitialized() {
+        let wrapper = LibAtari800Wrapper()
+
+        let buffer = wrapper.getFrameBufferBGRA()
+        XCTAssertEqual(buffer.count, AtariScreen.bgraBufferSize)
+        XCTAssertTrue(buffer.allSatisfy { $0 == 0 })
+    }
+
+    /// Test executeFrame returns notInitialized.
+    func test_executeFrame_notInitialized() {
+        let wrapper = LibAtari800Wrapper()
+        var input = InputState()
+
+        let result = wrapper.executeFrame(input: &input)
+        XCTAssertEqual(String(describing: result), String(describing: FrameResult.notInitialized))
+    }
+
+    /// Test getRegisters returns default when not initialized.
+    func test_getRegisters_notInitialized() {
+        let wrapper = LibAtari800Wrapper()
+
+        let regs = wrapper.getRegisters()
+        XCTAssertEqual(regs, CPURegisters())
+    }
+
+    /// Test reboot returns false when not initialized.
+    func test_reboot_notInitialized() {
+        let wrapper = LibAtari800Wrapper()
+
+        XCTAssertFalse(wrapper.reboot())
+    }
+
+    /// Test mount/unmount disk when not initialized.
+    func test_diskOperations_notInitialized() {
+        let wrapper = LibAtari800Wrapper()
+
+        XCTAssertFalse(wrapper.mountDisk(drive: 1, path: "/nonexistent.atr"))
+        // unmountDisk doesn't return value, just verify no crash
+        wrapper.unmountDisk(drive: 1)
+    }
+
+    /// Test audio buffer returns nil when not initialized.
+    func test_audioBuffer_notInitialized() {
+        let wrapper = LibAtari800Wrapper()
+
+        let (ptr, count) = wrapper.getAudioBuffer()
+        XCTAssertNil(ptr)
+        XCTAssertEqual(count, 0)
+    }
+
+    /// Test saveState returns empty state when not initialized.
+    func test_saveState_notInitialized() {
+        let wrapper = LibAtari800Wrapper()
+
+        let state = wrapper.saveState()
+        XCTAssertTrue(state.data.isEmpty)
+    }
+
+    /// Test initialize throws for missing ROM.
+    func test_initialize_missingROM() {
+        let wrapper = LibAtari800Wrapper()
+        let tempDir = FileManager.default.temporaryDirectory
+
+        XCTAssertThrowsError(try wrapper.initialize(romPath: tempDir)) { error in
+            XCTAssertTrue(error is AtticError)
+            if case AtticError.romNotFound = error {
+                // Expected
+            } else {
+                XCTFail("Expected romNotFound error")
+            }
+        }
+    }
+
+    /// Test drive number validation.
+    func test_mountDisk_invalidDriveNumber() {
+        let wrapper = LibAtari800Wrapper()
+
+        // Drive numbers must be 1-8
+        XCTAssertFalse(wrapper.mountDisk(drive: 0, path: "/test.atr"))
+        XCTAssertFalse(wrapper.mountDisk(drive: 9, path: "/test.atr"))
+    }
+}
+
+// =============================================================================
+// MARK: - EmulatorEngine Tests (No ROM Required)
+// =============================================================================
+
+/// Tests for EmulatorEngine that don't require ROM files.
+final class EmulatorEngineTests: XCTestCase {
+    /// Test engine initial state.
+    func test_init_defaultState() async {
+        let engine = EmulatorEngine()
+
+        let state = await engine.state
+        XCTAssertEqual(state, .uninitialized)
+    }
+
+    /// Test engine is not initialized by default.
+    func test_init_notInitialized() async {
+        let engine = EmulatorEngine()
+
+        let isInit = await engine.isInitialized
+        XCTAssertFalse(isInit)
+    }
+
+    /// Test initialize throws for missing ROM.
+    func test_initialize_missingROM() async {
+        let engine = EmulatorEngine()
+        let tempDir = FileManager.default.temporaryDirectory
+
+        do {
+            try await engine.initialize(romPath: tempDir)
+            XCTFail("Expected error for missing ROM")
+        } catch {
+            XCTAssertTrue(error is AtticError)
+        }
+    }
+
+    /// Test getRegisters returns default when not initialized.
+    func test_getRegisters_notInitialized() async {
+        let engine = EmulatorEngine()
+
+        let regs = await engine.getRegisters()
+        XCTAssertEqual(regs, CPURegisters())
+    }
+
+    /// Test executeFrame returns notInitialized.
+    func test_executeFrame_notInitialized() async {
+        let engine = EmulatorEngine()
+
+        let result = await engine.executeFrame()
+        XCTAssertEqual(String(describing: result), String(describing: FrameResult.notInitialized))
+    }
+
+    /// Test readMemory returns zero when not initialized.
+    func test_readMemory_notInitialized() async {
+        let engine = EmulatorEngine()
+
+        let value = await engine.readMemory(at: 0x0600)
+        XCTAssertEqual(value, 0)
+    }
+
+    /// Test readMemoryBlock returns empty when not initialized.
+    func test_readMemoryBlock_notInitialized() async {
+        let engine = EmulatorEngine()
+
+        let data = await engine.readMemoryBlock(at: 0x0600, count: 16)
+        XCTAssertTrue(data.isEmpty)
+    }
+
+    /// Test breakpoint operations when not initialized.
+    func test_breakpoints_notInitialized() async {
+        let engine = EmulatorEngine()
+
+        // Should work even when not initialized
+        let added = await engine.setBreakpoint(at: 0x0600)
+        XCTAssertTrue(added)
+
+        let bps = await engine.getBreakpoints()
+        XCTAssertEqual(bps, [0x0600])
+
+        let cleared = await engine.clearBreakpoint(at: 0x0600)
+        XCTAssertTrue(cleared)
+
+        let bpsAfter = await engine.getBreakpoints()
+        XCTAssertTrue(bpsAfter.isEmpty)
+    }
+
+    /// Test clearAllBreakpoints.
+    func test_clearAllBreakpoints() async {
+        let engine = EmulatorEngine()
+
+        _ = await engine.setBreakpoint(at: 0x0600)
+        _ = await engine.setBreakpoint(at: 0x0700)
+        _ = await engine.setBreakpoint(at: 0x0800)
+
+        await engine.clearAllBreakpoints()
+
+        let bps = await engine.getBreakpoints()
+        XCTAssertTrue(bps.isEmpty)
+    }
+
+    /// Test pause and resume have no effect when not initialized.
+    ///
+    /// The emulator's pause() and resume() methods only change state
+    /// when the emulator has been initialized with ROMs. This test verifies
+    /// that calling these methods on an uninitialized engine has no effect.
+    func test_pauseResume_notInitialized() async {
+        let engine = EmulatorEngine()
+
+        // Initial state is uninitialized
+        var state = await engine.state
+        XCTAssertEqual(state, .uninitialized)
+
+        // Pause should have no effect when uninitialized
+        // (pause() only changes state if currently .running)
+        await engine.pause()
+        state = await engine.state
+        XCTAssertEqual(state, .uninitialized)
+
+        // Resume should have no effect when not initialized
+        // (resume() has guard for wrapper.isInitialized)
+        await engine.resume()
+        state = await engine.state
+        XCTAssertEqual(state, .uninitialized)
+    }
+
+    /// Test frame buffer when not initialized.
+    func test_frameBuffer_notInitialized() async {
+        let engine = EmulatorEngine()
+
+        let buffer = await engine.getFrameBuffer()
+        XCTAssertEqual(buffer.count, AtariScreen.bgraBufferSize)
+        XCTAssertTrue(buffer.allSatisfy { $0 == 0 })
+    }
 }

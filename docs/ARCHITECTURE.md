@@ -4,10 +4,21 @@
 
 The Attic Atari 800 XL Emulator is a macOS application consisting of two cooperating executables:
 
-1. **Attic.app** - SwiftUI application with Metal rendering and audio output
+1. **AtticGUI** - SwiftUI application with Metal rendering and audio output
 2. **attic** - Command-line REPL tool for Emacs integration
 
 Both share a common core library (`AtticCore`) containing the emulator wrapper, REPL logic, tokenizers, and file format handlers.
+
+## Implementation Status
+
+| Phase | Component | Status |
+|-------|-----------|--------|
+| 1 | Project Foundation | ✅ Complete |
+| 2 | Emulator Core | ✅ Complete |
+| 3 | Metal Renderer | ✅ Complete |
+| 4 | Audio Engine | ✅ Complete |
+| 5 | Input Handling | Pending |
+| 6+ | Remaining Phases | Pending |
 
 ## Component Diagram
 
@@ -372,7 +383,7 @@ func romPath(for rom: ROMType) -> URL? {
 enum ROMType {
     case osXL      // ATARIXL.ROM
     case basic     // ATARIBAS.ROM
-    
+
     var filename: String {
         switch self {
         case .osXL: return "ATARIXL"
@@ -381,3 +392,253 @@ enum ROMType {
     }
 }
 ```
+
+## Implementation Choices (Phases 1-4)
+
+This section documents significant architectural decisions made during implementation that differ from or extend the original design.
+
+### Phase 1: Project Foundation
+
+#### Static Library vs Dynamic Library
+
+**Original Design:** Specification mentioned `libatari800.dylib` in the bundle.
+
+**Implementation:** We use a static library (`libatari800.a`) linked directly into the executables.
+
+**Rationale:**
+- Simpler deployment - no framework/dylib path management
+- SPM's `systemLibrary` target works well with static libraries
+- Single binary distribution without bundle dependencies
+- Eliminates runtime linking issues
+
+**Trade-offs:**
+- Larger binary size (library embedded in both CLI and GUI)
+- Must rebuild if library changes
+
+#### Module Map for C Interop
+
+```
+Libraries/libatari800/
+├── include/
+│   └── libatari800.h
+├── lib/
+│   └── libatari800.a
+└── module.modulemap
+```
+
+The `module.modulemap` enables Swift to import C types directly:
+```
+module CAtari800 {
+    header "include/libatari800.h"
+    link "atari800"
+    export *
+}
+```
+
+### Phase 2: Emulator Core
+
+#### Actor Model for Thread Safety
+
+**Implementation:** `EmulatorEngine` is a Swift actor.
+
+```swift
+public actor EmulatorEngine {
+    private let wrapper: LibAtari800Wrapper
+    // ... all state serialized through actor
+}
+```
+
+**Key Benefits:**
+- Automatic serialization of all access to emulator state
+- Safe concurrent access from UI thread and emulation loop
+- No manual locking required
+- Compiler-enforced `await` for cross-isolation calls
+
+**Swift 6 Strict Concurrency:**
+The code is written for Swift 6's strict concurrency checking:
+- All types crossing actor boundaries must be `Sendable`
+- `@unchecked Sendable` used for wrapper types that are internally thread-safe
+- `@preconcurrency import` for C library imports
+
+#### Frame Buffer Design
+
+**Original Design:** Frame buffer as raw pointer.
+
+**Implementation:** Copy-based frame buffer with BGRA conversion:
+
+```swift
+public func getFrameBuffer() -> [UInt8] {
+    wrapper.getFrameBufferBGRA()  // Returns copied [UInt8] array
+}
+```
+
+**Rationale:**
+- `[UInt8]` is `Sendable` and can safely cross actor boundaries
+- Avoids pointer lifetime issues
+- Palette conversion (indexed → BGRA) happens inside the actor
+- Slight memory overhead acceptable for 384×240×4 = 369KB per frame
+
+#### NTSC Palette
+
+The 256-color Atari palette is built into `LibAtari800Wrapper`:
+- Computed once at initialization
+- Stored as `[UInt32]` in BGRA format for direct Metal upload
+- Standard NTSC color approximation with 16 hues × 16 luminances
+
+### Phase 3: Metal Renderer
+
+#### Embedded Shaders
+
+**Original Design:** Separate `.metal` shader files.
+
+**Implementation:** Shaders embedded as Swift string literal:
+
+```swift
+private static let shaderSource = """
+#include <metal_stdlib>
+using namespace metal;
+// ... shader code
+"""
+```
+
+**Rationale:**
+- SPM resource bundling for `.metal` files is complex
+- Embedded shaders compile at runtime via `device.makeLibrary(source:)`
+- Single source of truth - no separate file to keep in sync
+- Acceptable compile time (~100ms at first launch)
+
+#### @MainActor for Metal Classes
+
+**Implementation:** `MetalRenderer` is `@MainActor`:
+
+```swift
+@MainActor
+public class MetalRenderer: NSObject, MTKViewDelegate {
+    // ...
+}
+```
+
+**Rationale:**
+- MTKView properties are main-actor isolated in Swift 6
+- Metal device configuration must happen on main thread
+- Delegate callbacks naturally arrive on main thread
+- Eliminates concurrency warnings
+
+#### Thread-Safe Texture Updates
+
+```swift
+private let textureLock = NSLock()
+private var pendingFrameBuffer: [UInt8]?
+
+public func updateTexture(with pixels: [UInt8]) {
+    textureLock.lock()
+    pendingFrameBuffer = pixels
+    textureLock.unlock()
+}
+
+private func uploadPendingFrame() {
+    // Called in draw() on render thread
+    textureLock.lock()
+    guard let pixels = pendingFrameBuffer else { ... }
+    pendingFrameBuffer = nil
+    textureLock.unlock()
+    // Upload to Metal texture
+}
+```
+
+**Pattern:** Producer-consumer with atomic swap - emulation produces frames, render thread consumes them.
+
+### Phase 4: Audio Engine
+
+#### Ring Buffer Capacity
+
+**Original Design:** "~23ms latency target" with 1024 sample buffer.
+
+**Implementation:** 8192 sample ring buffer (~185ms at 44100 Hz).
+
+```swift
+public static let ringBufferCapacity: Int = 8192
+```
+
+**Rationale:**
+- Real-time audio needs buffer headroom for timing variations
+- Emulation frame timing (16.67ms) has inherent jitter
+- Larger buffer prevents underruns at cost of slightly higher latency
+- Actual latency still feels responsive for emulation use case
+
+#### Sample Format Conversion
+
+**Implementation:** Supports both 8-bit and 16-bit PCM from libatari800:
+
+```swift
+if emulatorSampleSize == 16 {
+    // 16-bit signed PCM → Float
+    samples = int16Samples.map { Float($0) / 32768.0 * volume }
+} else {
+    // 8-bit unsigned PCM → Float
+    samples = uint8Samples.map { (Float($0) - 128.0) / 128.0 * volume }
+}
+```
+
+**Key Decisions:**
+- libatari800 configured with `-audio16` flag for better quality
+- Conversion to Float happens in `AudioEngine`, not in actor
+- Volume applied during conversion for efficiency
+
+#### Sendable Audio Buffer
+
+**Challenge:** Raw pointers are not `Sendable` in Swift 6.
+
+**Solution:** Added `getAudioSamples() -> [UInt8]` to EmulatorEngine:
+
+```swift
+public func getAudioSamples() -> [UInt8] {
+    let (pointer, count) = wrapper.getAudioBuffer()
+    guard let pointer = pointer, count > 0 else { return [] }
+    return Array(UnsafeBufferPointer(start: pointer, count: count))
+}
+```
+
+**Trade-off:** Extra copy vs. type safety. Acceptable because:
+- Audio buffers are small (~735 bytes per frame at 44100 Hz / 60 fps)
+- Copy happens once per frame
+- Enables clean actor boundaries
+
+### Emulation Loop Architecture
+
+The emulation loop runs at 60fps, coordinating video and audio:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                   AtticViewModel (MainActor)                 │
+│                                                              │
+│   emulationLoop() async {                                    │
+│       while !Task.isCancelled {                              │
+│           if isRunning {                                     │
+│               // 1. Execute emulation                        │
+│               let result = await emulator.executeFrame()     │
+│                                                              │
+│               // 2. Get video frame (Sendable [UInt8])       │
+│               let frameBuffer = await emulator.getFrameBuffer()│
+│                                                              │
+│               // 3. Get audio samples (Sendable [UInt8])     │
+│               let audioSamples = await emulator.getAudioSamples()│
+│                                                              │
+│               // 4. Update display                           │
+│               renderer?.updateTexture(with: frameBuffer)     │
+│                                                              │
+│               // 5. Feed audio                               │
+│               audioEngine.enqueueSamples(bytes: audioSamples)│
+│           }                                                  │
+│           // Sleep to maintain 60fps                         │
+│           try? await Task.sleep(nanoseconds: 16_666_667)     │
+│       }                                                      │
+│   }                                                          │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Key Design Decisions:**
+- Loop runs on `@MainActor` (AtticViewModel)
+- Actor boundary crossings use `await` and Sendable types
+- Frame timing uses `Task.sleep`, not display link (simpler for now)
+- Audio and video buffers extracted after each frame

@@ -4,23 +4,20 @@
 //
 // This file defines the main content view for the Attic GUI application.
 // It contains:
-// - The emulator display (placeholder for Metal view)
+// - The emulator display (Metal view)
 // - Control panel with START/SELECT/OPTION buttons
 // - Status bar showing running state and FPS
 //
 // Layout:
-// ┌─────────────────────────────────────────────────┐
-// │                                                 │
-// │              Emulator Display                   │
-// │              (Metal View)                       │
-// │              384x240 @ 3x                       │
-// │                                                 │
-// ├─────────────────────────────────────────────────┤
-// │  [START] [SELECT] [OPTION]  │  Status | 60 FPS │
-// └─────────────────────────────────────────────────┘
-//
-// The Metal rendering will be implemented in Phase 3.
-// For now, this shows a placeholder view.
+// ┌─────────────────────────────────────────────────────┐
+// │                                                     │
+// │              Emulator Display                       │
+// │              (Metal View)                           │
+// │              384x240 @ 3x                           │
+// │                                                     │
+// ├─────────────────────────────────────────────────────┤
+// │  [START] [SELECT] [OPTION]  │  Status | 60 FPS     │
+// └─────────────────────────────────────────────────────┘
 //
 // =============================================================================
 
@@ -45,7 +42,7 @@ struct ContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Emulator display area
+            // Emulator display area - Metal view
             EmulatorDisplayView()
                 .frame(minWidth: 384, minHeight: 240)
                 .aspectRatio(384.0/240.0, contentMode: .fit)
@@ -54,6 +51,12 @@ struct ContentView: View {
             ControlPanelView()
         }
         .background(Color.black)
+        .onAppear {
+            // Initialize emulator when view appears
+            Task {
+                await viewModel.initializeEmulator()
+            }
+        }
     }
 }
 
@@ -61,46 +64,21 @@ struct ContentView: View {
 // MARK: - Emulator Display View
 // =============================================================================
 
-/// Placeholder view for the emulator display.
+/// View for the emulator display using Metal rendering.
 ///
-/// This will be replaced with a Metal view in Phase 3.
-/// For now, it shows a static placeholder.
+/// This view contains the Metal-based emulator display. When the emulator
+/// is not initialized or fails, it shows a placeholder.
 struct EmulatorDisplayView: View {
     @EnvironmentObject var viewModel: AtticViewModel
 
     var body: some View {
-        GeometryReader { geometry in
-            ZStack {
-                // Background (Atari blue)
-                Color(red: 0.0, green: 0.3, blue: 0.6)
+        ZStack {
+            // Metal view for rendering (always present)
+            EmulatorMetalView(viewModel: viewModel)
 
-                // Placeholder content
-                VStack(spacing: 20) {
-                    Text("ATTIC")
-                        .font(.system(size: 48, weight: .bold, design: .monospaced))
-                        .foregroundColor(.white)
-
-                    Text("Atari 800 XL Emulator")
-                        .font(.system(size: 18, design: .monospaced))
-                        .foregroundColor(.white.opacity(0.8))
-
-                    Text("Display will appear here")
-                        .font(.system(size: 14, design: .monospaced))
-                        .foregroundColor(.white.opacity(0.6))
-                        .padding(.top, 20)
-
-                    // Simulated READY prompt
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("READY")
-                            .font(.system(size: 14, design: .monospaced))
-                            .foregroundColor(.white)
-                        Text("█")
-                            .font(.system(size: 14, design: .monospaced))
-                            .foregroundColor(.white)
-                            .opacity(0.8)
-                    }
-                    .padding(.top, 40)
-                }
+            // Overlay message when not initialized
+            if !viewModel.isInitialized {
+                InitializationOverlay(viewModel: viewModel)
             }
         }
         // Handle keyboard input
@@ -115,6 +93,65 @@ struct EmulatorDisplayView: View {
     private func handleKeyPress(_ keyPress: KeyPress) {
         // TODO: Send key to emulator in Phase 5
         print("Key pressed: \(keyPress.characters)")
+    }
+}
+
+// =============================================================================
+// MARK: - Initialization Overlay
+// =============================================================================
+
+/// Overlay shown when the emulator is not yet initialized.
+///
+/// Displays initialization status or error messages.
+struct InitializationOverlay: View {
+    @ObservedObject var viewModel: AtticViewModel
+
+    var body: some View {
+        ZStack {
+            // Semi-transparent background
+            Color.black.opacity(0.85)
+
+            VStack(spacing: 20) {
+                Text("ATTIC")
+                    .font(.system(size: 48, weight: .bold, design: .monospaced))
+                    .foregroundColor(.white)
+
+                Text("Atari 800 XL Emulator")
+                    .font(.system(size: 18, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.8))
+
+                if let error = viewModel.initializationError {
+                    // Show error
+                    VStack(spacing: 8) {
+                        Text("Initialization Error")
+                            .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                            .foregroundColor(.red)
+
+                        Text(error)
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.7))
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 40)
+
+                        Text("Place ATARIXL.ROM and ATARIBAS.ROM in Resources/ROM/")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.5))
+                            .padding(.top, 10)
+                    }
+                    .padding(.top, 20)
+                } else {
+                    // Show loading
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        .scaleEffect(1.5)
+                        .padding(.top, 30)
+
+                    Text("Initializing...")
+                        .font(.system(size: 14, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.6))
+                }
+            }
+        }
     }
 }
 

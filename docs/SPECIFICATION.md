@@ -9,8 +9,8 @@ Attic.app/
 └── Contents/
     ├── Info.plist
     ├── MacOS/
-    │   ├── AtticGUI             # Main GUI executable
-    │   └── attic                # Command-line tool
+    │   ├── AtticGUI             # Main GUI executable (libatari800 statically linked)
+    │   └── attic                # Command-line tool (libatari800 statically linked)
     ├── Resources/
     │   ├── ROM/
     │   │   ├── ATARIXL.ROM      # 16KB OS ROM
@@ -18,12 +18,13 @@ Attic.app/
     │   │   └── ATARIOSA.ROM     # Optional: OS-A for compatibility
     │   ├── Assets.xcassets
     │   └── Credits.rtf
-    ├── Frameworks/
-    │   └── libatari800.dylib
     └── Library/
         └── LaunchServices/
             └── attic            # For command-line access
 ```
+
+**Note:** libatari800 is statically linked into both executables rather than distributed
+as a dynamic library. This simplifies deployment and eliminates framework path issues.
 
 ### Info.plist Requirements
 
@@ -160,10 +161,17 @@ View
 
 ### Audio Output
 
-- Sample rate: 44100 Hz
+- Sample rate: 44100 Hz (configurable via libatari800)
 - Channels: Mono (POKEY output)
-- Buffer size: 1024 samples
-- Latency target: ~23ms
+- Sample format: 16-bit signed PCM (converted to Float internally)
+- Ring buffer: 8192 samples (~185ms capacity for jitter absorption)
+- AVAudioEngine callback buffer: 512-1024 samples
+- Typical latency: 50-100ms (acceptable for emulation use case)
+
+**Implementation Notes:**
+- libatari800 generates ~735 samples per frame at 60fps
+- AudioEngine converts 8-bit or 16-bit PCM to Float for AVAudioEngine
+- Larger ring buffer prevents underruns during system load spikes
 
 ## 3. CLI Application
 
@@ -203,28 +211,34 @@ The prompt always ends with `> ` followed by a space, making it easy to match wi
 
 ```
 1. Application launch
-2. Load configuration from UserDefaults
-3. Locate ROMs in bundle Resources/ROM/
-   - If missing: show error dialog and quit
-4. Initialize libatari800
-   - Set machine type: Atari 800 XL
-   - Set RAM: 64KB
-   - Enable BASIC ROM
-   - Set NTSC mode
-5. Initialize Metal renderer
+2. SwiftUI creates AtticApp and AtticViewModel
+3. ContentView appears, triggering initialization
+4. Locate ROMs (searched in order):
+   - ./Resources/ROM/
+   - Bundle.main/Contents/Resources/ROM/
+   - ~/.attic/ROM/
+   - Source directory (for development)
+   - If missing: show error overlay in window
+5. Initialize libatari800 (via EmulatorEngine actor)
+   - Set machine type: Atari 800 XL (-xl flag)
+   - Enable BASIC ROM (-basic flag)
+   - Enable 16-bit audio (-audio16 flag)
+6. Configure and start AudioEngine
+   - Query libatari800 for sample rate/format
+   - Create AVAudioEngine with AVAudioSourceNode
+   - Start audio output
+7. Initialize Metal renderer (when MTKView created)
    - Create MTLDevice
-   - Create render pipeline
-   - Create frame texture
-6. Initialize Core Audio
-   - Create AVAudioEngine
-   - Create source node
-   - Create ring buffer
-7. Start emulation thread
-8. Cold start emulator (boots to BASIC Ready)
-9. Open socket at /tmp/attic-<pid>.sock
-10. Begin display link refresh
-11. Show main window
+   - Compile embedded shaders
+   - Create render pipeline and texture
+8. Start emulation loop (Task in AtticViewModel)
+   - Run at ~60fps using Task.sleep timing
+   - Extract video and audio buffers each frame
+9. Auto-start emulation (boots to BASIC Ready)
+10. Window fully visible with running emulator
 ```
+
+**Note:** Socket server for CLI communication is implemented in Phase 6.
 
 ### CLI Startup (Normal)
 
