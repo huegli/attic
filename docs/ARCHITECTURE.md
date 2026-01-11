@@ -2,18 +2,18 @@
 
 ## Overview
 
-The Atari 800 XL Emulator is a macOS application consisting of two cooperating executables:
+The Attic Atari 800 XL Emulator is a macOS application consisting of two cooperating executables:
 
-1. **Atari800GUI** - SwiftUI application with Metal rendering and audio output
-2. **Atari800CLI** - Command-line REPL tool for Emacs integration
+1. **Attic.app** - SwiftUI application with Metal rendering and audio output
+2. **attic** - Command-line REPL tool for Emacs integration
 
-Both share a common core library (`Atari800Core`) containing the emulator wrapper, REPL logic, tokenizers, and file format handlers.
+Both share a common core library (`AtticCore`) containing the emulator wrapper, REPL logic, tokenizers, and file format handlers.
 
 ## Component Diagram
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                         Atari800Core                                 │
+│                         AtticCore                                   │
 │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────┐  │
 │  │   Emulator/     │  │    Monitor/     │  │      BASIC/         │  │
 │  │ EmulatorEngine  │  │   Monitor       │  │  BasicTokenizer     │  │
@@ -33,7 +33,7 @@ Both share a common core library (`Atari800Core`) containing the emulator wrappe
            │                           │
            ▼                           ▼
     ┌─────────────────┐         ┌─────────────────┐
-    │   Atari800GUI   │◄───────►│   Atari800CLI   │
+    │   Attic.app     │◄───────►│  attic          │
     │                 │  Unix   │                 │
     │  SwiftUI Views  │ Socket  │  REPL Server    │
     │  Metal Renderer │         │  (stdio)        │
@@ -120,7 +120,7 @@ func emulationLoop() async {
 
 ### Socket Architecture
 
-The GUI opens a Unix domain socket at `/tmp/atari800-<pid>.sock` on startup. The CLI connects to this socket to send commands and receive responses/events.
+The GUI opens a Unix domain socket at `/tmp/attic-<pid>.sock` on startup. The CLI connects to this socket to send commands and receive responses/events.
 
 ```
 CLI Process                          GUI Process
@@ -241,7 +241,7 @@ struct AudioRingBuffer {
 
 ```
 Atari800State {
-    magic: [UInt8; 4] = "A8XL"
+    magic: [UInt8; 4] = "ATTC"
     version: UInt16
     timestamp: UInt64
     
@@ -278,7 +278,7 @@ libatari800 likely has its own state save format. We'll use that for the emulato
 
 ```swift
 struct StateFile: Codable {
-    let magic: String = "A8XL"
+    let magic: String = "ATTC"
     let version: Int = 1
     let timestamp: Date
     let libatari800State: Data  // Opaque blob from libatari800

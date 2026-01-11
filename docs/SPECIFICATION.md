@@ -5,12 +5,12 @@
 ### Bundle Structure
 
 ```
-Atari800XL.app/
+Attic.app/
 └── Contents/
     ├── Info.plist
     ├── MacOS/
-    │   ├── Atari800GUI          # Main GUI executable
-    │   └── Atari800CLI          # Command-line tool
+    │   ├── AtticGUI             # Main GUI executable
+    │   └── attic                # Command-line tool
     ├── Resources/
     │   ├── ROM/
     │   │   ├── ATARIXL.ROM      # 16KB OS ROM
@@ -22,14 +22,14 @@ Atari800XL.app/
     │   └── libatari800.dylib
     └── Library/
         └── LaunchServices/
-            └── Atari800CLI      # For command-line access
+            └── attic            # For command-line access
 ```
 
 ### Info.plist Requirements
 
 ```xml
 <key>CFBundleIdentifier</key>
-<string>com.example.atari800xl</string>
+<string>com.example.attic</string>
 
 <key>CFBundleDocumentTypes</key>
 <array>
@@ -44,10 +44,10 @@ Atari800XL.app/
     </dict>
     <dict>
         <key>CFBundleTypeName</key>
-        <string>Atari 800 State</string>
+        <string>Attic State</string>
         <key>CFBundleTypeExtensions</key>
         <array>
-            <string>a8s</string>
+            <string>attic</string>
         </array>
     </dict>
 </array>
@@ -80,8 +80,8 @@ Atari800XL.app/
 ### Menu Structure
 
 ```
-Atari800XL
-  About Atari 800 XL
+Attic
+  About Attic
   Preferences...                    ⌘,
   ───────────────────────────────────
   Quit                              ⌘Q
@@ -170,25 +170,26 @@ View
 ### Command-Line Arguments
 
 ```
-USAGE: atari800 [options]
+USAGE: attic [options]
 
 OPTIONS:
   --repl              Start in REPL mode (default)
   --headless          Run without launching GUI
+  --silent            Disable audio output (headless mode only)
   --socket <path>     Connect to GUI at specific socket path
   --help              Show help information
 
 EXAMPLES:
-  atari800                    Launch GUI and connect REPL
-  atari800 --headless         Run emulator without GUI
-  atari800 --socket /tmp/a8.sock  Connect to existing GUI
+  attic                                Launch GUI and connect REPL
+  attic --headless                     Run emulator without GUI
+  attic --socket /tmp/attic-1234.sock  Connect to existing GUI
 ```
 
 ### Startup Behavior
 
 **Normal Mode (default):**
-1. Check for existing GUI socket in `/tmp/atari800-*.sock`
-2. If not found, launch `Atari800GUI` as subprocess
+1. Check for existing GUI socket in `/tmp/attic-*.sock`
+2. If not found, launch `AtticGUI` as subprocess
 3. Wait up to 5 seconds for socket to appear
 4. Connect to socket
 5. Enter REPL loop with BASIC mode default
@@ -236,7 +237,7 @@ The prompt always ends with `> ` followed by a space, making it easy to match wi
    - Create ring buffer
 7. Start emulation thread
 8. Cold start emulator (boots to BASIC Ready)
-9. Open socket at /tmp/atari800-<pid>.sock
+9. Open socket at /tmp/attic-<pid>.sock
 10. Begin display link refresh
 11. Show main window
 ```
@@ -245,7 +246,7 @@ The prompt always ends with `> ` followed by a space, making it easy to match wi
 
 ```
 1. Parse command-line arguments
-2. Look for existing socket: /tmp/atari800-*.sock
+2. Look for existing socket: /tmp/attic-*.sock
 3. If no socket found:
    a. Determine GUI path from bundle
    b. Launch GUI as subprocess (NSTask/Process)
@@ -288,7 +289,7 @@ Using a combination of libatari800's native format and our metadata:
 ```
 ┌──────────────────────────────────┐
 │ Header (16 bytes)                │
-│   Magic: "A8XL" (4 bytes)        │
+│   Magic: "ATTC" (4 bytes)        │
 │   Version: UInt32 (4 bytes)      │
 │   Flags: UInt32 (4 bytes)        │
 │   Reserved: (4 bytes)            │
@@ -304,14 +305,14 @@ Using a combination of libatari800's native format and our metadata:
 
 ### File Extension
 
-- `.a8s` - Atari 800 State file
+- `.attic` - Attic State file
 
 ## 6. Screenshot Capability
 
 ### Screenshot Command
 
 ```
-.screenshot              Save to ~/Desktop/atari800-<timestamp>.png
+.screenshot              Save to ~/Desktop/Attic-<YYYYMMDD-HHMMSS>.png
 .screenshot /path/to.png Save to specific path
 ```
 
@@ -377,6 +378,6 @@ Error: File not found 'NOFILE.DAT'
 **Socket Error:**
 ```
 Error: Cannot connect to Atari 800 XL GUI
-  No socket found at /tmp/atari800-*.sock
+  No socket found at /tmp/attic-*.sock
   Suggestion: Launch the GUI application first, or use --headless mode
 ```

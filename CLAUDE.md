@@ -20,9 +20,9 @@ This is a macOS application that emulates the Atari 800 XL home computer. It con
 attic/
 ├── Package.swift
 ├── Sources/
-│   ├── Atari800Core/           # Shared library (emulator, REPL, tokenizer)
-│   ├── Atari800CLI/            # Command-line executable
-│   └── Atari800GUI/            # SwiftUI + Metal application
+│   ├── AtticCore/              # Shared library (emulator, REPL, tokenizer)
+│   ├── AtticCLI/               # Command-line executable (attic)
+│   └── AtticGUI/               # SwiftUI + Metal application (AtticGUI)
 ├── Libraries/
 │   └── libatari800/            # Pre-compiled emulator core
 └── Resources/
@@ -75,6 +75,12 @@ attic/
 - Integration tests for socket protocol
 - Manual testing with Emacs comint for REPL interaction
 
+## Comments
+- Add detailed comments to all the files that make up this project.
+- Assume that the reader has some good general understanding of programing but is a beginner in Swift and not familiar with particular MacOS Application specific programming patterns and conventions like protocols, SwiftUI, Metal etc.
+- Highlight in particular best practices to use for MacOS App Development using Swift
+- IMPORTANT: Keep the comments updated as you make changes to the code!!!
+
 ## External Dependencies
 
 - libatari800: https://github.com/atari800/atari800
@@ -87,13 +93,16 @@ attic/
 swift build
 
 # Run GUI
-swift run Attic.app
+swift run AtticGUI
 
 # Run CLI
 swift run attic --repl
 
 # Run headless
 swift run attic --headless
+
+# Run headless without audio
+swift run attic --headless --silent
 
 # Tests
 swift test

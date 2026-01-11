@@ -10,7 +10,7 @@ The CLI and GUI communicate over a Unix domain socket using a simple line-based 
 
 The GUI creates a socket at startup:
 ```
-/tmp/atari800-<pid>.sock
+/tmp/attic-<pid>.sock
 ```
 
 Where `<pid>` is the GUI process ID.
@@ -19,7 +19,7 @@ Where `<pid>` is the GUI process ID.
 
 The CLI looks for existing sockets:
 ```bash
-ls /tmp/atari800-*.sock
+ls /tmp/attic-*.sock
 ```
 
 If multiple sockets exist (unlikely), use the most recent by modification time.
@@ -222,15 +222,15 @@ OK:drives (none)
 #### state save
 Save emulator state.
 ```
-CMD:state save /Users/nick/saves/game.a8s
-OK:state saved /Users/nick/saves/game.a8s
+CMD:state save /Users/nick/saves/game.attic
+OK:state saved /Users/nick/saves/game.attic
 ```
 
 #### state load
 Load emulator state.
 ```
-CMD:state load /Users/nick/saves/game.a8s
-OK:state loaded /Users/nick/saves/game.a8s
+CMD:state load /Users/nick/saves/game.attic
+OK:state loaded /Users/nick/saves/game.attic
 ```
 
 ### Display
@@ -245,7 +245,7 @@ OK:screenshot /Users/nick/screenshots/screen.png
 Default path if not specified:
 ```
 CMD:screenshot
-OK:screenshot /Users/nick/Desktop/atari800-20241215-143022.png
+OK:screenshot /Users/nick/Desktop/Attic-<YYYYMMDD-HHMMSS>.png
 ```
 
 ### BASIC Injection
@@ -391,11 +391,11 @@ OK:stepped A=$00 X=$00 Y=$03 S=$F7 P=$36 PC=$600F
 
 # Take a screenshot
 CMD:screenshot
-OK:screenshot /Users/nick/Desktop/atari800-20241215-143052.png
+OK:screenshot /Users/nick/Desktop/Attic-<YYYYMMDD-HHMMSS>.png
 
 # Save state
-CMD:state save /Users/nick/saves/checkpoint.a8s
-OK:state saved /Users/nick/saves/checkpoint.a8s
+CMD:state save /Users/nick/saves/checkpoint.attic
+OK:state saved /Users/nick/saves/checkpoint.attic
 
 # Disconnect
 CMD:quit

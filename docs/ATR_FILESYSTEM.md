@@ -28,12 +28,14 @@ Sector count = (disk size) / (sector size)
 
 ### Common Disk Sizes
 
-| Type | Sectors | Sector Size | Total Size | Paragraphs |
-|------|---------|-------------|------------|------------|
-| Single Density (SS/SD) | 720 | 128 | 92,160 | 5,760 |
-| Enhanced Density | 1,040 | 128 | 133,120 | 8,320 |
-| Double Density (SS/DD) | 720 | 256 | 184,320 | 11,520 |
-| Quad Density (DS/DD) | 1,440 | 256 | 368,640 | 23,040 |
+| Type | Sectors | Sector Size | Total Size | Paragraphs | Supported |
+|------|---------|-------------|------------|------------|-----------|
+| Single Density (SS/SD) | 720 | 128 | 92,160 | 5,760 | Yes |
+| Enhanced Density (SS/ED) | 1,040 | 128 | 133,120 | 8,320 | Yes |
+| Double Density (SS/DD) | 720 | 256 | 184,320 | 11,520 | Yes |
+| Quad Density (DS/DD) | 1,440 | 256 | 368,640 | 23,040 | No* |
+
+*Note: Quad density (double-sided) images can be read but are not supported for creation or formatting in the initial implementation.
 
 ### Sector Layout in ATR
 
@@ -464,10 +466,11 @@ func createATR(at url: URL, type: DiskType) throws {
 }
 
 enum DiskType {
-    case singleDensity    // 90K
-    case enhancedDensity  // 130K
-    case doubleDensity    // 180K
-    
+    case singleDensity    // SS/SD 90K
+    case enhancedDensity  // SS/ED 130K
+    case doubleDensity    // SS/DD 180K
+    // Note: Quad density (DS/DD 360K) not supported for creation
+
     var parameters: (paragraphs: Int, sectorSize: Int) {
         switch self {
         case .singleDensity:   return (5760, 128)

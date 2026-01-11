@@ -13,9 +13,9 @@ This document outlines the recommended implementation order for the Atari 800 XL
 1. **Create Swift Package**
    ```
    Package.swift with three targets:
-   - Atari800Core (library)
-   - Atari800CLI (executable)
-   - Atari800GUI (executable)
+   - AtticCore (library)
+   - attic (cli executable)
+   - Attic.app (GUI executable)
    ```
 
 2. **Set up libatari800 integration**
