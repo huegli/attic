@@ -168,42 +168,64 @@ This document outlines the recommended implementation order for the Atari 800 XL
 
 ---
 
-## Phase 5: Input Handling
+## Phase 5: Input Handling ✅ (Keyboard Complete)
 
 **Goal:** Keyboard and controller input working.
 
+**Status:** Keyboard input complete. Game controller support deferred.
+
 ### Tasks
 
-1. **KeyboardHandler**
-   - Key mapping table
-   - Function key to special key mapping
-   - Key injection to libatari800
+1. **KeyboardHandler** ✅
+   - Key mapping table (Mac keyCodes → Atari AKEY_* constants)
+   - Function key to special key mapping (F1=START, F2=SELECT, F3=OPTION)
+   - Key injection via `input_template_t` structure
+   - NSEvent local monitors for reliable event capture
 
-2. **ControlPanelView**
-   - START/SELECT/OPTION buttons
-   - Status display
+2. **ControlPanelView** ✅
+   - START/SELECT/OPTION buttons with press/release handling
+   - Buttons reflect keyboard state (highlight when F1/F2/F3 pressed)
+   - Status display (running/paused, FPS counter)
 
-3. **GameControllerHandler**
+3. **GameControllerHandler** ⏳ (Deferred)
    - GameController framework setup
    - D-pad and button mapping
 
-4. **Special keys**
+4. **Special keys** ✅
    - F1=START, F2=SELECT, F3=OPTION
-   - Reset handling
+   - Backtick (`) = ATARI key
+   - Arrow keys for cursor movement
+   - Shift/Control modifiers forwarded to emulator
+
+5. **Application Activation** ✅
+   - `NSApp.setActivationPolicy(.regular)` for proper GUI behavior
+   - Menu bar and Dock icon when running via `swift run`
 
 ### Testing
 
-- Type in BASIC
-- Run a simple game
-- Controller works
+- ✅ Type in BASIC (works)
+- ⏳ Run a simple game (joystick games need controller support)
+- ⏳ Controller works (deferred)
 
 ### Deliverables
 
-- Full keyboard input
-- On-screen buttons
-- Game controller support
+- ✅ Full keyboard input
+- ✅ On-screen buttons
+- ⏳ Game controller support (future phase)
 
-### Estimated Time: 2-3 days
+### Implementation Notes
+
+**Key Files Created:**
+- `Sources/AtticCore/Input/KeyboardInputHandler.swift` - Key mapping and state tracking
+- `Sources/AtticGUI/Input/KeyEventView.swift` - NSViewRepresentable for event capture
+
+**Key Architectural Decisions:**
+- Used `NSEvent.addLocalMonitorForEvents` instead of first responder (more reliable in SwiftUI)
+- Keyboard handler is `@MainActor` for thread safety with UI
+- Console keys tracked separately from regular keys
+- Command key combinations pass through for menu shortcuts
+
+### Estimated Time: 2-3 days (actual: keyboard portion ~1 day)
 
 ---
 
@@ -565,23 +587,23 @@ This document outlines the recommended implementation order for the Atari 800 XL
 
 ## Summary
 
-| Phase | Description | Days |
-|-------|-------------|------|
-| 1 | Project Foundation | 1-2 |
-| 2 | Emulator Core | 3-4 |
-| 3 | Metal Renderer | 2-3 |
-| 4 | Audio Engine | 2-3 |
-| 5 | Input Handling | 2-3 |
-| 6 | Socket Protocol | 2-3 |
-| 7 | 6502 Disassembler | 1-2 |
-| 8 | Monitor Mode | 3-4 |
-| 9 | ATR File System | 2-3 |
-| 10 | DOS Mode | 2-3 |
-| 11 | BASIC Tokenizer | 3-4 |
-| 12 | BASIC Detokenizer & Mode | 2-3 |
-| 13 | State Persistence | 1-2 |
-| 14 | Polish & Integration | 3-5 |
-| **Total** | | **30-44 days** |
+| Phase | Description | Status | Days |
+|-------|-------------|--------|------|
+| 1 | Project Foundation | ✅ Complete | 1-2 |
+| 2 | Emulator Core | ✅ Complete | 3-4 |
+| 3 | Metal Renderer | ✅ Complete | 2-3 |
+| 4 | Audio Engine | ✅ Complete | 2-3 |
+| 5 | Input Handling | ✅ Keyboard done | 2-3 |
+| 6 | Socket Protocol | Pending | 2-3 |
+| 7 | 6502 Disassembler | Pending | 1-2 |
+| 8 | Monitor Mode | Pending | 3-4 |
+| 9 | ATR File System | Pending | 2-3 |
+| 10 | DOS Mode | Pending | 2-3 |
+| 11 | BASIC Tokenizer | Pending | 3-4 |
+| 12 | BASIC Detokenizer & Mode | Pending | 2-3 |
+| 13 | State Persistence | Pending | 1-2 |
+| 14 | Polish & Integration | Pending | 3-5 |
+| **Total** | | | **30-44 days** |
 
 ## Dependencies
 
@@ -625,9 +647,9 @@ Phase 8 (Monitor)            Phase 10 (DOS)
 
 ## Milestones
 
-| Milestone | Phases | Description |
-|-----------|--------|-------------|
-| M1 | 1-5 | Playable emulator with GUI |
-| M2 | 6-8 | Debugging via Emacs |
-| M3 | 9-12 | Full REPL functionality |
-| M4 | 13-14 | Production release |
+| Milestone | Phases | Description | Status |
+|-----------|--------|-------------|--------|
+| M1 | 1-5 | Playable emulator with GUI | ✅ Complete (keyboard input, joystick deferred) |
+| M2 | 6-8 | Debugging via Emacs | Pending |
+| M3 | 9-12 | Full REPL functionality | Pending |
+| M4 | 13-14 | Production release | Pending |

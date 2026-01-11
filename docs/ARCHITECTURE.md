@@ -17,7 +17,7 @@ Both share a common core library (`AtticCore`) containing the emulator wrapper, 
 | 2 | Emulator Core | ✅ Complete |
 | 3 | Metal Renderer | ✅ Complete |
 | 4 | Audio Engine | ✅ Complete |
-| 5 | Input Handling | Pending |
+| 5 | Input Handling | ✅ Complete (Keyboard only) |
 | 6+ | Remaining Phases | Pending |
 
 ## Component Diagram
@@ -36,9 +36,9 @@ Both share a common core library (`AtticCore`) containing the emulator wrapper, 
 │  │      DOS/       │  │      REPL/      │  │      Audio/         │  │
 │  │   ATRImage      │  │   REPLEngine    │  │   AudioEngine       │  │
 │  │   AtariFileSys  │  │   CommandParser │  │                     │  │
-│  │   DOSCommands   │  │   MonitorMode   │  │                     │  │
-│  │                 │  │   BasicMode     │  │                     │  │
-│  │                 │  │   DOSMode       │  │                     │  │
+│  │   DOSCommands   │  │   MonitorMode   │  ├─────────────────────┤  │
+│  │                 │  │   BasicMode     │  │      Input/         │  │
+│  │                 │  │   DOSMode       │  │ KeyboardInputHandler│  │
 │  └─────────────────┘  └─────────────────┘  └─────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────┘
            │                           │
@@ -642,3 +642,150 @@ The emulation loop runs at 60fps, coordinating video and audio:
 - Actor boundary crossings use `await` and Sendable types
 - Frame timing uses `Task.sleep`, not display link (simpler for now)
 - Audio and video buffers extracted after each frame
+
+### Phase 5: Keyboard Input
+
+#### NSEvent Local Monitor vs First Responder
+
+**Original Design:** Make an NSView first responder to receive keyboard events.
+
+**Implementation:** Use `NSEvent.addLocalMonitorForEvents` to capture keyboard events at the application level.
+
+```swift
+keyDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+    if event.modifierFlags.contains(.command) {
+        return event  // Let menu shortcuts through
+    }
+    self?.onKeyDown?(event)
+    return nil  // Consume event (prevents system beep)
+}
+```
+
+**Rationale:**
+- First responder status is unreliable in SwiftUI layouts
+- NSViewRepresentable views may not receive proper focus
+- Local monitors capture all keyboard events sent to the app
+- Works regardless of which view has focus within the window
+
+**Trade-offs:**
+- Monitors must be properly removed in deinit to prevent leaks
+- All keys go to emulator (Command combinations excluded for menu shortcuts)
+
+#### Application Activation Policy
+
+**Challenge:** Running via `swift run` treats the app as a background process.
+
+**Implementation:** Set activation policy in AppDelegate:
+
+```swift
+func applicationWillFinishLaunching(_ notification: Notification) {
+    NSApp.setActivationPolicy(.regular)
+}
+
+func applicationDidFinishLaunching(_ notification: Notification) {
+    NSApp.activate(ignoringOtherApps: true)
+}
+```
+
+**Rationale:**
+- `.regular` policy makes app show in Dock with menu bar
+- `activate(ignoringOtherApps:)` brings app to foreground
+- Without this, keyboard events go to terminal, not GUI
+
+#### Keyboard Handler Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    KeyEventView (SwiftUI)                    │
+│                 NSViewRepresentable wrapper                  │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                  KeyCaptureNSView (AppKit)                   │
+│              Sets up NSEvent local monitors                  │
+│     - keyDown monitor → onKeyDown callback                   │
+│     - keyUp monitor → onKeyUp callback                       │
+│     - flagsChanged monitor → onFlagsChanged callback         │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│               AtticViewModel (handleKeyDown, etc.)           │
+│                                                              │
+│   1. Update modifier state in KeyboardInputHandler           │
+│   2. Convert Mac keyCode → Atari AKEY_* constant             │
+│   3. Send to EmulatorEngine via pressKey/releaseKey          │
+│   4. Update console keys (START/SELECT/OPTION)               │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                KeyboardInputHandler (AtticCore)              │
+│                                                              │
+│   - Maps Mac virtual key codes to Atari key codes            │
+│   - Tracks modifier state (Shift, Control)                   │
+│   - Tracks console keys (F1=START, F2=SELECT, F3=OPTION)     │
+│   - Handles special keys (arrows, backtick=ATARI key)        │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    EmulatorEngine (Actor)                    │
+│                                                              │
+│   pressKey(keyChar:keyCode:shift:control:)                   │
+│   releaseKey()                                               │
+│   setConsoleKeys(start:select:option:)                       │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                  LibAtari800Wrapper                          │
+│                                                              │
+│   Uses input_template_t structure:                           │
+│   - input.keychar = AKEY_* constant                          │
+│   - input.keycode = scancode                                 │
+│   - input.shift/control = modifier state                     │
+│   - input.start/select/option = console keys                 │
+│                                                              │
+│   Called via libatari800_input_frame(&input)                 │
+└─────────────────────────────────────────────────────────────┘
+```
+
+#### Key Mapping Table
+
+The `KeyboardInputHandler` maps Mac virtual key codes to Atari `AKEY_*` constants:
+
+| Mac Key Code | Mac Key | Atari AKEY |
+|--------------|---------|------------|
+| 0 | A | AKEY_a (0x3F) |
+| 1 | S | AKEY_s (0x3E) |
+| ... | ... | ... |
+| 122 | F1 | START (console) |
+| 120 | F2 | SELECT (console) |
+| 99 | F3 | OPTION (console) |
+| 50 | ` | AKEY_ATARI (Atari key) |
+| 123-126 | Arrows | AKEY_LEFT/RIGHT/DOWN/UP |
+
+**Special Handling:**
+- F1/F2/F3 set console keys rather than regular key codes
+- Backtick (`) maps to ATARI key for inverse video toggle
+- Shift and Control states forwarded directly to emulator
+- Command key combinations excluded to allow menu shortcuts
+
+#### Console Buttons UI
+
+The START/SELECT/OPTION buttons in the control panel:
+- Reflect keyboard state (highlight when F1/F2/F3 pressed)
+- Support mouse press/release for click interaction
+- Use `DragGesture(minimumDistance: 0)` for proper press detection
+
+```swift
+ConsoleButton(
+    label: "START",
+    key: "F1",
+    isPressed: viewModel.keyboardHandler.startPressed,
+    onPress: { Task { await emulator.setConsoleKeys(start: true, ...) } },
+    onRelease: { Task { await emulator.setConsoleKeys(start: false, ...) } }
+)
+```

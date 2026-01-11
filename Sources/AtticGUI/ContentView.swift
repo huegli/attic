@@ -23,6 +23,7 @@
 
 import SwiftUI
 import AtticCore
+import AppKit
 
 /// The main content view for the Attic window.
 ///
@@ -68,6 +69,11 @@ struct ContentView: View {
 ///
 /// This view contains the Metal-based emulator display. When the emulator
 /// is not initialized or fails, it shows a placeholder.
+///
+/// Keyboard Input:
+/// We overlay a KeyEventView on top of the Metal view to capture keyboard
+/// events. KeyEventView is an NSViewRepresentable that becomes first responder
+/// and receives all keyboard events, which are then forwarded to the view model.
 struct EmulatorDisplayView: View {
     @EnvironmentObject var viewModel: AtticViewModel
 
@@ -76,23 +82,26 @@ struct EmulatorDisplayView: View {
             // Metal view for rendering (always present)
             EmulatorMetalView(viewModel: viewModel)
 
+            // Keyboard event capture overlay
+            // This transparent view captures all keyboard events and forwards
+            // them to the view model for processing.
+            KeyEventView(
+                onKeyDown: { event in
+                    viewModel.handleKeyDown(event)
+                },
+                onKeyUp: { event in
+                    viewModel.handleKeyUp(event)
+                },
+                onFlagsChanged: { event in
+                    viewModel.handleFlagsChanged(event)
+                }
+            )
+
             // Overlay message when not initialized
             if !viewModel.isInitialized {
                 InitializationOverlay(viewModel: viewModel)
             }
         }
-        // Handle keyboard input
-        .focusable()
-        .onKeyPress { keyPress in
-            handleKeyPress(keyPress)
-            return .handled
-        }
-    }
-
-    /// Handles keyboard input.
-    private func handleKeyPress(_ keyPress: KeyPress) {
-        // TODO: Send key to emulator in Phase 5
-        print("Key pressed: \(keyPress.characters)")
     }
 }
 
@@ -160,27 +169,91 @@ struct InitializationOverlay: View {
 // =============================================================================
 
 /// The control panel with console buttons and status display.
+///
+/// Console Keys:
+/// The Atari 800 XL has three console keys: START, SELECT, and OPTION.
+/// These are mapped to F1, F2, and F3 on the keyboard. The buttons here
+/// provide an alternative way to trigger these keys via mouse click.
 struct ControlPanelView: View {
     @EnvironmentObject var viewModel: AtticViewModel
 
     var body: some View {
         HStack {
             // Console buttons
+            // These buttons trigger the same actions as F1/F2/F3 keys.
+            // On press, they set the console key; on release, they clear it.
             HStack(spacing: 12) {
-                ConsoleButton(label: "START", key: "F1") {
-                    // TODO: Send START key
-                    print("START pressed")
-                }
+                ConsoleButton(
+                    label: "START",
+                    key: "F1",
+                    isPressed: viewModel.keyboardHandler.startPressed,
+                    onPress: {
+                        Task {
+                            await viewModel.emulator.setConsoleKeys(
+                                start: true,
+                                select: viewModel.keyboardHandler.selectPressed,
+                                option: viewModel.keyboardHandler.optionPressed
+                            )
+                        }
+                    },
+                    onRelease: {
+                        Task {
+                            await viewModel.emulator.setConsoleKeys(
+                                start: false,
+                                select: viewModel.keyboardHandler.selectPressed,
+                                option: viewModel.keyboardHandler.optionPressed
+                            )
+                        }
+                    }
+                )
 
-                ConsoleButton(label: "SELECT", key: "F2") {
-                    // TODO: Send SELECT key
-                    print("SELECT pressed")
-                }
+                ConsoleButton(
+                    label: "SELECT",
+                    key: "F2",
+                    isPressed: viewModel.keyboardHandler.selectPressed,
+                    onPress: {
+                        Task {
+                            await viewModel.emulator.setConsoleKeys(
+                                start: viewModel.keyboardHandler.startPressed,
+                                select: true,
+                                option: viewModel.keyboardHandler.optionPressed
+                            )
+                        }
+                    },
+                    onRelease: {
+                        Task {
+                            await viewModel.emulator.setConsoleKeys(
+                                start: viewModel.keyboardHandler.startPressed,
+                                select: false,
+                                option: viewModel.keyboardHandler.optionPressed
+                            )
+                        }
+                    }
+                )
 
-                ConsoleButton(label: "OPTION", key: "F3") {
-                    // TODO: Send OPTION key
-                    print("OPTION pressed")
-                }
+                ConsoleButton(
+                    label: "OPTION",
+                    key: "F3",
+                    isPressed: viewModel.keyboardHandler.optionPressed,
+                    onPress: {
+                        Task {
+                            await viewModel.emulator.setConsoleKeys(
+                                start: viewModel.keyboardHandler.startPressed,
+                                select: viewModel.keyboardHandler.selectPressed,
+                                option: true
+                            )
+                        }
+                    },
+                    onRelease: {
+                        Task {
+                            await viewModel.emulator.setConsoleKeys(
+                                start: viewModel.keyboardHandler.startPressed,
+                                select: viewModel.keyboardHandler.selectPressed,
+                                option: false
+                            )
+                        }
+                    }
+                )
             }
             .padding(.leading)
 
@@ -216,37 +289,62 @@ struct ControlPanelView: View {
 // =============================================================================
 
 /// A styled button for console controls (START, SELECT, OPTION).
+///
+/// Console buttons support press and release actions to match the Atari's
+/// console key behavior. The button appearance changes when pressed
+/// (either via keyboard or mouse).
 struct ConsoleButton: View {
+    /// The label text (e.g., "START").
     let label: String
-    let key: String
-    let action: () -> Void
 
-    @State private var isPressed = false
+    /// The keyboard shortcut hint (e.g., "F1").
+    let key: String
+
+    /// Whether the button is currently pressed (bound to keyboard state).
+    let isPressed: Bool
+
+    /// Called when the button is pressed.
+    let onPress: () -> Void
+
+    /// Called when the button is released.
+    let onRelease: () -> Void
+
+    /// Local state for mouse press tracking.
+    @State private var isMousePressed = false
 
     var body: some View {
-        Button(action: action) {
-            VStack(spacing: 2) {
-                Text(label)
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                Text(key)
-                    .font(.system(size: 8, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.5))
-            }
-            .frame(width: 60, height: 32)
-            .background(
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(isPressed ? Color.white.opacity(0.3) : Color.white.opacity(0.1))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 4)
-                    .stroke(Color.white.opacity(0.3), lineWidth: 1)
-            )
+        VStack(spacing: 2) {
+            Text(label)
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+            Text(key)
+                .font(.system(size: 8, design: .monospaced))
+                .foregroundColor(.white.opacity(0.5))
         }
-        .buttonStyle(.plain)
+        .frame(width: 60, height: 32)
+        .background(
+            RoundedRectangle(cornerRadius: 4)
+                // Show pressed state from either keyboard or mouse
+                .fill((isPressed || isMousePressed) ? Color.white.opacity(0.3) : Color.white.opacity(0.1))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 4)
+                .stroke(Color.white.opacity(0.3), lineWidth: 1)
+        )
         .foregroundColor(.white)
-        .onLongPressGesture(minimumDuration: .infinity, pressing: { pressing in
-            isPressed = pressing
-        }, perform: {})
+        // Handle mouse press/release with gesture
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in
+                    if !isMousePressed {
+                        isMousePressed = true
+                        onPress()
+                    }
+                }
+                .onEnded { _ in
+                    isMousePressed = false
+                    onRelease()
+                }
+        )
     }
 }
 
