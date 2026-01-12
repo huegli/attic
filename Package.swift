@@ -45,6 +45,11 @@ let package = Package(
             name: "AtticCore",
             targets: ["AtticCore"]
         ),
+        // AtticProtocol library - AESP protocol for emulator/client communication
+        .library(
+            name: "AtticProtocol",
+            targets: ["AtticProtocol"]
+        ),
         // CLI executable - named "attic" for command-line use
         .executable(
             name: "attic",
@@ -68,6 +73,22 @@ let package = Package(
         .systemLibrary(
             name: "CAtari800",
             path: "Libraries/libatari800"
+        ),
+
+        // =================================================================
+        // AtticProtocol - AESP Protocol Library
+        // =================================================================
+        // Implements the Attic Emulator Server Protocol (AESP) for
+        // communication between the emulator server and GUI/web clients.
+        // This enables separating the emulator into a standalone process.
+        // - AESPMessage: Binary message encoding/decoding
+        // - AESPMessageType: Protocol message types
+        // - AESPServer: Server actor for broadcasting frames/audio
+        // - AESPClient: Client actor for connecting to servers
+        .target(
+            name: "AtticProtocol",
+            dependencies: [],
+            path: "Sources/AtticProtocol"
         ),
 
         // =================================================================
