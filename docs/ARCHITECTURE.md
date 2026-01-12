@@ -2,12 +2,30 @@
 
 ## Overview
 
-The Attic Atari 800 XL Emulator is a macOS application consisting of two cooperating executables:
+The Attic Atari 800 XL Emulator is a macOS application that will evolve through two architectural phases:
+
+### Current Architecture (Phases 1-5)
+
+Two cooperating executables:
 
 1. **AtticGUI** - SwiftUI application with Metal rendering and audio output
 2. **attic** - Command-line REPL tool for Emacs integration
 
 Both share a common core library (`AtticCore`) containing the emulator wrapper, REPL logic, tokenizers, and file format handlers.
+
+### Future Architecture (Phases 6-19)
+
+Three executables with protocol-based communication:
+
+1. **AtticServer** - Standalone emulator server process
+2. **AtticGUI** - Protocol client with Metal rendering (connects to AtticServer)
+3. **attic** - Command-line REPL tool (connects to AtticServer via text protocol)
+4. **Web Client** - Browser-based client via WebSocket (future)
+
+This separation enables:
+- Multiple simultaneous clients viewing the same emulator
+- Web browser access without native installation
+- Easier testing and debugging of components in isolation
 
 ## Implementation Status
 
@@ -17,8 +35,10 @@ Both share a common core library (`AtticCore`) containing the emulator wrapper, 
 | 2 | Emulator Core | ✅ Complete |
 | 3 | Metal Renderer | ✅ Complete |
 | 4 | Audio Engine | ✅ Complete |
-| 5 | Input Handling | ✅ Complete (Keyboard only) |
-| 6+ | Remaining Phases | Pending |
+| 5 | Input Handling | ✅ Complete (Keyboard only, joystick deferred) |
+| 6-8 | AESP Protocol & Server | Pending |
+| 9-17 | REPL, Debugging, BASIC | Pending |
+| 18-19 | Web Browser Support | Pending |
 
 ## Component Diagram
 
@@ -57,6 +77,105 @@ Both share a common core library (`AtticCore`) containing the emulator wrapper, 
                                 │  Emacs comint   │
                                 └─────────────────┘
 ```
+
+## Future Component Diagram (Post Phase 8)
+
+After implementing the Attic Emulator Server Protocol (AESP), the architecture will look like:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         AtticServer (Process 1)                          │
+│  ┌─────────────────────────────────────────────────────────────────────┐│
+│  │                         AtticCore                                    ││
+│  │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────┐  ││
+│  │  │ EmulatorEngine  │  │   AudioEngine   │  │ KeyboardInputHandler│  ││
+│  │  │ LibAtari800Wrap │  │   (samples)     │  │   (state tracking)  │  ││
+│  │  └─────────────────┘  └─────────────────┘  └─────────────────────┘  ││
+│  └─────────────────────────────────────────────────────────────────────┘│
+│  ┌─────────────────────────────────────────────────────────────────────┐│
+│  │                        AtticProtocol                                 ││
+│  │  ┌───────────────┐  ┌───────────────┐  ┌───────────────┐            ││
+│  │  │ Control Port  │  │  Video Port   │  │  Audio Port   │            ││
+│  │  │   :47800      │  │    :47801     │  │    :47802     │            ││
+│  │  └───────┬───────┘  └───────┬───────┘  └───────┬───────┘            ││
+│  └──────────┼──────────────────┼──────────────────┼─────────────────────┘│
+└─────────────┼──────────────────┼──────────────────┼──────────────────────┘
+              │                  │                  │
+    ┌─────────┴─────────┬────────┴──────────────────┤
+    │                   │                           │
+    ▼                   ▼                           ▼
+┌─────────────────┐ ┌─────────────────┐     ┌─────────────────┐
+│   AtticGUI      │ │   AtticGUI #2   │     │  WebSocket      │
+│   (Process 2)   │ │   (Process 3)   │     │  Bridge :47803  │
+│                 │ │                 │     │                 │
+│  AESPClient     │ │  AESPClient     │     └────────┬────────┘
+│  MetalRenderer  │ │  MetalRenderer  │              │
+│  AVAudioEngine  │ │  AVAudioEngine  │              ▼
+└─────────────────┘ └─────────────────┘     ┌─────────────────┐
+                                            │   Web Browser   │
+┌─────────────────┐                         │   (JavaScript)  │
+│   attic CLI     │                         │                 │
+│   (Process 4)   │                         │  Canvas/WebGL   │
+│                 │                         │  Web Audio API  │
+│  Text Protocol  │                         └─────────────────┘
+│  (Unix Socket)  │
+└─────────────────┘
+        │
+        ▼
+┌─────────────────┐
+│  Emacs comint   │
+└─────────────────┘
+```
+
+## Attic Emulator Server Protocol (AESP)
+
+AESP is a binary protocol for communication between the emulator server and GUI/web clients.
+
+### Transport
+
+Three separate ports for different data streams:
+
+| Port | Channel | Data Rate | Purpose |
+|------|---------|-----------|---------|
+| 47800 | Control | Low | Commands, status, memory access |
+| 47801 | Video | ~21 MB/s | Raw BGRA frames (384×240×4 @ 60fps) |
+| 47802 | Audio | ~88 KB/s | 16-bit PCM (44.1kHz mono) |
+| 47803 | WebSocket | Variable | Bridges all channels for web clients |
+
+### Message Format
+
+All AESP messages use this binary header:
+
+```
+┌────────┬────────┬────────┬────────┬─────────────┐
+│ Magic  │Version │ Type   │ Length │  Payload    │
+│0xAE50  │ 0x01   │(1 byte)│(4 byte)│ (variable)  │
+└────────┴────────┴────────┴────────┴─────────────┘
+   2 bytes  1 byte   1 byte  4 bytes   N bytes
+
+Total header: 8 bytes
+```
+
+### Message Types
+
+| Range | Category | Messages |
+|-------|----------|----------|
+| 0x00-0x3F | Control | PING, PONG, PAUSE, RESUME, RESET, STATUS, MEMORY_READ, MEMORY_WRITE |
+| 0x40-0x5F | Input | KEY_DOWN, KEY_UP, JOYSTICK, CONSOLE_KEYS |
+| 0x60-0x7F | Video | FRAME_RAW, FRAME_DELTA, FRAME_CONFIG |
+| 0x80-0x9F | Audio | AUDIO_PCM, AUDIO_CONFIG, AUDIO_SYNC |
+
+### Design Decisions
+
+1. **Separate Ports**: Clients subscribe only to channels they need (e.g., monitoring tool needs only Control, not Video/Audio)
+
+2. **Raw Video for Local Clients**: 21 MB/s is trivial for local IPC; compression adds latency and CPU overhead
+
+3. **Delta Encoding for Web**: Only changed pixels sent over WebSocket to reduce bandwidth
+
+4. **Push Model for A/V**: Server pushes frames/audio at 60fps; clients can drop frames if overwhelmed
+
+5. **Existing CLI Protocol Preserved**: Text-based protocol for Emacs REPL remains separate from binary AESP
 
 ## Threading Model
 

@@ -229,9 +229,348 @@ This document outlines the recommended implementation order for the Atari 800 XL
 
 ---
 
-## Phase 6: Socket Protocol
+## Phase 6: AESP Protocol Library
 
-**Goal:** CLI can communicate with GUI.
+**Goal:** Create the Attic Emulator Server Protocol (AESP) for emulator/GUI separation.
+
+### Background
+
+AESP enables separating the emulator into a standalone server process, allowing multiple clients (native GUI, web browser) to connect. This is a binary protocol optimized for low-latency video/audio streaming.
+
+### Protocol Architecture
+
+```
+┌─────────────────────────────────────┐
+│        Emulator Server              │
+│    (standalone process)             │
+└───────────────┬─────────────────────┘
+                │
+    ┌───────────┼───────────┐
+    │           │           │
+┌───▼───┐   ┌───▼───┐   ┌───▼───┐
+│Control│   │ Video │   │ Audio │
+│ Port  │   │ Port  │   │ Port  │
+└───┬───┘   └───┬───┘   └───┬───┘
+    │           │           │
+    └─────────┬─┴───────────┘
+              │
+      ┌───────┴───────┐
+      │               │
+┌─────▼─────┐   ┌─────▼─────┐
+│Native GUI │   │WebSocket  │
+│(SwiftUI)  │   │Bridge     │
+└───────────┘   └─────┬─────┘
+                      │
+                ┌─────▼─────┐
+                │Web Browser│
+                └───────────┘
+```
+
+### Binary Message Format
+
+```
+┌────────┬────────┬────────┬────────┬─────────────┐
+│ Magic  │Version │ Type   │ Length │  Payload    │
+│0xAE50  │ 0x01   │(1 byte)│(4 byte)│ (variable)  │
+└────────┴────────┴────────┴────────┴─────────────┘
+   Header (8 bytes)              Payload
+```
+
+### Message Types
+
+| Range | Category | Examples |
+|-------|----------|----------|
+| 0x00-0x3F | Control | PING, PAUSE, RESUME, RESET, STATUS, MEMORY_READ/WRITE |
+| 0x40-0x5F | Input | KEY_DOWN, KEY_UP, JOYSTICK, CONSOLE_KEYS |
+| 0x60-0x7F | Video | FRAME_RAW, FRAME_DELTA, FRAME_CONFIG |
+| 0x80-0x9F | Audio | AUDIO_PCM, AUDIO_CONFIG, AUDIO_SYNC |
+
+### Tasks
+
+1. **Create `AtticProtocol` module**
+   ```
+   Sources/AtticProtocol/
+   ├── AESPMessageType.swift    # Message type enum
+   ├── AESPMessage.swift        # Message encoding/decoding
+   ├── AESPServer.swift         # Server actor
+   └── AESPClient.swift         # Client connection
+   ```
+
+2. **Message Types Enum**
+   ```swift
+   public enum AESPMessageType: UInt8 {
+       // Control (0x00-0x3F)
+       case ping = 0x00
+       case pong = 0x01
+       case pause = 0x02
+       case resume = 0x03
+       case reset = 0x04
+       case status = 0x05
+       case memoryRead = 0x10
+       case memoryWrite = 0x11
+
+       // Input (0x40-0x5F)
+       case keyDown = 0x40
+       case keyUp = 0x41
+       case joystick = 0x42
+       case consoleKeys = 0x43
+
+       // Video (0x60-0x7F)
+       case frameRaw = 0x60
+       case frameDelta = 0x61
+       case frameConfig = 0x62
+
+       // Audio (0x80-0x9F)
+       case audioPCM = 0x80
+       case audioConfig = 0x81
+       case audioSync = 0x82
+   }
+   ```
+
+3. **Message Encoding/Decoding**
+   ```swift
+   public struct AESPMessage: Sendable {
+       public static let magic: UInt16 = 0xAE50
+       public static let version: UInt8 = 0x01
+
+       public let type: AESPMessageType
+       public let payload: Data
+
+       public func encode() -> Data
+       public static func decode(from data: Data) throws -> AESPMessage
+   }
+   ```
+
+4. **Server Actor**
+   ```swift
+   public actor AESPServer {
+       func start(controlPort: Int, videoPort: Int, audioPort: Int) async throws
+       func broadcastFrame(_ frameBuffer: [UInt8]) async
+       func broadcastAudio(_ samples: [UInt8]) async
+       func stop() async
+   }
+   ```
+
+5. **Client Actor**
+   ```swift
+   public actor AESPClient {
+       func connect(host: String, controlPort: Int, videoPort: Int, audioPort: Int) async throws
+       func sendInput(_ message: AESPMessage) async throws
+       var frameStream: AsyncStream<[UInt8]> { get }
+       var audioStream: AsyncStream<[UInt8]> { get }
+       func disconnect() async
+   }
+   ```
+
+6. **Update Package.swift**
+   - Add `AtticProtocol` library target
+   - Add dependency from `AtticCore` and `AtticGUI`
+
+### Ports
+
+- Control: `/tmp/attic-<pid>-control.sock` or TCP `localhost:47800`
+- Video: `/tmp/attic-<pid>-video.sock` or TCP `localhost:47801`
+- Audio: `/tmp/attic-<pid>-audio.sock` or TCP `localhost:47802`
+
+### Testing
+
+- Unit tests for message encoding/decoding
+- Roundtrip test: encode → decode → verify equality
+- Server accepts connections on all ports
+- Client can connect and receive streams
+
+### Deliverables
+
+- `AtticProtocol` module with full message support
+- Server and client actors ready for integration
+
+---
+
+## Phase 7: Emulator Server
+
+**Goal:** Standalone emulator server process using AESP.
+
+### Tasks
+
+1. **Create `AtticServer` executable**
+   ```
+   Sources/AtticServer/
+   └── main.swift
+   ```
+
+2. **Server Main Loop**
+   ```swift
+   @main
+   struct AtticServer {
+       static func main() async throws {
+           let emulator = EmulatorEngine()
+           try await emulator.initialize(romPath: romURL)
+
+           let server = AESPServer()
+           try await server.start(
+               controlPort: 47800,
+               videoPort: 47801,
+               audioPort: 47802
+           )
+
+           // Emulation loop
+           while !Task.isCancelled {
+               let result = await emulator.executeFrame()
+               let frameBuffer = await emulator.getFrameBuffer()
+               let audioSamples = await emulator.getAudioSamples()
+
+               await server.broadcastFrame(frameBuffer)
+               await server.broadcastAudio(audioSamples)
+
+               try? await Task.sleep(nanoseconds: 16_666_667)
+           }
+       }
+   }
+   ```
+
+3. **Command Handling**
+   - Process control messages (pause, resume, reset)
+   - Handle input messages (key events, joystick)
+   - Respond to memory read/write requests
+
+4. **Frame Broadcasting**
+   - Raw BGRA frames (384×240×4 = 368KB)
+   - 60fps push to all connected video clients
+   - Clients can drop frames if overwhelmed
+
+5. **Audio Broadcasting**
+   - Raw 16-bit PCM samples
+   - Include timestamps for A/V sync
+   - ~735 bytes per frame at 44100 Hz / 60 fps
+
+6. **Update Package.swift**
+   - Add `AtticServer` executable target
+   - Depends on `AtticCore` and `AtticProtocol`
+
+### Testing
+
+- Server starts and listens on ports
+- Connects with netcat/telnet to verify ports open
+- Server runs standalone without GUI
+- Multiple clients can connect
+
+### Deliverables
+
+- `AtticServer` executable runs emulator headlessly
+- Broadcasts video/audio to connected clients
+
+---
+
+## Phase 8: Refactor GUI as Protocol Client
+
+**Goal:** AtticGUI becomes a protocol client instead of directly owning EmulatorEngine.
+
+### Tasks
+
+1. **Modify AtticViewModel**
+   ```swift
+   @MainActor
+   class AtticViewModel: ObservableObject {
+       // Before: owned EmulatorEngine directly
+       // private let emulator: EmulatorEngine
+
+       // After: protocol client
+       private var client: AESPClient?
+       private var serverProcess: Process?
+
+       func startEmulator() async throws {
+           // Launch AtticServer as subprocess
+           serverProcess = try launchServer()
+
+           // Connect via protocol
+           client = AESPClient()
+           try await client?.connect(
+               host: "localhost",
+               controlPort: 47800,
+               videoPort: 47801,
+               audioPort: 47802
+           )
+
+           // Start receiving frames
+           startFrameReceiver()
+           startAudioReceiver()
+       }
+   }
+   ```
+
+2. **Frame Receiver**
+   ```swift
+   private func startFrameReceiver() {
+       Task {
+           guard let client = client else { return }
+           for await frameBuffer in client.frameStream {
+               await MainActor.run {
+                   renderer?.updateTexture(with: frameBuffer)
+               }
+           }
+       }
+   }
+   ```
+
+3. **Audio Receiver**
+   ```swift
+   private func startAudioReceiver() {
+       Task {
+           guard let client = client else { return }
+           for await samples in client.audioStream {
+               audioEngine.enqueueSamples(bytes: samples)
+           }
+       }
+   }
+   ```
+
+4. **Input Forwarding**
+   ```swift
+   func handleKeyDown(_ event: NSEvent) {
+       guard let (keyChar, keyCode, shift, control) = keyboardHandler.keyDown(event) else { return }
+
+       Task {
+           let message = AESPMessage.keyDown(
+               keyChar: keyChar,
+               keyCode: keyCode,
+               shift: shift,
+               control: control
+           )
+           try? await client?.sendInput(message)
+       }
+   }
+   ```
+
+5. **Server Lifecycle**
+   - Launch server on app start
+   - Kill server on app quit
+   - Handle server crashes gracefully
+
+6. **Backward Compatibility**
+   - Keep option to run embedded (without server) for debugging
+   - Command-line flag: `--embedded` for old behavior
+
+### Testing
+
+- Run AtticServer standalone
+- Run AtticGUI, verify it connects
+- Display shows emulator output
+- Audio plays correctly
+- Keyboard input works with no perceptible latency
+- Run two GUI clients, both receive frames
+
+### Deliverables
+
+- AtticGUI works as protocol client
+- Can run with or without separate server
+
+---
+
+## Phase 9: CLI Socket Protocol
+
+**Goal:** CLI can communicate with GUI via text-based protocol for REPL.
+
+**Note:** This is the existing CLI/GUI communication for the Emacs REPL interface, separate from AESP. AESP is binary and optimized for video/audio; this protocol is text-based for debugging commands.
 
 ### Tasks
 
@@ -274,11 +613,9 @@ This document outlines the recommended implementation order for the Atari 800 XL
 - CLI and GUI communicate
 - Basic commands work (ping, pause, resume)
 
-### Estimated Time: 2-3 days
-
 ---
 
-## Phase 7: 6502 Disassembler
+## Phase 10: 6502 Disassembler
 
 **Goal:** Memory can be disassembled.
 
@@ -317,7 +654,7 @@ This document outlines the recommended implementation order for the Atari 800 XL
 
 ---
 
-## Phase 8: Monitor Mode
+## Phase 11: Monitor Mode
 
 **Goal:** Full debugging capability.
 
@@ -357,7 +694,7 @@ This document outlines the recommended implementation order for the Atari 800 XL
 
 ---
 
-## Phase 9: ATR File System
+## Phase 12: ATR File System
 
 **Goal:** Read and write ATR disk images.
 
@@ -392,7 +729,7 @@ This document outlines the recommended implementation order for the Atari 800 XL
 
 ---
 
-## Phase 10: DOS Mode
+## Phase 13: DOS Mode
 
 **Goal:** Disk management from REPL.
 
@@ -425,7 +762,7 @@ This document outlines the recommended implementation order for the Atari 800 XL
 
 ---
 
-## Phase 11: BASIC Tokenizer
+## Phase 14: BASIC Tokenizer
 
 **Goal:** Enter BASIC programs via REPL.
 
@@ -466,7 +803,7 @@ This document outlines the recommended implementation order for the Atari 800 XL
 
 ---
 
-## Phase 12: BASIC Detokenizer & Mode
+## Phase 15: BASIC Detokenizer & Mode
 
 **Goal:** Complete BASIC mode.
 
@@ -505,7 +842,7 @@ This document outlines the recommended implementation order for the Atari 800 XL
 
 ---
 
-## Phase 13: State Persistence
+## Phase 16: State Persistence
 
 **Goal:** Save and restore emulator state.
 
@@ -539,9 +876,9 @@ This document outlines the recommended implementation order for the Atari 800 XL
 
 ---
 
-## Phase 14: Polish & Integration
+## Phase 17: Polish & Integration
 
-**Goal:** Production-ready application.
+**Goal:** Production-ready native application.
 
 ### Tasks
 
@@ -585,25 +922,174 @@ This document outlines the recommended implementation order for the Atari 800 XL
 
 ---
 
+## Phase 18: WebSocket Bridge
+
+**Goal:** Enable web browser clients to connect to the emulator server.
+
+### Background
+
+WebSocket provides a standard way for web browsers to maintain persistent connections. This phase adds a WebSocket bridge that translates between the binary AESP protocol and WebSocket frames.
+
+### Tasks
+
+1. **WebSocket Server**
+   ```swift
+   actor WebSocketBridge {
+       func start(port: Int) async throws  // Default: 47803
+       func stop() async
+
+       // Internal: connects to AESPServer and bridges to WebSocket clients
+   }
+   ```
+
+2. **Protocol Translation**
+   - AESP binary messages ↔ WebSocket binary frames
+   - Same message format, different transport
+   - Handle WebSocket connection lifecycle
+
+3. **Video Optimization for Web**
+   - Delta encoding: only send changed pixels
+   - Optional: JPEG/WebP compression for reduced bandwidth
+   - Frame skipping for slow connections
+
+4. **Audio Handling**
+   - Raw PCM over WebSocket
+   - Client-side Web Audio API handles playback
+   - Include timestamps for A/V sync
+
+5. **Integration with AtticServer**
+   - WebSocket bridge runs alongside AESP server
+   - Optional: can run as separate process
+
+### Testing
+
+- Connect from browser JavaScript console
+- Verify binary frames received correctly
+- Test video frame delivery
+- Test audio sample delivery
+- Multiple browser tabs connected simultaneously
+
+### Deliverables
+
+- WebSocket bridge functional
+- Ready for web client development
+
+---
+
+## Phase 19: Web Browser Client
+
+**Goal:** Full web-based emulator client running in browser.
+
+### Background
+
+This is the final phase, implementing a complete web frontend that connects to AtticServer via WebSocket, rendering video with Canvas/WebGL and playing audio via Web Audio API.
+
+### Tasks
+
+1. **Project Setup**
+   ```
+   web-client/
+   ├── package.json
+   ├── src/
+   │   ├── index.html
+   │   ├── main.ts
+   │   ├── protocol/
+   │   │   ├── AESPClient.ts
+   │   │   └── messages.ts
+   │   ├── video/
+   │   │   └── renderer.ts
+   │   ├── audio/
+   │   │   └── player.ts
+   │   └── input/
+   │       └── keyboard.ts
+   └── dist/
+   ```
+
+2. **TypeScript Protocol Client**
+   ```typescript
+   class AESPClient {
+       constructor(wsUrl: string);
+       connect(): Promise<void>;
+       disconnect(): void;
+
+       // Input
+       sendKeyDown(keyCode: number, shift: boolean, control: boolean): void;
+       sendKeyUp(): void;
+
+       // Callbacks
+       onFrame: (frameBuffer: Uint8Array) => void;
+       onAudio: (samples: Int16Array) => void;
+   }
+   ```
+
+3. **Video Rendering**
+   - Canvas 2D or WebGL for display
+   - Handle BGRA → RGBA conversion (or server sends RGBA)
+   - Scale to fit browser window
+   - Maintain aspect ratio (384:240)
+
+4. **Audio Playback**
+   ```typescript
+   class AudioPlayer {
+       private audioContext: AudioContext;
+       private ringBuffer: Float32Array;
+
+       enqueueSamples(samples: Int16Array): void;
+       start(): void;
+       stop(): void;
+   }
+   ```
+
+5. **Keyboard Input**
+   - Map browser key events to Atari key codes
+   - Handle modifiers (Shift, Control)
+   - Function keys for console buttons
+
+6. **UI Features**
+   - Fullscreen toggle
+   - Mute button
+   - Connection status indicator
+   - Optional: on-screen keyboard for mobile
+
+### Testing
+
+- Works in Chrome, Firefox, Safari
+- Video displays correctly at 60fps
+- Audio plays without crackling
+- Keyboard input responsive
+- Mobile browser support (touch input)
+
+### Deliverables
+
+- Complete web client
+- Can run Atari emulator in browser
+- Multiple users can watch same emulator instance
+
+---
+
 ## Summary
 
-| Phase | Description | Status | Days |
-|-------|-------------|--------|------|
-| 1 | Project Foundation | ✅ Complete | 1-2 |
-| 2 | Emulator Core | ✅ Complete | 3-4 |
-| 3 | Metal Renderer | ✅ Complete | 2-3 |
-| 4 | Audio Engine | ✅ Complete | 2-3 |
-| 5 | Input Handling | ✅ Keyboard done | 2-3 |
-| 6 | Socket Protocol | Pending | 2-3 |
-| 7 | 6502 Disassembler | Pending | 1-2 |
-| 8 | Monitor Mode | Pending | 3-4 |
-| 9 | ATR File System | Pending | 2-3 |
-| 10 | DOS Mode | Pending | 2-3 |
-| 11 | BASIC Tokenizer | Pending | 3-4 |
-| 12 | BASIC Detokenizer & Mode | Pending | 2-3 |
-| 13 | State Persistence | Pending | 1-2 |
-| 14 | Polish & Integration | Pending | 3-5 |
-| **Total** | | | **30-44 days** |
+| Phase | Description | Status |
+|-------|-------------|--------|
+| 1 | Project Foundation | ✅ Complete |
+| 2 | Emulator Core | ✅ Complete |
+| 3 | Metal Renderer | ✅ Complete |
+| 4 | Audio Engine | ✅ Complete |
+| 5 | Input Handling | ✅ Keyboard done, joystick deferred |
+| 6 | AESP Protocol Library | Pending |
+| 7 | Emulator Server | Pending |
+| 8 | GUI as Protocol Client | Pending |
+| 9 | CLI Socket Protocol | Pending |
+| 10 | 6502 Disassembler | Pending |
+| 11 | Monitor Mode | Pending |
+| 12 | ATR File System | Pending |
+| 13 | DOS Mode | Pending |
+| 14 | BASIC Tokenizer | Pending |
+| 15 | BASIC Detokenizer & Mode | Pending |
+| 16 | State Persistence | Pending |
+| 17 | Polish & Integration | Pending |
+| 18 | WebSocket Bridge | Pending |
+| 19 | Web Browser Client | Pending |
 
 ## Dependencies
 
@@ -620,29 +1106,39 @@ Phase 3        Phase 4        Phase 5
     │              │              │
     └──────────────┴──────────────┘
                    │
-                   ▼
-            Phase 6 (Socket)
+    ┌──────────────┴──────────────┐
+    ▼                             ▼
+Phase 6-8 (AESP Protocol)    Phase 9 (CLI Socket)
+(Protocol, Server, Client)         │
+    │                              │
+    └──────────────┬───────────────┘
                    │
     ┌──────────────┴──────────────┐
     ▼                             ▼
-Phase 7 (Disasm)              Phase 9 (ATR)
+Phase 10 (Disasm)            Phase 12 (ATR)
     │                             │
     ▼                             ▼
-Phase 8 (Monitor)            Phase 10 (DOS)
+Phase 11 (Monitor)           Phase 13 (DOS)
     │                             │
     └──────────────┬──────────────┘
                    │
                    ▼
-           Phase 11 (Tokenizer)
+           Phase 14 (Tokenizer)
                    │
                    ▼
-           Phase 12 (BASIC Mode)
+           Phase 15 (BASIC Mode)
                    │
                    ▼
-           Phase 13 (State)
+           Phase 16 (State)
                    │
                    ▼
-           Phase 14 (Polish)
+           Phase 17 (Polish)
+                   │
+                   ▼
+           Phase 18 (WebSocket Bridge)
+                   │
+                   ▼
+           Phase 19 (Web Browser Client)
 ```
 
 ## Milestones
@@ -650,6 +1146,8 @@ Phase 8 (Monitor)            Phase 10 (DOS)
 | Milestone | Phases | Description | Status |
 |-----------|--------|-------------|--------|
 | M1 | 1-5 | Playable emulator with GUI | ✅ Complete (keyboard input, joystick deferred) |
-| M2 | 6-8 | Debugging via Emacs | Pending |
-| M3 | 9-12 | Full REPL functionality | Pending |
-| M4 | 13-14 | Production release | Pending |
+| M2 | 6-8 | Emulator/GUI separation | Pending |
+| M3 | 9-11 | Debugging via Emacs | Pending |
+| M4 | 12-15 | Full REPL functionality | Pending |
+| M5 | 16-17 | Production native release | Pending |
+| M6 | 18-19 | Web browser support | Pending |
