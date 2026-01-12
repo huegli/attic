@@ -151,9 +151,10 @@ public final class LibAtari800Wrapper: @unchecked Sendable {
         // These configure the emulator for Atari 800 XL with BASIC
         //
         // Note: libatari800 parses these like command-line arguments.
-        // The library may print "Error opening" warnings for arguments it
-        // doesn't recognize as valid options - these are harmless as long
-        // as the core initialization succeeds.
+        // The library prints "Error opening" warnings for arguments it
+        // doesn't recognize as file paths - these warnings are harmless
+        // and occur because the library tries to open each argument as
+        // a file before processing it as an option.
         let args = [
             "attic",                           // Program name (argv[0], required)
             "-xl",                             // Atari 800 XL machine type
@@ -214,19 +215,39 @@ public final class LibAtari800Wrapper: @unchecked Sendable {
         currentInput.trig1 = input.trigger1 ? 0 : 1
 
         // Execute one frame
+        // libatari800_next_frame returns 1 on success, 0 on failure
         let result = libatari800_next_frame(&currentInput)
 
         // Invalidate cached state since emulation has progressed
         stateIsCached = false
 
-        // Check for special conditions
+        // Check for special conditions indicated by error_code
         // @preconcurrency import allows access to C globals
-        switch libatari800_error_code {
-        case LIBATARI800_BRK_INSTRUCTION:
+        //
+        // Error codes from libatari800.h:
+        // 0 = No error
+        // 1 = UNIDENTIFIED_CART_TYPE
+        // 2 = CPU_CRASH
+        // 3 = BRK_INSTRUCTION
+        // 4 = DLIST_ERROR (recoverable - display list issues during boot)
+        // 5 = SELF_TEST
+        // 6 = MEMO_PAD
+        // 7 = INVALID_ESCAPE_OPCODE
+        let errorCode = Int(libatari800_error_code)
+
+        switch errorCode {
+        case 3:  // LIBATARI800_BRK_INSTRUCTION
             return .breakpoint
-        case LIBATARI800_CPU_CRASH:
+        case 2:  // LIBATARI800_CPU_CRASH
             return .cpuCrash
+        case 4, 5, 6:  // DLIST_ERROR, SELF_TEST, MEMO_PAD - recoverable
+            // These are normal conditions during boot/operation
+            return .ok
+        case 0:
+            // No error - check result
+            return result != 0 ? .ok : .error
         default:
+            // Unknown error or result indicates failure
             return result != 0 ? .ok : .error
         }
     }

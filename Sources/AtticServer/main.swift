@@ -267,6 +267,10 @@ struct AtticServer {
             return
         }
 
+        // Disable output buffering for immediate feedback
+        setbuf(stdout, nil)
+        setbuf(stderr, nil)
+
         print("=== Attic Emulator Server ===")
         print("Starting server...")
 
