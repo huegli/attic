@@ -1076,8 +1076,8 @@ This is the final phase, implementing a complete web frontend that connects to A
 | 3 | Metal Renderer | ✅ Complete |
 | 4 | Audio Engine | ✅ Complete |
 | 5 | Input Handling | ✅ Keyboard done, joystick deferred |
-| 6 | AESP Protocol Library | Pending |
-| 7 | Emulator Server | Pending |
+| 6 | AESP Protocol Library | ✅ Complete |
+| 7 | Emulator Server | ✅ Complete |
 | 8 | GUI as Protocol Client | Pending |
 | 9 | CLI Socket Protocol | Pending |
 | 10 | 6502 Disassembler | Pending |

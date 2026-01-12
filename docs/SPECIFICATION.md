@@ -238,7 +238,7 @@ The prompt always ends with `> ` followed by a space, making it easy to match wi
 10. Window fully visible with running emulator
 ```
 
-**Note:** Socket server for CLI communication is implemented in Phase 6.
+**Note:** Socket server for CLI communication is implemented in Phase 9 (CLI Socket Protocol).
 
 ### CLI Startup (Normal)
 

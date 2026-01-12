@@ -59,6 +59,11 @@ let package = Package(
         .executable(
             name: "AtticGUI",
             targets: ["AtticGUI"]
+        ),
+        // Server executable - standalone emulator server using AESP protocol
+        .executable(
+            name: "AtticServer",
+            targets: ["AtticServer"]
         )
     ],
 
@@ -137,6 +142,22 @@ let package = Package(
             name: "AtticGUI",
             dependencies: ["AtticCore"],
             path: "Sources/AtticGUI"
+        ),
+
+        // =================================================================
+        // AtticServer - Standalone Emulator Server
+        // =================================================================
+        // A headless emulator server that broadcasts video frames and audio
+        // samples via the Attic Emulator Server Protocol (AESP).
+        // Clients (GUI, web browser) connect to receive streams.
+        // - Runs EmulatorEngine in server mode
+        // - Broadcasts frames at 60fps to video subscribers
+        // - Broadcasts audio samples to audio subscribers
+        // - Handles control commands from connected clients
+        .executableTarget(
+            name: "AtticServer",
+            dependencies: ["AtticCore", "AtticProtocol"],
+            path: "Sources/AtticServer"
         ),
 
         // =================================================================

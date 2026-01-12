@@ -13,14 +13,17 @@ Two cooperating executables:
 
 Both share a common core library (`AtticCore`) containing the emulator wrapper, REPL logic, tokenizers, and file format handlers.
 
-### Future Architecture (Phases 6-19)
+### Server Architecture (Phases 6-8, partially complete)
 
-Three executables with protocol-based communication:
+Four executables with protocol-based communication:
 
-1. **AtticServer** - Standalone emulator server process
-2. **AtticGUI** - Protocol client with Metal rendering (connects to AtticServer)
-3. **attic** - Command-line REPL tool (connects to AtticServer via text protocol)
-4. **Web Client** - Browser-based client via WebSocket (future)
+1. **AtticServer** - Standalone emulator server process ✅ (Phase 7 complete)
+2. **AtticGUI** - Protocol client with Metal rendering (Phase 8 pending - currently runs embedded)
+3. **attic** - Command-line REPL tool (connects via text protocol)
+4. **Web Client** - Browser-based client via WebSocket (Phases 18-19, future)
+
+Supporting library:
+- **AtticProtocol** - AESP protocol implementation ✅ (Phase 6 complete)
 
 This separation enables:
 - Multiple simultaneous clients viewing the same emulator
@@ -36,7 +39,9 @@ This separation enables:
 | 3 | Metal Renderer | ✅ Complete |
 | 4 | Audio Engine | ✅ Complete |
 | 5 | Input Handling | ✅ Complete (Keyboard only, joystick deferred) |
-| 6-8 | AESP Protocol & Server | Pending |
+| 6 | AESP Protocol Library | ✅ Complete |
+| 7 | Emulator Server | ✅ Complete |
+| 8 | GUI as Protocol Client | Pending |
 | 9-17 | REPL, Debugging, BASIC | Pending |
 | 18-19 | Web Browser Support | Pending |
 

@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-This is a macOS application that emulates the Atari 800 XL home computer. It consists of two executables: a GUI application with Metal rendering and a CLI tool for REPL-based interaction designed to work with Emacs comint mode.
+This is a macOS application that emulates the Atari 800 XL home computer. It uses a client-server architecture where the emulator runs as a standalone server (AtticServer) communicating with clients via the Attic Emulator Server Protocol (AESP). Clients include a native SwiftUI/Metal GUI and a CLI tool for REPL-based interaction designed to work with Emacs comint mode.
 
 ## Technology Stack
 
@@ -11,6 +11,7 @@ This is a macOS application that emulates the Atari 800 XL home computer. It con
 - **UI Framework**: SwiftUI
 - **Graphics**: Metal
 - **Audio**: Core Audio (AVAudioEngine)
+- **Networking**: Network framework (NWListener, NWConnection for AESP)
 - **Emulation Core**: libatari800 (pre-compiled C library)
 - **Game Input**: GameController framework
 
@@ -21,6 +22,8 @@ attic/
 ├── Package.swift
 ├── Sources/
 │   ├── AtticCore/              # Shared library (emulator, REPL, tokenizer)
+│   ├── AtticProtocol/          # AESP binary protocol (message types, server, client)
+│   ├── AtticServer/            # Standalone emulator server executable
 │   ├── AtticCLI/               # Command-line executable (attic)
 │   └── AtticGUI/               # SwiftUI + Metal application (AtticGUI)
 ├── Libraries/
@@ -31,24 +34,29 @@ attic/
 
 ## Key Architecture Decisions
 
-1. **Separate Executables**: CLI and GUI are distinct executables communicating via Unix domain socket
-2. **CLI Launches GUI**: By default, CLI starts the GUI if not running; `--headless` flag for no-GUI operation
-3. **BASIC Tokenization**: We tokenize BASIC source and inject into emulator memory rather than interpreting
-4. **BRK-Based Breakpoints**: Debugger uses 6502 BRK instruction ($00) for breakpoints
-5. **Emacs Integration**: REPL designed for comint compatibility with clear prompts
+1. **Client-Server Architecture**: Emulator runs as standalone AtticServer process, clients connect via AESP protocol
+2. **AESP Protocol**: Binary protocol with three channels - Control (47800), Video (47801), Audio (47802)
+3. **Separate Executables**: CLI and GUI are distinct client executables; CLI uses text protocol, GUI uses AESP
+4. **CLI Launches GUI**: By default, CLI starts the GUI if not running; `--headless` flag for no-GUI operation
+5. **BASIC Tokenization**: We tokenize BASIC source and inject into emulator memory rather than interpreting
+6. **BRK-Based Breakpoints**: Debugger uses 6502 BRK instruction ($00) for breakpoints
+7. **Emacs Integration**: REPL designed for comint compatibility with clear prompts
 
-## Implementation Priority
+## Implementation Status
 
-1. libatari800 Swift wrapper
-2. Metal renderer
-3. Audio engine
-4. Socket protocol (CLI/GUI communication)
-5. 6502 disassembler
-6. Monitor mode
-7. ATR file system parser
-8. DOS mode
-9. BASIC tokenizer/detokenizer
-10. State save/load
+See `docs/IMPLEMENTATION_PLAN.md` for detailed phase-by-phase progress. Summary:
+
+**Complete:**
+- Phase 1-5: libatari800 wrapper, Metal renderer, Audio engine, Keyboard input, BASIC interaction
+- Phase 6: AESP Protocol Library (AtticProtocol module)
+- Phase 7: Emulator Server (AtticServer executable)
+
+**In Progress:**
+- Phase 8: GUI as Protocol Client (refactor AtticGUI to use AESP)
+
+**Pending:**
+- Phase 9-17: CLI socket protocol, joystick input, 6502 disassembler, monitor mode, ATR filesystem, DOS mode, BASIC tokenizer, state save/load, polish
+- Phase 18-19: WebSocket bridge and web browser client
 
 ## Key Files to Reference
 
@@ -92,7 +100,11 @@ attic/
 # Build
 swift build
 
-# Run GUI
+# Run emulator server (required for GUI in client mode)
+swift run AtticServer
+swift run AtticServer --rom-path ~/ROMs
+
+# Run GUI (currently standalone, Phase 8 will make it a client)
 swift run AtticGUI
 
 # Run CLI

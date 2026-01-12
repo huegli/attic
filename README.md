@@ -26,18 +26,188 @@ Attic is an Atari 800 XL emulator designed for developers and retrocomputing ent
 # Clone the repository
 git clone https://github.com/yourusername/attic.git
 cd attic
-
-# Build
-swift build -c release
-
-# Run the GUI
-swift run Attic.app
-
-# Or use the CLI
-swift run attic --repl
 ```
 
-Place your ROM files in `~/.config/attic/roms/` or in the app bundle's `Resources/ROM/` directory.
+Place your ROM files in one of these locations:
+- `Resources/ROM/` (project directory)
+- `~/.attic/ROM/`
+- `~/Library/Application Support/Attic/ROM/`
+
+Required ROM files:
+- `ATARIXL.ROM` — 16KB Atari XL OS ROM
+- `ATARIBAS.ROM` — 8KB Atari BASIC ROM
+
+## Building & Running
+
+Attic can be built and run using either the Swift command-line tools or Xcode.
+
+### Using Swift CLI
+
+```bash
+# Build all targets (debug)
+swift build
+
+# Build all targets (release, optimized)
+swift build -c release
+
+# Run the GUI application
+swift run AtticGUI
+
+# Run the CLI in headless mode
+swift run attic --headless
+
+# Run the CLI with audio disabled
+swift run attic --headless --silent
+
+# Run the emulator server (AESP protocol)
+swift run AtticServer
+swift run AtticServer --rom-path /path/to/roms
+
+# Run tests
+swift test
+```
+
+### Using Xcode
+
+Open the Xcode project:
+
+```bash
+open Attic.xcodeproj
+```
+
+**Available Schemes:**
+
+| Scheme | Description |
+|--------|-------------|
+| AtticGUI | Main GUI application (SwiftUI + Metal) |
+| AtticServer | Standalone emulator server (AESP protocol) |
+| attic | Command-line REPL tool |
+| AtticCore | Shared framework (emulator, audio, input) |
+| AtticProtocol | AESP protocol framework |
+
+**To build and run:**
+1. Select the desired scheme from the scheme selector (top-left of Xcode)
+2. Press `Cmd+R` to build and run, or `Cmd+B` to build only
+
+**Build configurations:**
+- **Debug** — Includes debug symbols, no optimization, assertions enabled
+- **Release** — Optimized build, suitable for distribution
+
+### Project Structure
+
+```
+Attic/
+├── Sources/
+│   ├── AtticCore/        # Shared library (emulator engine, audio, input)
+│   ├── AtticProtocol/    # AESP binary protocol (server/client communication)
+│   ├── AtticServer/      # Standalone emulator server executable
+│   ├── AtticCLI/         # Command-line REPL executable
+│   └── AtticGUI/         # SwiftUI + Metal GUI application
+├── Libraries/
+│   └── libatari800/      # Pre-compiled Atari 800 emulator core
+├── Resources/
+│   └── ROM/              # Place ROM files here
+├── Tests/
+│   └── AtticCoreTests/   # Unit tests
+├── Package.swift         # Swift Package Manager configuration
+└── Attic.xcodeproj/      # Xcode project
+```
+
+## Debugging
+
+### Debugging with Xcode
+
+1. **Set breakpoints**: Click in the gutter next to any line of Swift code
+2. **Run in debug mode**: Press `Cmd+R` (Debug is the default configuration)
+3. **Use the debug console**: View variables, evaluate expressions with LLDB
+
+**Useful debug features:**
+- **View hierarchy debugger**: `Debug > View Debugging > Capture View Hierarchy`
+- **Memory graph**: `Debug > Debug Memory Graph`
+- **GPU debugger**: `Debug > Capture GPU Workload` (for Metal rendering issues)
+
+**Console commands (LLDB):**
+```lldb
+# Print a variable
+po variableName
+
+# Print emulator state
+po await emulator.state
+
+# Examine memory (emulator's virtual memory)
+# Set a breakpoint in EmulatorEngine and use:
+po self.readMemory(at: 0x600)
+
+# Continue execution
+c
+
+# Step over
+n
+
+# Step into
+s
+```
+
+### Debugging with Swift CLI + LLDB
+
+```bash
+# Build with debug symbols
+swift build
+
+# Run with LLDB
+lldb .build/debug/AtticGUI
+
+# In LLDB:
+(lldb) run
+(lldb) breakpoint set --file EmulatorEngine.swift --line 150
+(lldb) breakpoint set --name "EmulatorEngine.executeFrame"
+```
+
+### Debugging the Emulator
+
+The REPL monitor mode provides 6502-level debugging:
+
+```
+# Switch to monitor mode
+[basic] > .monitor
+
+# Disassemble at address
+[monitor] $E477> d $E477 8
+
+# Set a breakpoint
+[monitor] $E477> bp $600A
+
+# View registers
+[monitor] $E477> r
+
+# Step one instruction
+[monitor] $E477> s
+
+# Continue execution
+[monitor] $E477> g
+
+# View memory
+[monitor] $E477> m $0600 32
+```
+
+### Common Issues
+
+**Build fails with "module 'CAtari800' not found":**
+- Ensure `Libraries/libatari800/lib/libatari800.a` exists
+- Ensure `Libraries/libatari800/include/libatari800.h` exists
+- Check that `Libraries/libatari800/module.modulemap` is present
+
+**"ROM not found" error at runtime:**
+- Place `ATARIXL.ROM` and `ATARIBAS.ROM` in `Resources/ROM/`
+- Or specify path: `swift run AtticServer --rom-path /path/to/roms`
+
+**Xcode can't find frameworks:**
+- Clean build folder: `Cmd+Shift+K`
+- Delete DerivedData: `rm -rf ~/Library/Developer/Xcode/DerivedData/Attic-*`
+- Rebuild: `Cmd+B`
+
+**Linker warnings about macOS version:**
+- These are benign warnings from libatari800 and can be ignored
 
 ## Usage
 
@@ -122,22 +292,40 @@ Key bindings in `attic-mode`:
 
 ## Architecture
 
+Attic uses a client-server architecture where the emulator runs as a standalone server process:
+
 ```
-┌─────────────┐         ┌─────────────┐
-│  AtticGUI   │◄───────►│  AtticCLI   │
-│             │  Unix   │             │
-│  SwiftUI    │ Socket  │  REPL       │
-│  Metal      │         │             │
-│  Audio      │         └──────┬──────┘
-└─────────────┘                │
-                               ▼
-                        ┌─────────────┐
-                        │   Emacs     │
-                        │  comint     │
-                        └─────────────┘
+                         ┌─────────────────┐
+                         │  AtticServer    │
+                         │  (Emulator)     │
+                         │                 │
+                         │  libatari800    │
+                         └───────┬─────────┘
+                                 │ AESP Protocol
+              ┌──────────────────┼──────────────────┐
+              │                  │                  │
+              ▼                  ▼                  ▼
+       ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+       │  AtticGUI   │    │  AtticCLI   │    │  (Future)   │
+       │             │    │             │    │  Web Client │
+       │  SwiftUI    │    │  REPL       │    │             │
+       │  Metal      │    │             │    │  WebSocket  │
+       │  Audio      │    └──────┬──────┘    └─────────────┘
+       └─────────────┘           │
+                                 ▼
+                          ┌─────────────┐
+                          │   Emacs     │
+                          │  comint     │
+                          └─────────────┘
 ```
 
-The GUI owns the emulator core. The CLI connects over a Unix socket, making it possible to debug from your editor while watching the display update in real time.
+**AESP (Attic Emulator Server Protocol):**
+- Binary protocol over TCP for efficient video/audio streaming
+- Control port (47800): Commands, status, memory access, input events
+- Video port (47801): 60fps frame broadcasts (384x240 BGRA)
+- Audio port (47802): 44.1kHz PCM audio streaming
+
+Multiple clients can connect to the same server, making it possible to debug from your editor while watching the display update in real time.
 
 ## Documentation
 

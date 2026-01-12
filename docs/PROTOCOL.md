@@ -1,5 +1,7 @@
 # CLI/GUI Socket Protocol
 
+> **Note:** This document describes the text-based CLI/GUI protocol used for REPL communication (Phase 9). For the binary Attic Emulator Server Protocol (AESP) used for video/audio streaming between AtticServer and GUI clients (Phases 6-8), see the AESP sections in `IMPLEMENTATION_PLAN.md` and `ARCHITECTURE.md`.
+
 ## Overview
 
 The CLI and GUI communicate over a Unix domain socket using a simple line-based text protocol. This design allows easy debugging and is compatible with tools like `socat` or `nc` for testing.
