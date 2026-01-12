@@ -38,6 +38,32 @@ import Foundation
 #if canImport(Network)
 import Network
 #endif
+import os.lock
+
+// MARK: - Continuation Resume Guard
+
+/// A thread-safe guard to prevent resuming a continuation more than once.
+///
+/// This class uses an atomic flag to ensure that only one call to `tryResume()`
+/// succeeds, even when called from multiple threads concurrently.
+private final class ContinuationResumeGuard: @unchecked Sendable {
+    /// The underlying lock for atomic access.
+    private let lock = OSAllocatedUnfairLock(initialState: false)
+
+    /// Attempts to mark the continuation as resumed.
+    ///
+    /// - Returns: `true` if this is the first call (continuation should be resumed),
+    ///   `false` if already resumed (continuation should NOT be resumed again).
+    func tryResume() -> Bool {
+        return lock.withLock { hasResumed in
+            if hasResumed {
+                return false
+            }
+            hasResumed = true
+            return true
+        }
+    }
+}
 
 // MARK: - Client Configuration
 
@@ -320,14 +346,27 @@ public actor AESPClient {
         let connection = NWConnection(to: endpoint, using: .tcp)
 
         return try await withCheckedThrowingContinuation { continuation in
-            connection.stateUpdateHandler = { state in
+            // Use a thread-safe flag to track whether continuation has been resumed
+            let resumeGuard = ContinuationResumeGuard()
+
+            connection.stateUpdateHandler = { [resumeGuard] state in
                 switch state {
                 case .ready:
-                    continuation.resume(returning: connection)
+                    // Only resume continuation once
+                    if resumeGuard.tryResume() {
+                        connection.stateUpdateHandler = nil
+                        continuation.resume(returning: connection)
+                    }
                 case .failed(let error):
-                    continuation.resume(throwing: error)
+                    if resumeGuard.tryResume() {
+                        connection.stateUpdateHandler = nil
+                        continuation.resume(throwing: error)
+                    }
                 case .cancelled:
-                    continuation.resume(throwing: AESPError.connectionError("Connection cancelled"))
+                    if resumeGuard.tryResume() {
+                        connection.stateUpdateHandler = nil
+                        continuation.resume(throwing: AESPError.connectionError("Connection cancelled"))
+                    }
                 default:
                     break
                 }

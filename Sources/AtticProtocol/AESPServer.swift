@@ -551,6 +551,10 @@ public actor AESPServer {
     ///
     /// - Parameter pixels: The frame buffer as a byte array.
     public func broadcastFrame(_ pixels: [UInt8]) async {
+        // Always increment frame counter for A/V synchronization,
+        // regardless of whether there are video clients
+        frameCounter += 1
+
         #if canImport(Network)
         guard !videoClients.isEmpty else { return }
 
@@ -561,8 +565,6 @@ public actor AESPServer {
             client.connection.send(content: data, completion: .contentProcessed { _ in })
         }
         #endif
-
-        frameCounter += 1
     }
 
     /// Broadcasts a video frame to all subscribed video clients.

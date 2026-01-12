@@ -168,6 +168,19 @@ let package = Package(
             name: "AtticCoreTests",
             dependencies: ["AtticCore"],
             path: "Tests/AtticCoreTests"
+        ),
+
+        // =================================================================
+        // AtticProtocolTests - AESP Protocol Tests
+        // =================================================================
+        // Test suite for the AESP protocol library including:
+        // - Message encoding/decoding unit tests
+        // - Server integration tests
+        // - Client-server communication tests
+        .testTarget(
+            name: "AtticProtocolTests",
+            dependencies: ["AtticProtocol", "AtticCore"],
+            path: "Tests/AtticProtocolTests"
         )
     ]
 )
