@@ -132,55 +132,30 @@ After implementing the Attic Emulator Server Protocol (AESP), the architecture w
 └─────────────────┘
 ```
 
-## Attic Emulator Server Protocol (AESP)
+## Communication Protocols
 
-AESP is a binary protocol for communication between the emulator server and GUI/web clients.
+The Attic Emulator uses two communication protocols:
 
-### Transport
+1. **AESP (Attic Emulator Server Protocol)** - Binary protocol for GUI/web clients
+   - High-performance video/audio streaming at 60fps
+   - Control, video, and audio on separate ports (47800-47802)
+   - WebSocket bridge on port 47803 for web clients
 
-Three separate ports for different data streams:
+2. **CLI Protocol** - Text-based protocol for REPL/Emacs integration
+   - Line-based commands over Unix domain socket
+   - Designed for Emacs comint mode compatibility
 
-| Port | Channel | Data Rate | Purpose |
-|------|---------|-----------|---------|
-| 47800 | Control | Low | Commands, status, memory access |
-| 47801 | Video | ~21 MB/s | Raw BGRA frames (384×240×4 @ 60fps) |
-| 47802 | Audio | ~88 KB/s | 16-bit PCM (44.1kHz mono) |
-| 47803 | WebSocket | Variable | Bridges all channels for web clients |
+For complete protocol specifications including message formats, payload structures, and test coverage requirements, see **[PROTOCOL.md](PROTOCOL.md)**.
 
-### Message Format
+### Protocol Summary
 
-All AESP messages use this binary header:
-
-```
-┌────────┬────────┬────────┬────────┬─────────────┐
-│ Magic  │Version │ Type   │ Length │  Payload    │
-│0xAE50  │ 0x01   │(1 byte)│(4 byte)│ (variable)  │
-└────────┴────────┴────────┴────────┴─────────────┘
-   2 bytes  1 byte   1 byte  4 bytes   N bytes
-
-Total header: 8 bytes
-```
-
-### Message Types
-
-| Range | Category | Messages |
-|-------|----------|----------|
-| 0x00-0x3F | Control | PING, PONG, PAUSE, RESUME, RESET, STATUS, MEMORY_READ, MEMORY_WRITE |
-| 0x40-0x5F | Input | KEY_DOWN, KEY_UP, JOYSTICK, CONSOLE_KEYS |
-| 0x60-0x7F | Video | FRAME_RAW, FRAME_DELTA, FRAME_CONFIG |
-| 0x80-0x9F | Audio | AUDIO_PCM, AUDIO_CONFIG, AUDIO_SYNC |
-
-### Design Decisions
-
-1. **Separate Ports**: Clients subscribe only to channels they need (e.g., monitoring tool needs only Control, not Video/Audio)
-
-2. **Raw Video for Local Clients**: 21 MB/s is trivial for local IPC; compression adds latency and CPU overhead
-
-3. **Delta Encoding for Web**: Only changed pixels sent over WebSocket to reduce bandwidth
-
-4. **Push Model for A/V**: Server pushes frames/audio at 60fps; clients can drop frames if overwhelmed
-
-5. **Existing CLI Protocol Preserved**: Text-based protocol for Emacs REPL remains separate from binary AESP
+| Protocol | Transport | Purpose |
+|----------|-----------|---------|
+| AESP Control | TCP :47800 | Commands, status, memory access |
+| AESP Video | TCP :47801 | Raw BGRA frames (384×240×4 @ 60fps) |
+| AESP Audio | TCP :47802 | 16-bit PCM (44.1kHz mono) |
+| AESP WebSocket | TCP :47803 | Bridges all channels for web |
+| CLI | Unix socket | Text-based REPL commands |
 
 ## Threading Model
 
@@ -253,9 +228,9 @@ func emulationLoop() async {
 
 ## Inter-Process Communication
 
-### Socket Architecture
+The CLI communicates with the GUI via Unix domain socket using a text-based protocol. See **[PROTOCOL.md](PROTOCOL.md)** for complete command reference.
 
-The GUI opens a Unix domain socket at `/tmp/attic-<pid>.sock` on startup. The CLI connects to this socket to send commands and receive responses/events.
+### Socket Architecture
 
 ```
 CLI Process                          GUI Process
@@ -281,18 +256,6 @@ CLI Process                          GUI Process
 5. GUI sends response via socket
 6. CLI formats response and writes to stdout
 7. Emacs displays in comint buffer
-
-### Async Events
-
-The GUI can send unsolicited events (breakpoint hits, emulator stopped). The CLI must handle these and display appropriately:
-
-```
-EVENT:breakpoint $600A
-* Breakpoint hit at $600A
-  A=$4F X=$00 Y=$03 S=$F7 P=$A3
-  Flags: N.....ZC
-[monitor] $600A>
-```
 
 ## Memory Architecture
 
