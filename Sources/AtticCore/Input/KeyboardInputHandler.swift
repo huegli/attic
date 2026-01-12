@@ -214,6 +214,14 @@ public final class KeyboardInputHandler: ObservableObject {
         if let result = handleSpecialKey(keyCode: keyCode, shift: shift, control: control) {
             currentKeyChar = result.keyChar
             currentKeyCode = result.keyCode
+
+            // Log special key down event
+            let keyName = macKeyCodeName(keyCode)
+            print("[KeyDown] Mac: 0x\(String(format: "%02X", keyCode)) (\(keyName)) | " +
+                  "Atari: keyChar=0x\(String(format: "%02X", result.keyChar)), " +
+                  "keyCode=0x\(String(format: "%02X", result.keyCode)) | " +
+                  "shift=\(result.shift), control=\(result.control)")
+
             return result
         }
 
@@ -222,8 +230,20 @@ public final class KeyboardInputHandler: ObservableObject {
             let result = handleCharacterKey(character: firstChar, shift: shift, control: control)
             currentKeyChar = result.keyChar
             currentKeyCode = result.keyCode
+
+            // Log character key down event
+            let keyName = macKeyCodeName(keyCode)
+            print("[KeyDown] Mac: 0x\(String(format: "%02X", keyCode)) (\(keyName)) char='\(firstChar)' | " +
+                  "Atari: keyChar=0x\(String(format: "%02X", result.keyChar)) ('\(Character(UnicodeScalar(result.keyChar)))'), " +
+                  "keyCode=0x\(String(format: "%02X", result.keyCode)) | " +
+                  "shift=\(result.shift), control=\(result.control)")
+
             return result
         }
+
+        // Log ignored key
+        let keyName = macKeyCodeName(keyCode)
+        print("[KeyDown] Mac: 0x\(String(format: "%02X", keyCode)) (\(keyName)) | IGNORED (no mapping)")
 
         return nil
     }
@@ -235,6 +255,11 @@ public final class KeyboardInputHandler: ObservableObject {
     public func keyUp(keyCode: UInt16) -> Bool {
         let wasPressed = pressedKeys.contains(keyCode)
         pressedKeys.remove(keyCode)
+
+        // Log key up event
+        let keyName = macKeyCodeName(keyCode)
+        print("[KeyUp]   Mac: 0x\(String(format: "%02X", keyCode)) (\(keyName)) | " +
+              "wasPressed=\(wasPressed), remainingKeys=\(pressedKeys.count)")
 
         // Check if console keys are released
         switch keyCode {
@@ -374,6 +399,101 @@ public final class KeyboardInputHandler: ObservableObject {
         }
 
         return (atasciiChar, 0xFF, shift, control)
+    }
+
+    // =========================================================================
+    // MARK: - Logging Helpers
+    // =========================================================================
+
+    /// Returns a human-readable name for a Mac virtual key code.
+    ///
+    /// Used for debug logging to make key events easier to understand.
+    private func macKeyCodeName(_ keyCode: UInt16) -> String {
+        switch keyCode {
+        // Letters
+        case MacKeyCode.a: return "A"
+        case MacKeyCode.b: return "B"
+        case MacKeyCode.c: return "C"
+        case MacKeyCode.d: return "D"
+        case MacKeyCode.e: return "E"
+        case MacKeyCode.f: return "F"
+        case MacKeyCode.g: return "G"
+        case MacKeyCode.h: return "H"
+        case MacKeyCode.i: return "I"
+        case MacKeyCode.j: return "J"
+        case MacKeyCode.k: return "K"
+        case MacKeyCode.l: return "L"
+        case MacKeyCode.m: return "M"
+        case MacKeyCode.n: return "N"
+        case MacKeyCode.o: return "O"
+        case MacKeyCode.p: return "P"
+        case MacKeyCode.q: return "Q"
+        case MacKeyCode.r: return "R"
+        case MacKeyCode.s: return "S"
+        case MacKeyCode.t: return "T"
+        case MacKeyCode.u: return "U"
+        case MacKeyCode.v: return "V"
+        case MacKeyCode.w: return "W"
+        case MacKeyCode.x: return "X"
+        case MacKeyCode.y: return "Y"
+        case MacKeyCode.z: return "Z"
+
+        // Numbers
+        case MacKeyCode.key0: return "0"
+        case MacKeyCode.key1: return "1"
+        case MacKeyCode.key2: return "2"
+        case MacKeyCode.key3: return "3"
+        case MacKeyCode.key4: return "4"
+        case MacKeyCode.key5: return "5"
+        case MacKeyCode.key6: return "6"
+        case MacKeyCode.key7: return "7"
+        case MacKeyCode.key8: return "8"
+        case MacKeyCode.key9: return "9"
+
+        // Special keys
+        case MacKeyCode.return: return "Return"
+        case MacKeyCode.tab: return "Tab"
+        case MacKeyCode.space: return "Space"
+        case MacKeyCode.delete: return "Backspace"
+        case MacKeyCode.escape: return "Escape"
+        case MacKeyCode.capsLock: return "CapsLock"
+        case MacKeyCode.grave: return "Grave"
+
+        // Arrow keys
+        case MacKeyCode.leftArrow: return "Left"
+        case MacKeyCode.rightArrow: return "Right"
+        case MacKeyCode.downArrow: return "Down"
+        case MacKeyCode.upArrow: return "Up"
+
+        // Function keys
+        case MacKeyCode.f1: return "F1"
+        case MacKeyCode.f2: return "F2"
+        case MacKeyCode.f3: return "F3"
+        case MacKeyCode.f4: return "F4"
+        case MacKeyCode.f5: return "F5"
+        case MacKeyCode.f6: return "F6"
+        case MacKeyCode.f7: return "F7"
+        case MacKeyCode.f8: return "F8"
+        case MacKeyCode.f9: return "F9"
+        case MacKeyCode.f10: return "F10"
+        case MacKeyCode.f11: return "F11"
+        case MacKeyCode.f12: return "F12"
+
+        // Modifiers
+        case MacKeyCode.shift: return "Shift"
+        case MacKeyCode.rightShift: return "RightShift"
+        case MacKeyCode.control: return "Control"
+        case MacKeyCode.rightControl: return "RightControl"
+        case MacKeyCode.option: return "Option"
+        case MacKeyCode.rightOption: return "RightOption"
+        case MacKeyCode.command: return "Command"
+        case MacKeyCode.rightCommand: return "RightCommand"
+
+        // Keypad
+        case MacKeyCode.keypadEnter: return "KeypadEnter"
+
+        default: return "Unknown"
+        }
     }
 
     // =========================================================================
