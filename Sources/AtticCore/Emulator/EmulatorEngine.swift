@@ -103,6 +103,12 @@ public actor EmulatorEngine {
     /// Current input state, updated each frame.
     private var inputState = InputState()
 
+    /// Whether a key release is pending.
+    /// This implements "key latching" - a key press must be seen by at least
+    /// one frame before being released. This prevents missed keys when
+    /// keyDown and keyUp events arrive within the same frame period.
+    private var keyReleasePending: Bool = false
+
     /// Set of active breakpoint addresses.
     private var breakpoints: Set<UInt16> = []
 
@@ -283,6 +289,10 @@ public actor EmulatorEngine {
     /// This is useful for headless operation or when you want to control
     /// frame timing externally.
     ///
+    /// Note: This method implements key latching. If a key release is pending,
+    /// the key state is cleared AFTER the frame executes, ensuring every key
+    /// press is seen by at least one frame.
+    ///
     /// - Returns: The frame execution result.
     @discardableResult
     public func executeFrame() async -> FrameResult {
@@ -291,6 +301,16 @@ public actor EmulatorEngine {
         var input = inputState
         let result = wrapper.executeFrame(input: &input)
         frameCount += 1
+
+        // Handle pending key release AFTER the frame has processed the input.
+        // This ensures every key press is seen by at least one frame.
+        if keyReleasePending {
+            inputState.keyChar = 0
+            inputState.keyCode = 0
+            // Note: We don't clear shift/control here as they're modifier states
+            // that should persist based on physical key state
+            keyReleasePending = false
+        }
 
         if result == .breakpoint {
             let pc = wrapper.getRegisters().pc
@@ -325,9 +345,13 @@ public actor EmulatorEngine {
 
     /// Sends a key press event.
     ///
+    /// The key will be held until `releaseKey()` is called. Key latching ensures
+    /// that even if releaseKey() is called very quickly (within the same frame),
+    /// the key press will still be seen by at least one frame of emulation.
+    ///
     /// - Parameters:
-    ///   - keyChar: ATASCII character code.
-    ///   - keyCode: Internal Atari key code.
+    ///   - keyChar: ATASCII character code (0 for special keys like arrows).
+    ///   - keyCode: Internal Atari key code (AKEY_* constant).
     ///   - shift: Shift key state.
     ///   - control: Control key state.
     public func pressKey(keyChar: UInt8, keyCode: UInt8, shift: Bool = false, control: Bool = false) {
@@ -335,14 +359,19 @@ public actor EmulatorEngine {
         inputState.keyCode = keyCode
         inputState.shift = shift
         inputState.control = control
+        // Cancel any pending release since we have a new key press
+        keyReleasePending = false
     }
 
-    /// Releases all key input.
+    /// Releases the current key input.
+    ///
+    /// This marks the key for release, but the actual clearing happens after
+    /// the next frame executes. This ensures every key press is processed by
+    /// at least one frame, preventing missed keypresses when typing quickly.
     public func releaseKey() {
-        inputState.keyChar = 0
-        inputState.keyCode = 0
-        inputState.shift = false
-        inputState.control = false
+        // Don't clear immediately - mark for release after next frame
+        // This implements key latching to prevent missed keypresses
+        keyReleasePending = true
     }
 
     /// Sets console key states (START, SELECT, OPTION).
