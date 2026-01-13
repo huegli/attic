@@ -400,8 +400,8 @@ class AtticViewModel: ObservableObject {
             guard let self = self, let client = self.client else { return }
 
             for await samples in await client.audioStream {
-                // Feed samples to audio engine (can be done off main actor)
-                self.audioEngine.enqueueSamplesFromEmulator(bytes: samples)
+                // Feed samples to audio engine using Data directly (avoids Array copy)
+                self.audioEngine.enqueueSamplesFromEmulator(data: samples)
             }
         }
     }
@@ -696,11 +696,11 @@ class AtticViewModel: ObservableObject {
         guard let emulator = emulator else { return }
 
         // Target 60fps = 16.67ms per frame
+        // Use absolute frame scheduling to prevent timing drift
         let targetFrameTime: UInt64 = 16_666_667  // nanoseconds
+        var nextFrameTime = DispatchTime.now().uptimeNanoseconds + targetFrameTime
 
         while !Task.isCancelled {
-            let frameStart = DispatchTime.now().uptimeNanoseconds
-
             if isRunning {
                 // Execute one frame
                 let result = await emulator.executeFrame()
@@ -733,14 +733,14 @@ class AtticViewModel: ObservableObject {
                 }
             }
 
-            // Sleep to maintain 60fps
-            let frameEnd = DispatchTime.now().uptimeNanoseconds
-            let elapsed = frameEnd - frameStart
-
-            if elapsed < targetFrameTime {
-                let sleepTime = targetFrameTime - elapsed
+            // Sleep until next scheduled frame time
+            let now = DispatchTime.now().uptimeNanoseconds
+            if now < nextFrameTime {
+                let sleepTime = nextFrameTime - now
                 try? await Task.sleep(nanoseconds: sleepTime)
             }
+            // Schedule next frame (prevents timing drift)
+            nextFrameTime += targetFrameTime
         }
     }
 

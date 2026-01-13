@@ -336,8 +336,10 @@ struct AtticServer {
         }
         sigintSource.resume()
 
-        // Main emulation loop
-        let frameInterval: UInt64 = 16_666_667  // ~60fps in nanoseconds
+        // Main emulation loop with proper frame timing
+        // We measure elapsed time and only sleep for the remainder to maintain 60fps
+        let targetFrameTime: UInt64 = 16_666_667  // ~60fps in nanoseconds
+        var nextFrameTime = DispatchTime.now().uptimeNanoseconds + targetFrameTime
 
         while delegate.shouldRun {
             // Execute one frame
@@ -361,8 +363,15 @@ struct AtticServer {
                 }
             }
 
-            // Maintain ~60fps timing
-            try? await Task.sleep(nanoseconds: frameInterval)
+            // Calculate remaining time until next frame
+            let now = DispatchTime.now().uptimeNanoseconds
+            if now < nextFrameTime {
+                // Sleep only for the remaining time
+                let sleepTime = nextFrameTime - now
+                try? await Task.sleep(nanoseconds: sleepTime)
+            }
+            // Schedule next frame (even if we're behind, this keeps us on pace)
+            nextFrameTime += targetFrameTime
         }
 
         // Shutdown

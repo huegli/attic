@@ -201,20 +201,29 @@ public actor AESPClient {
     /// Buffer for incomplete video data.
     private var videoReceiveBuffer: Data = Data()
 
+    /// Index of next byte to consume in video buffer (for efficient buffer management).
+    /// Using index tracking avoids O(n) removeFirst() operations on large buffers.
+    private var videoBufferConsumed: Int = 0
+
     /// Buffer for incomplete audio data.
     private var audioReceiveBuffer: Data = Data()
 
+    /// Index of next byte to consume in audio buffer.
+    private var audioBufferConsumed: Int = 0
+
     /// Continuation for the frame stream.
-    private var frameContinuation: AsyncStream<[UInt8]>.Continuation?
+    /// Uses Data instead of [UInt8] to avoid expensive Array copy on each frame.
+    private var frameContinuation: AsyncStream<Data>.Continuation?
 
     /// Continuation for the audio stream.
-    private var audioContinuation: AsyncStream<[UInt8]>.Continuation?
+    /// Uses Data instead of [UInt8] to avoid expensive Array copy.
+    private var audioContinuation: AsyncStream<Data>.Continuation?
 
     /// The video frame stream.
-    private var _frameStream: AsyncStream<[UInt8]>?
+    private var _frameStream: AsyncStream<Data>?
 
     /// The audio sample stream.
-    private var _audioStream: AsyncStream<[UInt8]>?
+    private var _audioStream: AsyncStream<Data>?
 
     // =========================================================================
     // MARK: - Initialization
@@ -327,10 +336,12 @@ public actor AESPClient {
         _frameStream = nil
         _audioStream = nil
 
-        // Clear buffers
+        // Clear buffers and reset consumed indices
         controlReceiveBuffer.removeAll()
         videoReceiveBuffer.removeAll()
+        videoBufferConsumed = 0
         audioReceiveBuffer.removeAll()
+        audioBufferConsumed = 0
 
         state = .disconnected
         print("[AESPClient] Disconnected")
@@ -428,15 +439,26 @@ public actor AESPClient {
 
     /// Handles received data from a channel.
     private func handleReceivedData(_ data: Data, channel: AESPChannel) async {
-        // Append to appropriate buffer
+        // Append to appropriate buffer and process
         switch channel {
         case .control:
             controlReceiveBuffer.append(data)
             await processControlBuffer()
         case .video:
+            // Compact buffer if consumed portion is too large (>1MB)
+            // This prevents unbounded buffer growth while avoiding frequent O(n) shifts
+            if videoBufferConsumed > 1_000_000 {
+                videoReceiveBuffer.removeFirst(videoBufferConsumed)
+                videoBufferConsumed = 0
+            }
             videoReceiveBuffer.append(data)
             await processVideoBuffer()
         case .audio:
+            // Compact audio buffer if consumed portion is too large
+            if audioBufferConsumed > 100_000 {
+                audioReceiveBuffer.removeFirst(audioBufferConsumed)
+                audioBufferConsumed = 0
+            }
             audioReceiveBuffer.append(data)
             await processAudioBuffer()
         }
@@ -458,38 +480,69 @@ public actor AESPClient {
     }
 
     /// Processes the video receive buffer.
+    ///
+    /// Uses index-based tracking to avoid O(n) removeFirst() on every frame.
+    /// The buffer is only compacted when the consumed portion exceeds a threshold.
     private func processVideoBuffer() async {
-        while let messageSize = AESPMessage.messageSize(in: videoReceiveBuffer) {
+        // Process all complete messages in the buffer
+        while true {
+            // Get unconsumed portion using dropFirst (safe: returns empty if index >= count)
+            let unconsumedData = Data(videoReceiveBuffer.dropFirst(videoBufferConsumed))
+
+            // Check if we have a complete message
+            guard let messageSize = AESPMessage.messageSize(in: unconsumedData) else {
+                // Incomplete message or empty buffer, wait for more data
+                break
+            }
+
             do {
-                let (message, _) = try AESPMessage.decode(from: videoReceiveBuffer)
-                videoReceiveBuffer.removeFirst(messageSize)
+                let (message, _) = try AESPMessage.decode(from: unconsumedData)
+
+                // Advance the consumed index instead of removing bytes (O(1) vs O(n))
+                videoBufferConsumed += messageSize
 
                 if message.type == .frameRaw {
-                    // Emit frame to stream
-                    frameContinuation?.yield(Array(message.payload))
+                    // Emit frame payload directly as Data (no Array copy needed)
+                    frameContinuation?.yield(message.payload)
                 }
             } catch {
                 print("[AESPClient] Error decoding video message: \(error)")
                 videoReceiveBuffer.removeAll()
+                videoBufferConsumed = 0
                 break
             }
         }
     }
 
     /// Processes the audio receive buffer.
+    ///
+    /// Uses index-based tracking to avoid O(n) removeFirst() operations.
     private func processAudioBuffer() async {
-        while let messageSize = AESPMessage.messageSize(in: audioReceiveBuffer) {
+        // Process all complete messages in the buffer
+        while true {
+            // Get unconsumed portion using dropFirst (safe: returns empty if index >= count)
+            let unconsumedData = Data(audioReceiveBuffer.dropFirst(audioBufferConsumed))
+
+            // Check if we have a complete message
+            guard let messageSize = AESPMessage.messageSize(in: unconsumedData) else {
+                // Incomplete message or empty buffer, wait for more data
+                break
+            }
+
             do {
-                let (message, _) = try AESPMessage.decode(from: audioReceiveBuffer)
-                audioReceiveBuffer.removeFirst(messageSize)
+                let (message, _) = try AESPMessage.decode(from: unconsumedData)
+
+                // Advance the consumed index (O(1) operation)
+                audioBufferConsumed += messageSize
 
                 if message.type == .audioPCM {
-                    // Emit samples to stream
-                    audioContinuation?.yield(Array(message.payload))
+                    // Emit samples directly as Data (no Array copy needed)
+                    audioContinuation?.yield(message.payload)
                 }
             } catch {
                 print("[AESPClient] Error decoding audio message: \(error)")
                 audioReceiveBuffer.removeAll()
+                audioBufferConsumed = 0
                 break
             }
         }
@@ -544,25 +597,29 @@ public actor AESPClient {
 
     /// The video frame stream.
     ///
-    /// Iterate over this stream to receive video frames:
+    /// Iterate over this stream to receive video frames as Data:
     /// ```swift
-    /// for await frame in await client.frameStream {
-    ///     renderer.updateTexture(with: frame)
+    /// for await frameData in await client.frameStream {
+    ///     renderer.updateTexture(with: frameData)
     /// }
     /// ```
-    public var frameStream: AsyncStream<[UInt8]> {
+    ///
+    /// Note: Uses Data instead of [UInt8] for zero-copy frame delivery.
+    public var frameStream: AsyncStream<Data> {
         return _frameStream ?? AsyncStream { $0.finish() }
     }
 
     /// The audio sample stream.
     ///
-    /// Iterate over this stream to receive audio samples:
+    /// Iterate over this stream to receive audio samples as Data:
     /// ```swift
     /// for await samples in await client.audioStream {
-    ///     audioEngine.enqueueSamples(bytes: samples)
+    ///     audioEngine.enqueueSamples(data: samples)
     /// }
     /// ```
-    public var audioStream: AsyncStream<[UInt8]> {
+    ///
+    /// Note: Uses Data instead of [UInt8] for zero-copy delivery.
+    public var audioStream: AsyncStream<Data> {
         return _audioStream ?? AsyncStream { $0.finish() }
     }
 

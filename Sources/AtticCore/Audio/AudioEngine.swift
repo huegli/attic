@@ -320,6 +320,23 @@ public final class AudioEngine: @unchecked Sendable {
         }
     }
 
+    /// Enqueues audio samples from Data.
+    ///
+    /// This version accepts Data directly, which is more efficient when
+    /// receiving audio from network protocol buffers (avoids Array copy).
+    ///
+    /// - Parameter data: Raw audio bytes from the protocol stream.
+    /// - Returns: Number of samples actually written (may be less if buffer full).
+    @discardableResult
+    public func enqueueSamplesFromEmulator(data: Data) -> Int {
+        guard !data.isEmpty, isEnabled else { return 0 }
+
+        return data.withUnsafeBytes { bytes in
+            guard let pointer = bytes.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return 0 }
+            return enqueueSamplesFromEmulator(pointer: pointer, byteCount: data.count)
+        }
+    }
+
     /// Enqueues audio samples from the emulator's raw audio buffer.
     ///
     /// This is the primary method for feeding audio from libatari800 to the

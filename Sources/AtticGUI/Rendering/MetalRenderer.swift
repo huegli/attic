@@ -80,7 +80,8 @@ public class MetalRenderer: NSObject {
     private let textureLock = NSLock()
 
     /// Pending frame buffer to upload (set from emulation thread).
-    private var pendingFrameBuffer: [UInt8]?
+    /// Stored as Data to support both [UInt8] and Data input without extra copies.
+    private var pendingFrameBuffer: Data?
 
     // =========================================================================
     // MARK: - Initialization
@@ -231,8 +232,30 @@ public class MetalRenderer: NSObject {
             return
         }
 
+        // Convert [UInt8] to Data for storage
+        let data = Data(pixels)
+
         textureLock.lock()
-        pendingFrameBuffer = pixels
+        pendingFrameBuffer = data
+        textureLock.unlock()
+    }
+
+    /// Updates the screen texture with new frame data from Data.
+    ///
+    /// This is an optimized overload that accepts Data directly, avoiding
+    /// an extra copy when frames come from network protocol buffers.
+    ///
+    /// - Parameter data: BGRA pixel data (384 x 240 x 4 bytes) as Data.
+    public func updateTexture(with data: Data) {
+        guard data.count == AtariScreen.bgraBufferSize else {
+            print("MetalRenderer: Invalid pixel buffer size: \(data.count)")
+            return
+        }
+
+        textureLock.lock()
+        // Store Data directly - no copy needed!
+        // Data is copy-on-write, so this just increments a reference count.
+        pendingFrameBuffer = data
         textureLock.unlock()
     }
 
@@ -241,7 +264,7 @@ public class MetalRenderer: NSObject {
     /// Called at the start of each draw to upload any pending frame.
     private func uploadPendingFrame() {
         textureLock.lock()
-        guard let pixels = pendingFrameBuffer else {
+        guard let frameData = pendingFrameBuffer else {
             textureLock.unlock()
             return
         }
@@ -254,7 +277,7 @@ public class MetalRenderer: NSObject {
             size: MTLSize(width: AtariScreen.width, height: AtariScreen.height, depth: 1)
         )
 
-        pixels.withUnsafeBytes { ptr in
+        frameData.withUnsafeBytes { ptr in
             screenTexture.replace(
                 region: region,
                 mipmapLevel: 0,
