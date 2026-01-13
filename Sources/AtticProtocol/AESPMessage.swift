@@ -234,26 +234,30 @@ public struct AESPMessage: Sendable, Equatable {
             )
         }
 
-        // Parse header
-        let magic = UInt16(data[0]) << 8 | UInt16(data[1])
+        // Parse header using withUnsafeBytes to handle Data slices correctly
+        let (magic, version, typeRaw, length): (UInt16, UInt8, UInt8, UInt32) = data.withUnsafeBytes { bytes in
+            let ptr = bytes.bindMemory(to: UInt8.self)
+            let m = UInt16(ptr[0]) << 8 | UInt16(ptr[1])
+            let v = ptr[2]
+            let t = ptr[3]
+            let l = UInt32(ptr[4]) << 24 |
+                    UInt32(ptr[5]) << 16 |
+                    UInt32(ptr[6]) << 8 |
+                    UInt32(ptr[7])
+            return (m, v, t, l)
+        }
+
         guard magic == AESPConstants.magic else {
             throw AESPError.invalidMagic(received: magic)
         }
 
-        let version = data[2]
         guard version == AESPConstants.version else {
             throw AESPError.unsupportedVersion(received: version)
         }
 
-        let typeRaw = data[3]
         guard let type = AESPMessageType(rawValue: typeRaw) else {
             throw AESPError.unknownMessageType(rawValue: typeRaw)
         }
-
-        let length = UInt32(data[4]) << 24 |
-                     UInt32(data[5]) << 16 |
-                     UInt32(data[6]) << 8 |
-                     UInt32(data[7])
 
         guard length <= AESPConstants.maxPayloadSize else {
             throw AESPError.payloadTooLarge(size: length)
@@ -264,10 +268,12 @@ public struct AESPMessage: Sendable, Equatable {
             throw AESPError.insufficientData(expected: totalSize, received: data.count)
         }
 
-        // Extract payload
+        // Extract payload using proper indexing for Data slices
         let payload: Data
         if length > 0 {
-            payload = data.subdata(in: AESPConstants.headerSize..<totalSize)
+            let start = data.startIndex + AESPConstants.headerSize
+            let end = data.startIndex + totalSize
+            payload = data.subdata(in: start..<end)
         } else {
             payload = Data()
         }
@@ -285,20 +291,26 @@ public struct AESPMessage: Sendable, Equatable {
             return nil
         }
 
-        // Verify magic
-        let magic = UInt16(data[0]) << 8 | UInt16(data[1])
-        guard magic == AESPConstants.magic else {
-            return nil
+        // Use withUnsafeBytes for safe access to Data bytes
+        // This avoids issues with Data slices that don't start at index 0
+        return data.withUnsafeBytes { bytes -> Int? in
+            let ptr = bytes.bindMemory(to: UInt8.self)
+
+            // Verify magic
+            let magic = UInt16(ptr[0]) << 8 | UInt16(ptr[1])
+            guard magic == AESPConstants.magic else {
+                return nil
+            }
+
+            // Get payload length
+            let length = UInt32(ptr[4]) << 24 |
+                         UInt32(ptr[5]) << 16 |
+                         UInt32(ptr[6]) << 8 |
+                         UInt32(ptr[7])
+
+            let totalSize = AESPConstants.headerSize + Int(length)
+            return data.count >= totalSize ? totalSize : nil
         }
-
-        // Get payload length
-        let length = UInt32(data[4]) << 24 |
-                     UInt32(data[5]) << 16 |
-                     UInt32(data[6]) << 8 |
-                     UInt32(data[7])
-
-        let totalSize = AESPConstants.headerSize + Int(length)
-        return data.count >= totalSize ? totalSize : nil
     }
 }
 

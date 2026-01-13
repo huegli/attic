@@ -119,21 +119,3 @@ struct EmulatorMetalView: NSViewRepresentable {
     }
 }
 
-// =============================================================================
-// MARK: - AtticViewModel Extension
-// =============================================================================
-
-extension AtticViewModel {
-    /// Sends a new frame to the Metal renderer.
-    ///
-    /// This should be called after each emulation frame to update the display.
-    @MainActor
-    func sendFrameToRenderer(_ renderer: MetalRenderer?) {
-        guard let renderer = renderer else { return }
-
-        Task {
-            let buffer = await emulator.getFrameBuffer()
-            renderer.updateTexture(with: buffer)
-        }
-    }
-}

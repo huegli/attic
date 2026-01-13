@@ -137,10 +137,10 @@ let package = Package(
         // - Metal-based rendering at 60fps
         // - Core Audio output
         // - Keyboard and game controller input
-        // - Unix socket server for CLI communication
+        // - Connects to AtticServer via AESP protocol (or runs embedded)
         .executableTarget(
             name: "AtticGUI",
-            dependencies: ["AtticCore"],
+            dependencies: ["AtticCore", "AtticProtocol"],
             path: "Sources/AtticGUI"
         ),
 

@@ -327,20 +327,17 @@ public actor AESPServer {
         }
     }
 
+    /// Pending client connections that haven't reached .ready state yet.
+    private var pendingClients: [UUID: AESPClientConnection] = [:]
+
     /// Handles a new client connection.
     private func handleNewConnection(_ connection: NWConnection, channel: AESPChannel) {
         let clientId = UUID()
         let client = AESPClientConnection(id: clientId, channel: channel, connection: connection)
 
-        // Store client in appropriate dictionary
-        switch channel {
-        case .control:
-            controlClients[clientId] = client
-        case .video:
-            videoClients[clientId] = client
-        case .audio:
-            audioClients[clientId] = client
-        }
+        // Store in pending clients until connection is ready
+        // This prevents broadcastFrame from sending to connections that aren't established yet
+        pendingClients[clientId] = client
 
         // Set up connection state handler
         connection.stateUpdateHandler = { [weak self] state in
@@ -351,21 +348,31 @@ public actor AESPServer {
 
         // Start the connection
         connection.start(queue: .global(qos: .userInteractive))
-
-        print("[AESPServer] Client \(clientId) connected on \(channel.rawValue) channel")
-
-        // Notify delegate
-        Task {
-            await delegate?.server(self, clientDidConnect: clientId, channel: channel)
-        }
     }
 
     /// Handles connection state changes.
     private func handleConnectionStateChange(_ state: NWConnection.State, clientId: UUID, channel: AESPChannel) {
         switch state {
         case .ready:
-            // Start receiving data
-            Task {
+            // Move from pending to active clients
+            if let client = pendingClients.removeValue(forKey: clientId) {
+                switch channel {
+                case .control:
+                    controlClients[clientId] = client
+                case .video:
+                    videoClients[clientId] = client
+                case .audio:
+                    audioClients[clientId] = client
+                }
+
+                print("[AESPServer] Client \(clientId) connected on \(channel.rawValue) channel")
+
+                // Notify delegate
+                Task {
+                    await delegate?.server(self, clientDidConnect: clientId, channel: channel)
+                }
+
+                // Start receiving data
                 startReceiving(clientId: clientId, channel: channel)
             }
         case .failed(let error):
@@ -471,6 +478,14 @@ public actor AESPServer {
 
     /// Removes a client from tracking.
     private func removeClient(clientId: UUID, channel: AESPChannel) async {
+        // Check if still pending
+        if let client = pendingClients.removeValue(forKey: clientId) {
+            client.connection.cancel()
+            print("[AESPServer] Pending client \(clientId) removed from \(channel.rawValue) channel")
+            return
+        }
+
+        // Remove from active clients
         switch channel {
         case .control:
             if let client = controlClients.removeValue(forKey: clientId) {
@@ -556,6 +571,10 @@ public actor AESPServer {
         frameCounter += 1
 
         #if canImport(Network)
+        // Note: Logging disabled for performance. Uncomment for debugging:
+        // if frameCounter <= 5 || frameCounter % 300 == 0 {
+        //     print("[AESPServer] broadcastFrame \(frameCounter): videoClients=\(videoClients.count)")
+        // }
         guard !videoClients.isEmpty else { return }
 
         let message = AESPMessage.frameRaw(pixels: pixels)

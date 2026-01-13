@@ -461,9 +461,18 @@ AESP enables separating the emulator into a standalone server process, allowing 
 
 ---
 
-## Phase 8: Refactor GUI as Protocol Client
+## Phase 8: Refactor GUI as Protocol Client ✅
+
+**Status:** Complete
 
 **Goal:** AtticGUI becomes a protocol client instead of directly owning EmulatorEngine.
+
+**Implementation Notes:**
+- AtticGUI now supports two operation modes: client (default) and embedded
+- Client mode: Launches AtticServer automatically and connects via AESP protocol
+- Embedded mode: Runs EmulatorEngine directly (for debugging), enabled with `--embedded` flag
+- Frame and audio receivers use AsyncStreams from AESPClient
+- All input (keyboard, console keys) forwarded via protocol in client mode
 
 ### Tasks
 

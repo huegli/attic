@@ -13,12 +13,12 @@ Two cooperating executables:
 
 Both share a common core library (`AtticCore`) containing the emulator wrapper, REPL logic, tokenizers, and file format handlers.
 
-### Server Architecture (Phases 6-8, partially complete)
+### Server Architecture (Phases 6-8, complete)
 
 Four executables with protocol-based communication:
 
 1. **AtticServer** - Standalone emulator server process ✅ (Phase 7 complete)
-2. **AtticGUI** - Protocol client with Metal rendering (Phase 8 pending - currently runs embedded)
+2. **AtticGUI** - Protocol client with Metal rendering ✅ (Phase 8 complete - supports client and embedded modes)
 3. **attic** - Command-line REPL tool (connects via text protocol)
 4. **Web Client** - Browser-based client via WebSocket (Phases 18-19, future)
 
@@ -83,9 +83,9 @@ This separation enables:
                                 └─────────────────┘
 ```
 
-## Future Component Diagram (Post Phase 8)
+## Server Architecture Component Diagram (Phase 8 Complete)
 
-After implementing the Attic Emulator Server Protocol (AESP), the architecture will look like:
+With the Attic Emulator Server Protocol (AESP) implemented, the architecture now supports:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐

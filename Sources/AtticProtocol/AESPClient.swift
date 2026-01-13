@@ -263,14 +263,16 @@ public actor AESPClient {
             // Connect to control channel (always)
             controlConnection = try await createConnection(
                 host: targetHost,
-                port: configuration.controlPort
+                port: configuration.controlPort,
+                channel: .control
             )
 
             // Connect to video channel if requested
             if connectVideo {
                 videoConnection = try await createConnection(
                     host: targetHost,
-                    port: configuration.videoPort
+                    port: configuration.videoPort,
+                    channel: .video
                 )
                 setupVideoStream()
             }
@@ -279,7 +281,8 @@ public actor AESPClient {
             if connectAudio {
                 audioConnection = try await createConnection(
                     host: targetHost,
-                    port: configuration.audioPort
+                    port: configuration.audioPort,
+                    channel: .audio
                 )
                 setupAudioStream()
             }
@@ -338,7 +341,13 @@ public actor AESPClient {
 
     #if canImport(Network)
     /// Creates a connection to the specified host and port.
-    private func createConnection(host: String, port: Int) async throws -> NWConnection {
+    ///
+    /// - Parameters:
+    ///   - host: The host to connect to.
+    ///   - port: The port to connect to.
+    ///   - channel: The channel type (for logging and state management).
+    /// - Returns: The established NWConnection.
+    private func createConnection(host: String, port: Int, channel: AESPChannel) async throws -> NWConnection {
         let endpoint = NWEndpoint.hostPort(
             host: NWEndpoint.Host(host),
             port: NWEndpoint.Port(integerLiteral: UInt16(port))
@@ -349,23 +358,31 @@ public actor AESPClient {
             // Use a thread-safe flag to track whether continuation has been resumed
             let resumeGuard = ContinuationResumeGuard()
 
-            connection.stateUpdateHandler = { [resumeGuard] state in
+            connection.stateUpdateHandler = { [resumeGuard, weak self] state in
                 switch state {
                 case .ready:
                     // Only resume continuation once
                     if resumeGuard.tryResume() {
-                        connection.stateUpdateHandler = nil
+                        // Keep monitoring state for disconnection events
                         continuation.resume(returning: connection)
                     }
                 case .failed(let error):
                     if resumeGuard.tryResume() {
-                        connection.stateUpdateHandler = nil
                         continuation.resume(throwing: error)
+                    } else {
+                        // Connection failed after initial establishment
+                        Task { [weak self] in
+                            await self?.handleDisconnection(channel: channel)
+                        }
                     }
                 case .cancelled:
                     if resumeGuard.tryResume() {
-                        connection.stateUpdateHandler = nil
                         continuation.resume(throwing: AESPError.connectionError("Connection cancelled"))
+                    } else {
+                        // Connection cancelled after initial establishment
+                        Task { [weak self] in
+                            await self?.handleDisconnection(channel: channel)
+                        }
                     }
                 default:
                     break

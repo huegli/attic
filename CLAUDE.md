@@ -50,9 +50,7 @@ See `docs/IMPLEMENTATION_PLAN.md` for detailed phase-by-phase progress. Summary:
 - Phase 1-5: libatari800 wrapper, Metal renderer, Audio engine, Keyboard input, BASIC interaction
 - Phase 6: AESP Protocol Library (AtticProtocol module)
 - Phase 7: Emulator Server (AtticServer executable)
-
-**In Progress:**
-- Phase 8: GUI as Protocol Client (refactor AtticGUI to use AESP)
+- Phase 8: GUI as Protocol Client (AtticGUI connects to AtticServer via AESP)
 
 **Pending:**
 - Phase 9-17: CLI socket protocol, joystick input, 6502 disassembler, monitor mode, ATR filesystem, DOS mode, BASIC tokenizer, state save/load, polish
@@ -104,8 +102,11 @@ swift build
 swift run AtticServer
 swift run AtticServer --rom-path ~/ROMs
 
-# Run GUI (currently standalone, Phase 8 will make it a client)
+# Run GUI in client mode (default - launches AtticServer automatically)
 swift run AtticGUI
+
+# Run GUI in embedded mode (runs emulator directly, for debugging)
+swift run AtticGUI -- --embedded
 
 # Run CLI
 swift run attic --repl

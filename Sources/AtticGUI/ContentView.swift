@@ -188,22 +188,18 @@ struct ControlPanelView: View {
                     key: "F1",
                     isPressed: viewModel.keyboardHandler.startPressed,
                     onPress: {
-                        Task {
-                            await viewModel.emulator.setConsoleKeys(
-                                start: true,
-                                select: viewModel.keyboardHandler.selectPressed,
-                                option: viewModel.keyboardHandler.optionPressed
-                            )
-                        }
+                        viewModel.setConsoleKeys(
+                            start: true,
+                            select: viewModel.keyboardHandler.selectPressed,
+                            option: viewModel.keyboardHandler.optionPressed
+                        )
                     },
                     onRelease: {
-                        Task {
-                            await viewModel.emulator.setConsoleKeys(
-                                start: false,
-                                select: viewModel.keyboardHandler.selectPressed,
-                                option: viewModel.keyboardHandler.optionPressed
-                            )
-                        }
+                        viewModel.setConsoleKeys(
+                            start: false,
+                            select: viewModel.keyboardHandler.selectPressed,
+                            option: viewModel.keyboardHandler.optionPressed
+                        )
                     }
                 )
 
@@ -212,22 +208,18 @@ struct ControlPanelView: View {
                     key: "F2",
                     isPressed: viewModel.keyboardHandler.selectPressed,
                     onPress: {
-                        Task {
-                            await viewModel.emulator.setConsoleKeys(
-                                start: viewModel.keyboardHandler.startPressed,
-                                select: true,
-                                option: viewModel.keyboardHandler.optionPressed
-                            )
-                        }
+                        viewModel.setConsoleKeys(
+                            start: viewModel.keyboardHandler.startPressed,
+                            select: true,
+                            option: viewModel.keyboardHandler.optionPressed
+                        )
                     },
                     onRelease: {
-                        Task {
-                            await viewModel.emulator.setConsoleKeys(
-                                start: viewModel.keyboardHandler.startPressed,
-                                select: false,
-                                option: viewModel.keyboardHandler.optionPressed
-                            )
-                        }
+                        viewModel.setConsoleKeys(
+                            start: viewModel.keyboardHandler.startPressed,
+                            select: false,
+                            option: viewModel.keyboardHandler.optionPressed
+                        )
                     }
                 )
 
@@ -236,22 +228,18 @@ struct ControlPanelView: View {
                     key: "F3",
                     isPressed: viewModel.keyboardHandler.optionPressed,
                     onPress: {
-                        Task {
-                            await viewModel.emulator.setConsoleKeys(
-                                start: viewModel.keyboardHandler.startPressed,
-                                select: viewModel.keyboardHandler.selectPressed,
-                                option: true
-                            )
-                        }
+                        viewModel.setConsoleKeys(
+                            start: viewModel.keyboardHandler.startPressed,
+                            select: viewModel.keyboardHandler.selectPressed,
+                            option: true
+                        )
                     },
                     onRelease: {
-                        Task {
-                            await viewModel.emulator.setConsoleKeys(
-                                start: viewModel.keyboardHandler.startPressed,
-                                select: viewModel.keyboardHandler.selectPressed,
-                                option: false
-                            )
-                        }
+                        viewModel.setConsoleKeys(
+                            start: viewModel.keyboardHandler.startPressed,
+                            select: viewModel.keyboardHandler.selectPressed,
+                            option: false
+                        )
                     }
                 )
             }

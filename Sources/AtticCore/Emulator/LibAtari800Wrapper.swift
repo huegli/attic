@@ -764,6 +764,18 @@ public struct AudioConfiguration: Sendable {
 
     /// Bits per sample (8 or 16).
     public let sampleSize: Int
+
+    /// Creates an audio configuration with the specified parameters.
+    ///
+    /// - Parameters:
+    ///   - sampleRate: Sample rate in Hz (e.g., 44100).
+    ///   - channels: Number of channels (1 for mono, 2 for stereo).
+    ///   - sampleSize: Bytes per sample (1 for 8-bit, 2 for 16-bit).
+    public init(sampleRate: Int, channels: Int, sampleSize: Int) {
+        self.sampleRate = sampleRate
+        self.channels = channels
+        self.sampleSize = sampleSize
+    }
 }
 
 /// Emulator state snapshot for save/restore.

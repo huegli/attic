@@ -5,27 +5,38 @@
 // This is the main entry point for the Attic GUI application.
 // It defines the SwiftUI App struct which creates the main window.
 //
-// The GUI application is responsible for:
-// - Displaying the Atari screen using Metal rendering
-// - Playing audio output
-// - Handling keyboard and game controller input
-// - Providing a Unix socket for CLI communication
+// The GUI application supports two operation modes:
+//
+// 1. **Client Mode (default)**: Connects to AtticServer via AESP protocol.
+//    The server runs as a subprocess and handles all emulation. The GUI
+//    receives video frames and audio samples via the protocol.
+//
+// 2. **Embedded Mode**: Runs the EmulatorEngine directly within the GUI
+//    process. Used for debugging or when server launch fails.
+//    Enabled with --embedded flag.
 //
 // Architecture:
 // The App struct creates a single main window containing the ContentView.
-// The EmulatorEngine is created as a StateObject and passed to child views.
-// This ensures the emulator persists across view updates.
-//
-// macOS App Lifecycle:
-// SwiftUI manages the app lifecycle automatically. Key events:
-// - App launch: The @main attribute marks this as the entry point
-// - Window creation: The WindowGroup creates the main window
-// - App termination: Handled by the system (Cmd-Q or closing window)
+// AtticViewModel manages either the protocol client or embedded emulator.
 //
 // =============================================================================
 
 import SwiftUI
 import AtticCore
+import AtticProtocol
+
+// MARK: - Operation Mode
+
+/// The operation mode for the GUI application.
+enum OperationMode: Sendable {
+    /// Client mode: connects to AtticServer via AESP protocol.
+    /// This is the default mode for normal operation.
+    case client
+
+    /// Embedded mode: runs EmulatorEngine directly in the GUI process.
+    /// Used for debugging or when server launch fails.
+    case embedded
+}
 
 /// The main SwiftUI application for Attic.
 ///
@@ -38,12 +49,37 @@ struct AtticApp: App {
     // MARK: - State
     // =========================================================================
 
-    /// The emulator engine, shared across the app.
+    /// The view model, shared across the app.
     /// Using @StateObject ensures it persists across view updates.
-    @StateObject private var viewModel = AtticViewModel()
+    @StateObject private var viewModel: AtticViewModel
 
     /// App delegate for handling application lifecycle events.
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+
+    // =========================================================================
+    // MARK: - Initialization
+    // =========================================================================
+
+    init() {
+        // Parse command-line arguments to determine operation mode
+        let mode = AtticApp.parseOperationMode()
+        _viewModel = StateObject(wrappedValue: AtticViewModel(mode: mode))
+    }
+
+    /// Parses command-line arguments to determine operation mode.
+    private static func parseOperationMode() -> OperationMode {
+        let arguments = CommandLine.arguments
+
+        // Check for --embedded flag
+        if arguments.contains("--embedded") {
+            print("[AtticGUI] Running in embedded mode")
+            return .embedded
+        }
+
+        // Default to client mode
+        print("[AtticGUI] Running in client mode")
+        return .client
+    }
 
     // =========================================================================
     // MARK: - Body
@@ -102,28 +138,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Called when the app finishes launching.
     func applicationDidFinishLaunching(_ notification: Notification) {
-        print("Attic GUI launched")
+        print("[AtticGUI] Application launched")
 
         // Bring the app to the foreground and make it the active app
         // This ensures our window receives keyboard events instead of the terminal
         NSApp.activate(ignoringOtherApps: true)
-
-        // TODO: Create Unix socket for CLI communication
-        // let socketPath = "/tmp/attic-\(getpid()).sock"
     }
 
     /// Called when the app is about to terminate.
     func applicationWillTerminate(_ notification: Notification) {
-        print("Attic GUI terminating")
-
-        // TODO: Clean up socket
-        // TODO: Save any unsaved state
+        print("[AtticGUI] Application terminating")
+        // Server cleanup is handled by AtticViewModel's deinit
     }
 
     /// Called when a file is opened via Finder (double-click on .atr file).
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
-            print("Open file: \(url.path)")
+            print("[AtticGUI] Open file: \(url.path)")
             // TODO: Mount disk image or load state file
         }
     }
@@ -140,28 +171,36 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
 /// Main view model for the Attic application.
 ///
-/// This class holds the emulator state and provides bindings for the UI.
-/// Using ObservableObject allows SwiftUI to update views when state changes.
+/// This class supports two operation modes:
+/// - **Client mode**: Connects to AtticServer via AESP protocol
+/// - **Embedded mode**: Runs EmulatorEngine directly
 ///
-/// The view model also manages the emulation loop, which runs in a background
-/// task and executes frames at approximately 60fps.
+/// In client mode, the view model:
+/// 1. Launches AtticServer as a subprocess
+/// 2. Connects via AESPClient
+/// 3. Receives video frames via AsyncStream
+/// 4. Receives audio samples via AsyncStream
+/// 5. Sends input via protocol messages
 ///
-/// Architecture:
-/// - EmulatorEngine: Runs the actual emulation (CPU, ANTIC, GTIA, POKEY)
-/// - MetalRenderer: Displays the video output
-/// - AudioEngine: Plays the audio output from POKEY
-/// - KeyboardInputHandler: Maps keyboard events to Atari input
-///
-/// The emulation loop coordinates all components: it runs a frame of emulation,
-/// sends the video frame to the renderer, feeds audio samples to the audio
-/// engine, and applies the current keyboard input state.
+/// In embedded mode, the view model:
+/// 1. Creates and initializes EmulatorEngine directly
+/// 2. Runs an emulation loop that executes frames
+/// 3. Gets frame/audio data directly from the emulator
+/// 4. Sends input directly to the emulator
 ///
 /// Note: @MainActor ensures all UI-related updates happen on the main thread.
 @MainActor
 class AtticViewModel: ObservableObject {
-    /// The emulator engine.
-    /// This is the core emulation that wraps libatari800.
-    let emulator: EmulatorEngine
+    // =========================================================================
+    // MARK: - Mode Configuration
+    // =========================================================================
+
+    /// The current operation mode.
+    let mode: OperationMode
+
+    // =========================================================================
+    // MARK: - Shared Components
+    // =========================================================================
 
     /// The Metal renderer (set by EmulatorMetalView).
     /// This displays the Atari screen using GPU acceleration.
@@ -175,7 +214,35 @@ class AtticViewModel: ObservableObject {
     /// This maps Mac keyboard events to Atari key codes.
     let keyboardHandler: KeyboardInputHandler
 
-    /// Whether the emulator is initialized.
+    // =========================================================================
+    // MARK: - Client Mode Components
+    // =========================================================================
+
+    /// The AESP protocol client (client mode only).
+    private var client: AESPClient?
+
+    /// Task for receiving video frames.
+    private var frameReceiverTask: Task<Void, Never>?
+
+    /// Task for receiving audio samples.
+    private var audioReceiverTask: Task<Void, Never>?
+
+    // =========================================================================
+    // MARK: - Embedded Mode Components
+    // =========================================================================
+
+    /// The emulator engine (embedded mode only).
+    /// This is the core emulation that wraps libatari800.
+    private var emulator: EmulatorEngine?
+
+    /// The emulation loop task (embedded mode only).
+    private var emulationTask: Task<Void, Never>?
+
+    // =========================================================================
+    // MARK: - Published State
+    // =========================================================================
+
+    /// Whether the emulator is initialized/connected.
     @Published var isInitialized: Bool = false
 
     /// Initialization error message, if any.
@@ -200,8 +267,9 @@ class AtticViewModel: ObservableObject {
         }
     }
 
-    /// The emulation loop task.
-    private var emulationTask: Task<Void, Never>?
+    // =========================================================================
+    // MARK: - Internal State
+    // =========================================================================
 
     /// Frame counter for FPS calculation.
     private var frameCounter: Int = 0
@@ -209,25 +277,146 @@ class AtticViewModel: ObservableObject {
     /// Last FPS update time.
     private var lastFPSUpdate: Date = Date()
 
-    /// Creates a new view model.
-    init() {
-        self.emulator = EmulatorEngine()
+    // =========================================================================
+    // MARK: - Initialization
+    // =========================================================================
+
+    /// Creates a new view model with the specified operation mode.
+    ///
+    /// - Parameter mode: The operation mode (client or embedded).
+    init(mode: OperationMode = .client) {
+        self.mode = mode
         self.audioEngine = AudioEngine()
         self.keyboardHandler = KeyboardInputHandler()
+
+        // Only create emulator in embedded mode
+        if mode == .embedded {
+            self.emulator = EmulatorEngine()
+        }
     }
 
-    /// Initializes the emulator with ROMs.
+    /// Initializes the emulator (embedded mode) or connects to server (client mode).
     ///
-    /// This should be called when the view appears. It looks for ROMs
-    /// in the standard locations.
-    ///
-    /// The initialization process:
-    /// 1. Find ROM directory (ATARIXL.ROM, ATARIBAS.ROM)
-    /// 2. Initialize the emulator engine with ROMs
-    /// 3. Configure and start the audio engine
-    /// 4. Start the emulation loop
-    /// 5. Auto-start emulation
+    /// This should be called when the view appears.
     func initializeEmulator() async {
+        switch mode {
+        case .client:
+            await initializeClientMode()
+        case .embedded:
+            await initializeEmbeddedMode()
+        }
+    }
+
+    // =========================================================================
+    // MARK: - Client Mode Initialization
+    // =========================================================================
+
+    /// Initializes client mode by connecting to an existing AtticServer.
+    ///
+    /// The server must be started separately before launching the GUI.
+    /// If no server is running, an error message is displayed.
+    private func initializeClientMode() async {
+        statusMessage = "Connecting to server..."
+
+        do {
+            // Create and connect client to existing server
+            let clientConfig = AESPClientConfiguration(
+                host: "localhost",
+                controlPort: AESPConstants.defaultControlPort,
+                videoPort: AESPConstants.defaultVideoPort,
+                audioPort: AESPConstants.defaultAudioPort
+            )
+            client = AESPClient(configuration: clientConfig)
+
+            try await client?.connect()
+
+            // Subscribe to video and audio streams
+            await client?.subscribeToVideo()
+            await client?.subscribeToAudio()
+
+            // Configure audio engine
+            // libatari800 typically outputs 44100 Hz, 16-bit mono audio
+            let audioConfig = AudioConfiguration(sampleRate: 44100, channels: 1, sampleSize: 2)
+            audioEngine.configure(from: audioConfig)
+
+            // Start audio engine in a background task to avoid blocking
+            // This is a workaround for AVAudioEngine sometimes blocking on start()
+            Task.detached {
+                do {
+                    try self.audioEngine.start()
+                } catch {
+                    print("[AtticGUI] Warning: Failed to start audio: \(error)")
+                }
+            }
+
+            // Start receiving frames and audio
+            startFrameReceiver()
+            startAudioReceiver()
+
+            isInitialized = true
+            isRunning = true
+            statusMessage = "Connected"
+            audioEngine.resume()
+
+            print("[AtticGUI] Connected to server")
+
+        } catch {
+            // No server is running - show error message
+            print("[AtticGUI] Failed to connect to server: \(error)")
+            initializationError = """
+                No AtticServer found on localhost:\(AESPConstants.defaultControlPort)
+
+                Please start the server first:
+                  swift run AtticServer
+
+                Or run in embedded mode:
+                  swift run AtticGUI --embedded
+                """
+            statusMessage = "No Server"
+
+            // Clean up
+            await cleanup()
+        }
+    }
+
+    /// Starts the frame receiver task.
+    private func startFrameReceiver() {
+        frameReceiverTask = Task { [weak self] in
+            guard let self = self, let client = self.client else { return }
+
+            for await frameBuffer in await client.frameStream {
+                // Update renderer on main actor
+                await MainActor.run {
+                    self.renderer?.updateTexture(with: frameBuffer)
+                    self.updateFPS()
+                }
+            }
+        }
+    }
+
+    /// Starts the audio receiver task.
+    private func startAudioReceiver() {
+        audioReceiverTask = Task { [weak self] in
+            guard let self = self, let client = self.client else { return }
+
+            for await samples in await client.audioStream {
+                // Feed samples to audio engine (can be done off main actor)
+                self.audioEngine.enqueueSamplesFromEmulator(bytes: samples)
+            }
+        }
+    }
+
+    // =========================================================================
+    // MARK: - Embedded Mode Initialization
+    // =========================================================================
+
+    /// Initializes embedded mode with direct EmulatorEngine.
+    private func initializeEmbeddedMode() async {
+        guard let emulator = emulator else {
+            initializationError = "Emulator not created"
+            return
+        }
+
         // Try to find ROM directory
         let romPath = findROMPath()
 
@@ -243,19 +432,16 @@ class AtticViewModel: ObservableObject {
             statusMessage = "Ready"
 
             // Configure audio engine to match emulator's output format
-            // libatari800 typically outputs 44100 Hz, 16-bit mono audio
             let audioConfig = await emulator.getAudioConfiguration()
             audioEngine.configure(from: audioConfig)
 
             // Start audio engine
             do {
                 try audioEngine.start()
-                // Note: sampleSize from libatari800 is in bytes (1 or 2), convert to bits
                 let bitsPerSample = audioConfig.sampleSize * 8
-                print("Audio engine started: \(audioConfig.sampleRate) Hz, \(audioConfig.channels) ch, \(bitsPerSample)-bit")
+                print("[AtticGUI] Audio engine started: \(audioConfig.sampleRate) Hz, \(audioConfig.channels) ch, \(bitsPerSample)-bit")
             } catch {
-                // Audio failure is non-fatal - continue without sound
-                print("Warning: Failed to start audio: \(error.localizedDescription)")
+                print("[AtticGUI] Warning: Failed to start audio: \(error.localizedDescription)")
             }
 
             // Start the emulation loop
@@ -268,6 +454,10 @@ class AtticViewModel: ObservableObject {
             statusMessage = "Error"
         }
     }
+
+    // =========================================================================
+    // MARK: - ROM Path Discovery
+    // =========================================================================
 
     /// Finds the ROM directory.
     ///
@@ -296,12 +486,12 @@ class AtticViewModel: ObservableObject {
         for path in searchPaths {
             let osRom = path.appendingPathComponent("ATARIXL.ROM")
             if fileManager.fileExists(atPath: osRom.path) {
-                print("Found ROMs at: \(path.path)")
+                print("[AtticGUI] Found ROMs at: \(path.path)")
                 return path
             }
         }
 
-        print("ROM search paths tried:")
+        print("[AtticGUI] ROM search paths tried:")
         for path in searchPaths {
             print("  - \(path.path)")
         }
@@ -309,37 +499,66 @@ class AtticViewModel: ObservableObject {
         return nil
     }
 
-    /// Starts the emulator.
-    ///
-    /// This resumes both the emulation and the audio output.
+    // =========================================================================
+    // MARK: - Control Methods
+    // =========================================================================
+
+    /// Starts/resumes the emulator.
     func start() async {
         guard isInitialized else { return }
-        await emulator.resume()
-        audioEngine.resume()
-        isRunning = true
-        statusMessage = "Running"
+
+        switch mode {
+        case .client:
+            await client?.resume()
+            audioEngine.resume()
+            isRunning = true
+            statusMessage = "Running"
+
+        case .embedded:
+            guard let emulator = emulator else { return }
+            await emulator.resume()
+            audioEngine.resume()
+            isRunning = true
+            statusMessage = "Running"
+        }
     }
 
     /// Pauses the emulator.
-    ///
-    /// This pauses both the emulation and the audio output.
-    /// The audio buffer is preserved so playback can resume smoothly.
     func pause() async {
-        await emulator.pause()
-        audioEngine.pause()
-        isRunning = false
-        statusMessage = "Paused"
+        switch mode {
+        case .client:
+            await client?.pause()
+            audioEngine.pause()
+            isRunning = false
+            statusMessage = "Paused"
+
+        case .embedded:
+            guard let emulator = emulator else { return }
+            await emulator.pause()
+            audioEngine.pause()
+            isRunning = false
+            statusMessage = "Paused"
+        }
     }
 
-    /// Performs a cold reset.
+    /// Performs a reset.
     ///
-    /// This clears the audio buffer to prevent old audio from playing
-    /// after the reset.
-    func reset() async {
-        await emulator.reset(cold: true)
-        audioEngine.clearBuffer()
-        keyboardHandler.reset()
-        statusMessage = "Reset"
+    /// - Parameter cold: If true, performs a cold reset (power cycle).
+    func reset(cold: Bool = true) async {
+        switch mode {
+        case .client:
+            await client?.reset(cold: cold)
+            audioEngine.clearBuffer()
+            keyboardHandler.reset()
+            statusMessage = cold ? "Cold Reset" : "Warm Reset"
+
+        case .embedded:
+            guard let emulator = emulator else { return }
+            await emulator.reset(cold: cold)
+            audioEngine.clearBuffer()
+            keyboardHandler.reset()
+            statusMessage = cold ? "Cold Reset" : "Warm Reset"
+        }
     }
 
     // =========================================================================
@@ -347,10 +566,6 @@ class AtticViewModel: ObservableObject {
     // =========================================================================
 
     /// Handles a key down event from the keyboard.
-    ///
-    /// Converts the Mac key event to Atari input and sends it to the emulator.
-    ///
-    /// - Parameter event: The NSEvent for the key press.
     func handleKeyDown(_ event: NSEvent) {
         let shift = event.modifierFlags.contains(.shift)
         let control = event.modifierFlags.contains(.control)
@@ -370,53 +585,50 @@ class AtticViewModel: ObservableObject {
             shift: shift,
             control: control
         ) {
-            // Send to emulator
+            // Send to emulator/server based on mode
             Task {
-                await emulator.pressKey(
-                    keyChar: keyChar,
-                    keyCode: keyCode,
-                    shift: atariShift,
-                    control: atariControl
-                )
+                switch mode {
+                case .client:
+                    await client?.sendKeyDown(
+                        keyChar: keyChar,
+                        keyCode: keyCode,
+                        shift: atariShift,
+                        control: atariControl
+                    )
+                case .embedded:
+                    await emulator?.pressKey(
+                        keyChar: keyChar,
+                        keyCode: keyCode,
+                        shift: atariShift,
+                        control: atariControl
+                    )
+                }
             }
         }
 
         // Update console keys
-        let consoleKeys = keyboardHandler.getConsoleKeys()
-        Task {
-            await emulator.setConsoleKeys(
-                start: consoleKeys.start,
-                select: consoleKeys.select,
-                option: consoleKeys.option
-            )
-        }
+        sendConsoleKeys()
     }
 
     /// Handles a key up event from the keyboard.
-    ///
-    /// - Parameter event: The NSEvent for the key release.
     func handleKeyUp(_ event: NSEvent) {
         if keyboardHandler.keyUp(keyCode: event.keyCode) {
-            // Release the key in the emulator
+            // Release the key
             Task {
-                await emulator.releaseKey()
+                switch mode {
+                case .client:
+                    await client?.sendKeyUp()
+                case .embedded:
+                    await emulator?.releaseKey()
+                }
             }
         }
 
         // Update console keys (in case F1/F2/F3 was released)
-        let consoleKeys = keyboardHandler.getConsoleKeys()
-        Task {
-            await emulator.setConsoleKeys(
-                start: consoleKeys.start,
-                select: consoleKeys.select,
-                option: consoleKeys.option
-            )
-        }
+        sendConsoleKeys()
     }
 
     /// Handles modifier flags changes (Shift, Control, etc.).
-    ///
-    /// - Parameter event: The NSEvent for the modifier change.
     func handleFlagsChanged(_ event: NSEvent) {
         keyboardHandler.updateModifiers(
             shift: event.modifierFlags.contains(.shift),
@@ -426,63 +638,83 @@ class AtticViewModel: ObservableObject {
         )
     }
 
+    /// Sends current console key states.
+    func sendConsoleKeys() {
+        let consoleKeys = keyboardHandler.getConsoleKeys()
+        Task {
+            switch mode {
+            case .client:
+                await client?.sendConsoleKeys(
+                    start: consoleKeys.start,
+                    select: consoleKeys.select,
+                    option: consoleKeys.option
+                )
+            case .embedded:
+                await emulator?.setConsoleKeys(
+                    start: consoleKeys.start,
+                    select: consoleKeys.select,
+                    option: consoleKeys.option
+                )
+            }
+        }
+    }
+
+    /// Sends console key states (for button presses).
+    func setConsoleKeys(start: Bool, select: Bool, option: Bool) {
+        Task {
+            switch mode {
+            case .client:
+                await client?.sendConsoleKeys(
+                    start: start,
+                    select: select,
+                    option: option
+                )
+            case .embedded:
+                await emulator?.setConsoleKeys(
+                    start: start,
+                    select: select,
+                    option: option
+                )
+            }
+        }
+    }
+
     // =========================================================================
-    // MARK: - Emulation Loop
+    // MARK: - Emulation Loop (Embedded Mode Only)
     // =========================================================================
 
-    /// Starts the emulation loop.
-    ///
-    /// The emulation loop runs as a Task and executes frames at approximately
-    /// 60fps. Each frame:
-    /// 1. Executes one frame of emulation
-    /// 2. Gets the frame buffer
-    /// 3. Updates the Metal texture
-    /// 4. Updates the FPS counter
+    /// Starts the emulation loop (embedded mode only).
     private func startEmulationLoop() {
+        guard mode == .embedded else { return }
         emulationTask = Task { [weak self] in
             await self?.emulationLoop()
         }
     }
 
-    /// The main emulation loop.
-    ///
-    /// This runs at approximately 60fps (the Atari's native frame rate).
-    /// Each iteration:
-    /// 1. Executes one frame of emulation (CPU, ANTIC, GTIA, POKEY)
-    /// 2. Sends the video frame to the Metal renderer
-    /// 3. Sends audio samples to the audio engine
-    /// 4. Updates the FPS counter
-    /// 5. Sleeps to maintain proper timing
-    ///
-    /// The Atari 800 XL uses NTSC timing, which is approximately 59.94 Hz.
-    /// We target 60 fps for simplicity, which is close enough.
+    /// The main emulation loop (embedded mode only).
     private func emulationLoop() async {
+        guard let emulator = emulator else { return }
+
         // Target 60fps = 16.67ms per frame
         let targetFrameTime: UInt64 = 16_666_667  // nanoseconds
 
         while !Task.isCancelled {
             let frameStart = DispatchTime.now().uptimeNanoseconds
 
-            // Check if we should be running (we're on main actor)
             if isRunning {
                 // Execute one frame
-                // This runs the 6502 CPU and all hardware for one video frame
-                // (~29780 CPU cycles for NTSC)
                 let result = await emulator.executeFrame()
 
                 // Get frame buffer and update renderer
-                // The frame buffer is 384x240 pixels in BGRA format
                 let frameBuffer = await emulator.getFrameBuffer()
 
                 // Get audio samples and feed to audio engine
-                // libatari800 generates audio samples during executeFrame()
-                // We use getAudioSamples() which returns a Sendable [UInt8] array
                 let audioSamples = await emulator.getAudioSamples()
                 if !audioSamples.isEmpty {
                     audioEngine.enqueueSamplesFromEmulator(bytes: audioSamples)
                 }
 
-                // Update UI (already on main actor)
+                // Update UI
                 renderer?.updateTexture(with: frameBuffer)
                 updateFPS()
 
@@ -526,23 +758,36 @@ class AtticViewModel: ObservableObject {
         }
     }
 
-    /// Stops the emulation loop.
-    ///
-    /// This also stops the audio engine to prevent any lingering audio output.
-    func stopEmulationLoop() {
+    // =========================================================================
+    // MARK: - Cleanup
+    // =========================================================================
+
+    /// Cleans up resources.
+    private func cleanup() async {
+        // Cancel receiver tasks
+        frameReceiverTask?.cancel()
+        audioReceiverTask?.cancel()
+        frameReceiverTask = nil
+        audioReceiverTask = nil
+
+        // Disconnect client
+        await client?.disconnect()
+        client = nil
+
+        // Cancel emulation task
         emulationTask?.cancel()
         emulationTask = nil
+
+        // Stop audio
         audioEngine.stop()
     }
 
     /// Called to clean up when the view model is deallocated.
-    ///
-    /// Note: deinit is nonisolated in Swift, so we can only perform
-    /// simple cleanup here. We cancel the task directly rather than
-    /// calling stopEmulationLoop() which requires actor isolation.
     deinit {
+        // Cancel tasks synchronously
+        frameReceiverTask?.cancel()
+        audioReceiverTask?.cancel()
         emulationTask?.cancel()
-        // Note: audioEngine.stop() is called in AudioEngine's deinit
     }
 }
 
@@ -551,9 +796,6 @@ class AtticViewModel: ObservableObject {
 // =============================================================================
 
 /// Custom menu commands for the Attic application.
-///
-/// This struct defines additional menu items that appear in the menu bar.
-/// SwiftUI's Commands API allows adding to or replacing standard menu items.
 struct AtticCommands: Commands {
     @ObservedObject var viewModel: AtticViewModel
 
@@ -594,14 +836,20 @@ struct AtticCommands: Commands {
             Divider()
 
             Button("Reset (Cold)") {
-                Task { await viewModel.reset() }
+                Task { await viewModel.reset(cold: true) }
             }
             .keyboardShortcut("R", modifiers: [.command, .shift])
 
             Button("Reset (Warm)") {
-                Task { await viewModel.emulator.reset(cold: false) }
+                Task { await viewModel.reset(cold: false) }
             }
             .keyboardShortcut("R", modifiers: [.command, .option])
+
+            Divider()
+
+            // Show current mode
+            Text("Mode: \(viewModel.mode == .client ? "Client" : "Embedded")")
+                .foregroundColor(.secondary)
         }
 
         // View menu additions
@@ -625,3 +873,4 @@ struct AtticCommands: Commands {
         }
     }
 }
+
