@@ -41,7 +41,7 @@ This separation enables:
 | 5 | Input Handling | ✅ Complete (Keyboard only, joystick deferred) |
 | 6 | AESP Protocol Library | ✅ Complete |
 | 7 | Emulator Server | ✅ Complete |
-| 8 | GUI as Protocol Client | Pending |
+| 8 | GUI as Protocol Client | ✅ Complete |
 | 9-17 | REPL, Debugging, BASIC | Pending |
 | 18-19 | Web Browser Support | Pending |
 
