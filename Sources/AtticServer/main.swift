@@ -6,10 +6,16 @@
 // emulation and broadcasts video frames and audio samples via the Attic
 // Emulator Server Protocol (AESP).
 //
-// The server listens on three ports:
-// - Control (47800): Commands, status, memory access, input events
-// - Video (47801): Frame broadcasts to subscribed clients
-// - Audio (47802): Audio sample broadcasts to subscribed clients
+// The server provides two protocol interfaces:
+//
+// 1. AESP (Binary Protocol) - For GUI/web clients
+//    - Control (47800): Commands, status, memory access, input events
+//    - Video (47801): Frame broadcasts to subscribed clients
+//    - Audio (47802): Audio sample broadcasts to subscribed clients
+//
+// 2. CLI Protocol (Text Protocol) - For CLI/Emacs integration
+//    - Unix socket at /tmp/attic-<pid>.sock
+//    - Text-based commands for REPL interaction
 //
 // Usage:
 //   AtticServer [options]
@@ -19,11 +25,15 @@
 //   --control-port <n>   Control port (default: 47800)
 //   --video-port <n>     Video port (default: 47801)
 //   --audio-port <n>     Audio port (default: 47802)
+//   --socket-path <p>    Unix socket path (default: /tmp/attic-<pid>.sock)
+//   --no-cli-socket      Disable CLI socket server
 //   --silent             Disable audio generation
 //   --help               Show usage information
 //
 // Clients can connect using the AESPClient from the AtticProtocol module,
 // or any implementation that speaks the AESP binary protocol.
+//
+// CLI clients connect via the Unix socket using the text protocol.
 //
 // =============================================================================
 
@@ -39,6 +49,8 @@ struct ServerConfiguration {
     var controlPort: Int = AESPConstants.defaultControlPort
     var videoPort: Int = AESPConstants.defaultVideoPort
     var audioPort: Int = AESPConstants.defaultAudioPort
+    var socketPath: String? = nil  // nil means use default /tmp/attic-<pid>.sock
+    var enableCLISocket: Bool = true
     var silent: Bool = false
     var showHelp: Bool = false
 
@@ -75,6 +87,15 @@ struct ServerConfiguration {
                     config.audioPort = port
                 }
 
+            case "--socket-path":
+                index += 1
+                if index < arguments.count {
+                    config.socketPath = arguments[index]
+                }
+
+            case "--no-cli-socket":
+                config.enableCLISocket = false
+
             case "--silent":
                 config.silent = true
 
@@ -104,12 +125,17 @@ struct ServerConfiguration {
           --control-port <n>   Control port (default: 47800)
           --video-port <n>     Video port (default: 47801)
           --audio-port <n>     Audio port (default: 47802)
+          --socket-path <p>    Unix socket path for CLI protocol
+                               (default: /tmp/attic-<pid>.sock)
+          --no-cli-socket      Disable CLI socket server
           --silent             Disable audio generation
           --help, -h           Show this help message
 
         The server broadcasts video frames and audio samples to connected clients.
         Use AESPClient to connect from Swift applications, or implement the AESP
         binary protocol for other languages.
+
+        CLI clients can connect via the Unix socket using the text-based CLI protocol.
 
         Example:
           AtticServer --rom-path ~/ROMs --control-port 47800
@@ -253,6 +279,244 @@ final class ServerDelegate: AESPServerDelegate, @unchecked Sendable {
     }
 }
 
+// MARK: - CLI Socket Server Delegate
+
+/// Handles incoming CLI protocol commands from CLI clients.
+///
+/// This delegate implements the text-based CLI protocol, translating CLI commands
+/// into emulator operations and returning formatted responses.
+final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
+    /// Reference to the emulator engine.
+    private let emulator: EmulatorEngine
+
+    /// Reference to the CLI socket server for sending events.
+    private weak var cliServer: CLISocketServer?
+
+    /// Lock for thread-safe access.
+    private let lock = NSLock()
+
+    init(emulator: EmulatorEngine) {
+        self.emulator = emulator
+    }
+
+    /// Sets the CLI server reference for sending async events.
+    func setServer(_ server: CLISocketServer) {
+        cliServer = server
+    }
+
+    func server(
+        _ server: CLISocketServer,
+        didReceiveCommand command: CLICommand,
+        from clientId: UUID
+    ) async -> CLIResponse {
+        switch command {
+        // Connection commands
+        case .ping:
+            return .ok("pong")
+
+        case .version:
+            return .ok(CLIProtocolConstants.protocolVersion)
+
+        case .quit:
+            return .ok("goodbye")
+
+        case .shutdown:
+            // Signal shutdown (handled in main loop)
+            return .ok("shutting down")
+
+        // Emulator control
+        case .pause:
+            await emulator.pause()
+            return .ok("paused")
+
+        case .resume:
+            await emulator.resume()
+            return .ok("resumed")
+
+        case .step(let count):
+            // Execute frames (libatari800 steps by frames, not instructions)
+            for _ in 0..<count {
+                let result = await emulator.executeFrame()
+                if result == .breakpoint {
+                    let regs = await emulator.getRegisters()
+                    return .ok("stepped \(formatRegisters(regs))\n* Breakpoint hit at $\(String(format: "%04X", regs.pc))")
+                }
+            }
+            let regs = await emulator.getRegisters()
+            return .ok("stepped \(formatRegisters(regs))")
+
+        case .reset(let cold):
+            await emulator.reset(cold: cold)
+            return .ok("reset \(cold ? "cold" : "warm")")
+
+        case .status:
+            return await formatStatus()
+
+        // Memory operations
+        case .read(let address, let count):
+            let bytes = await emulator.readMemoryBlock(at: address, count: Int(count))
+            let hexBytes = bytes.map { String(format: "%02X", $0) }.joined(separator: ",")
+            return .ok("data \(hexBytes)")
+
+        case .write(let address, let data):
+            await emulator.writeMemoryBlock(at: address, bytes: data)
+            return .ok("written \(data.count)")
+
+        case .registers(let modifications):
+            if let mods = modifications {
+                var regs = await emulator.getRegisters()
+                for (regName, value) in mods {
+                    switch regName.uppercased() {
+                    case "A": regs.a = UInt8(value & 0xFF)
+                    case "X": regs.x = UInt8(value & 0xFF)
+                    case "Y": regs.y = UInt8(value & 0xFF)
+                    case "S": regs.s = UInt8(value & 0xFF)
+                    case "P": regs.p = UInt8(value & 0xFF)
+                    case "PC": regs.pc = value
+                    default: break
+                    }
+                }
+                await emulator.setRegisters(regs)
+            }
+            let regs = await emulator.getRegisters()
+            return .ok(formatRegisters(regs))
+
+        // Breakpoints
+        case .breakpointSet(let address):
+            if await emulator.setBreakpoint(at: address) {
+                return .ok("breakpoint set $\(String(format: "%04X", address))")
+            } else {
+                return .error("Breakpoint already set at $\(String(format: "%04X", address))")
+            }
+
+        case .breakpointClear(let address):
+            if await emulator.clearBreakpoint(at: address) {
+                return .ok("breakpoint cleared $\(String(format: "%04X", address))")
+            } else {
+                return .error("No breakpoint at $\(String(format: "%04X", address))")
+            }
+
+        case .breakpointClearAll:
+            await emulator.clearAllBreakpoints()
+            return .ok("breakpoints cleared")
+
+        case .breakpointList:
+            let bps = await emulator.getBreakpoints()
+            if bps.isEmpty {
+                return .ok("breakpoints (none)")
+            }
+            let bpStrs = bps.map { "$\(String(format: "%04X", $0))" }.joined(separator: ",")
+            return .ok("breakpoints \(bpStrs)")
+
+        // Disk operations
+        case .mount(let drive, let path):
+            // Check if file exists
+            guard FileManager.default.fileExists(atPath: path) else {
+                return .error("File not found '\(path)'")
+            }
+            if await emulator.mountDisk(drive: drive, path: path, readOnly: false) {
+                return .ok("mounted \(drive) \(path)")
+            } else {
+                return .error("Failed to mount '\(path)'")
+            }
+
+        case .unmount(let drive):
+            await emulator.unmountDisk(drive: drive)
+            return .ok("unmounted \(drive)")
+
+        case .drives:
+            // TODO: Get mounted drives from emulator
+            return .ok("drives (none)")
+
+        // State management
+        case .stateSave(let path):
+            do {
+                try await emulator.saveState(to: URL(fileURLWithPath: path))
+                return .ok("state saved \(path)")
+            } catch {
+                return .error(error.localizedDescription)
+            }
+
+        case .stateLoad(let path):
+            guard FileManager.default.fileExists(atPath: path) else {
+                return .error("File not found '\(path)'")
+            }
+            do {
+                try await emulator.loadState(from: URL(fileURLWithPath: path))
+                return .ok("state loaded \(path)")
+            } catch {
+                return .error(error.localizedDescription)
+            }
+
+        // Display
+        case .screenshot(let path):
+            // TODO: Implement screenshot capture
+            let actualPath = path ?? "~/Desktop/Attic-\(Date()).png"
+            return .ok("screenshot \(actualPath)")
+
+        // BASIC injection
+        case .injectBasic(let base64Data):
+            // TODO: Implement BASIC injection
+            guard Data(base64Encoded: base64Data) != nil else {
+                return .error("Invalid base64 data")
+            }
+            return .ok("injected basic (not yet implemented)")
+
+        case .injectKeys(let text):
+            // TODO: Implement keyboard injection
+            return .ok("injected keys \(text.count)")
+        }
+    }
+
+    func server(_ server: CLISocketServer, clientDidConnect clientId: UUID) async {
+        print("[CLISocket] Client connected: \(clientId)")
+    }
+
+    func server(_ server: CLISocketServer, clientDidDisconnect clientId: UUID) async {
+        print("[CLISocket] Client disconnected: \(clientId)")
+    }
+
+    // MARK: - Helper Methods
+
+    /// Formats CPU registers for response.
+    private func formatRegisters(_ regs: CPURegisters) -> String {
+        "A=$\(String(format: "%02X", regs.a)) X=$\(String(format: "%02X", regs.x)) Y=$\(String(format: "%02X", regs.y)) S=$\(String(format: "%02X", regs.s)) P=$\(String(format: "%02X", regs.p)) PC=$\(String(format: "%04X", regs.pc))"
+    }
+
+    /// Formats emulator status for response.
+    private func formatStatus() async -> CLIResponse {
+        let state = await emulator.state
+        let regs = await emulator.getRegisters()
+        let bps = await emulator.getBreakpoints()
+
+        var status = ""
+        switch state {
+        case .running:
+            status += "running"
+        case .paused:
+            status += "paused"
+        case .breakpoint(let addr):
+            status += "breakpoint $\(String(format: "%04X", addr))"
+        case .uninitialized:
+            status += "uninitialized"
+        }
+
+        status += " PC=$\(String(format: "%04X", regs.pc))"
+
+        // TODO: Add disk mount status (D1=..., D2=..., etc.)
+        status += " D1=(none) D2=(none)"
+
+        if bps.isEmpty {
+            status += " BP=(none)"
+        } else {
+            let bpStrs = bps.map { "$\(String(format: "%04X", $0))" }.joined(separator: ",")
+            status += " BP=\(bpStrs)"
+        }
+
+        return .ok("status \(status)")
+    }
+}
+
 // MARK: - Main Entry Point
 
 @main
@@ -306,20 +570,46 @@ struct AtticServer {
             audioPort: config.audioPort
         )
 
-        // Create and start server
+        // Create and start AESP server
         let server = AESPServer(configuration: serverConfig)
         let delegate = ServerDelegate(emulator: emulator)
         await server.setDelegate(delegate)
 
         do {
             try await server.start()
-            print("Server listening on:")
+            print("AESP server listening on:")
             print("  Control: localhost:\(config.controlPort)")
             print("  Video:   localhost:\(config.videoPort)")
             print("  Audio:   localhost:\(config.audioPort)")
         } catch {
-            print("Error starting server: \(error)")
+            print("Error starting AESP server: \(error)")
             return
+        }
+
+        // Create and start CLI socket server (if enabled)
+        var cliServer: CLISocketServer?
+        var cliDelegate: CLIServerDelegate?
+
+        if config.enableCLISocket {
+            let socketPath = config.socketPath ?? CLIProtocolConstants.currentSocketPath
+            cliServer = CLISocketServer(socketPath: socketPath)
+            cliDelegate = CLIServerDelegate(emulator: emulator)
+
+            if let server = cliServer, let del = cliDelegate {
+                del.setServer(server)
+                await server.delegate = del
+
+                do {
+                    try await server.start()
+                    print("CLI socket server listening on:")
+                    print("  Socket: \(socketPath)")
+                } catch {
+                    print("Warning: Failed to start CLI socket server: \(error)")
+                    // Continue without CLI socket - AESP is still available
+                    cliServer = nil
+                    cliDelegate = nil
+                }
+            }
         }
 
         // Start emulation
@@ -375,8 +665,17 @@ struct AtticServer {
         }
 
         // Shutdown
-        print("Stopping server...")
+        print("Stopping servers...")
+
+        // Stop CLI socket server first
+        if let cliServer = cliServer {
+            await cliServer.stop()
+        }
+
+        // Stop AESP server
         await server.stop()
+
+        // Shutdown emulator
         await emulator.pause()
         await emulator.shutdown()
         print("Server stopped")

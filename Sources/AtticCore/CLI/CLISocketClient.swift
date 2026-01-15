@@ -1,0 +1,552 @@
+// =============================================================================
+// CLISocketClient.swift - Unix Socket Client for CLI Protocol
+// =============================================================================
+//
+// This file implements a Unix domain socket client that connects to AtticServer
+// via the CLI text protocol. The client:
+//
+// - Discovers running AtticServer instances via /tmp/attic-*.sock
+// - Connects to the server socket
+// - Sends text commands and receives responses
+// - Handles async events from the server
+//
+// Usage:
+//
+//     let client = CLISocketClient()
+//
+//     // Discover and connect to an existing server
+//     if let socketPath = client.discoverSocket() {
+//         try await client.connect(to: socketPath)
+//     }
+//
+//     // Or connect to a specific socket
+//     try await client.connect(to: "/tmp/attic-12345.sock")
+//
+//     // Send commands
+//     let response = try await client.send(.pause)
+//
+//     // Disconnect
+//     await client.disconnect()
+//
+// =============================================================================
+
+import Foundation
+
+#if canImport(Darwin)
+import Darwin
+#else
+import Glibc
+#endif
+
+// =============================================================================
+// MARK: - CLI Socket Client Delegate
+// =============================================================================
+
+/// Protocol for receiving async events from the server.
+///
+/// Implement this protocol to handle events like breakpoint hits or errors
+/// that arrive asynchronously while the emulator is running.
+public protocol CLISocketClientDelegate: AnyObject, Sendable {
+    /// Called when an async event is received from the server.
+    ///
+    /// - Parameters:
+    ///   - client: The client that received the event.
+    ///   - event: The received event.
+    func client(_ client: CLISocketClient, didReceiveEvent event: CLIEvent) async
+
+    /// Called when the connection to the server is lost.
+    ///
+    /// - Parameters:
+    ///   - client: The client.
+    ///   - error: The error that caused the disconnection, if any.
+    func client(_ client: CLISocketClient, didDisconnectWithError error: Error?) async
+}
+
+// =============================================================================
+// MARK: - CLI Socket Client
+// =============================================================================
+
+/// A Unix domain socket client for connecting to AtticServer.
+///
+/// This client implements the CLI text protocol for sending commands to the
+/// emulator server and receiving responses. It also handles async events
+/// like breakpoint notifications.
+///
+/// Thread Safety:
+/// The client uses an actor to ensure thread-safe access to its state.
+/// All public methods are async and can be safely called from any context.
+///
+public actor CLISocketClient {
+    // =========================================================================
+    // MARK: - Properties
+    // =========================================================================
+
+    /// The delegate for receiving async events.
+    public weak var delegate: CLISocketClientDelegate?
+
+    /// The socket file descriptor.
+    private var socket: Int32 = -1
+
+    /// Whether the client is connected.
+    private(set) public var isConnected: Bool = false
+
+    /// Path to the connected socket.
+    private var connectedPath: String?
+
+    /// Command parser (for building commands).
+    private let commandParser = CLICommandParser()
+
+    /// Response parser.
+    private let responseParser = CLIResponseParser()
+
+    /// Background task for reading events.
+    private var eventReaderTask: Task<Void, Never>?
+
+    /// Pending response (for synchronous request/response).
+    private var pendingResponse: CheckedContinuation<CLIResponse, Error>?
+
+    /// Read buffer for partial data.
+    private var readBuffer = Data()
+
+    // =========================================================================
+    // MARK: - Initialization
+    // =========================================================================
+
+    /// Creates a new CLI socket client.
+    public init() {}
+
+    deinit {
+        if socket >= 0 {
+            close(socket)
+        }
+    }
+
+    // =========================================================================
+    // MARK: - Socket Discovery
+    // =========================================================================
+
+    /// Discovers available AtticServer sockets.
+    ///
+    /// Scans /tmp for attic-*.sock files and returns the paths of valid sockets.
+    /// Sockets are sorted by modification time (most recent first).
+    ///
+    /// - Returns: Array of socket paths, or empty if none found.
+    public nonisolated func discoverSockets() -> [String] {
+        let fileManager = FileManager.default
+        let tmpPath = "/tmp"
+
+        guard let files = try? fileManager.contentsOfDirectory(atPath: tmpPath) else {
+            return []
+        }
+
+        var sockets: [(path: String, modified: Date)] = []
+
+        for file in files {
+            if file.hasPrefix("attic-") && file.hasSuffix(".sock") {
+                let fullPath = (tmpPath as NSString).appendingPathComponent(file)
+
+                // Check if socket exists and get modification time
+                if let attrs = try? fileManager.attributesOfItem(atPath: fullPath),
+                   let modified = attrs[.modificationDate] as? Date {
+                    sockets.append((path: fullPath, modified: modified))
+                }
+            }
+        }
+
+        // Sort by modification time (most recent first)
+        sockets.sort { $0.modified > $1.modified }
+
+        return sockets.map { $0.path }
+    }
+
+    /// Discovers the most recently active AtticServer socket.
+    ///
+    /// - Returns: Path to the socket, or nil if none found.
+    public nonisolated func discoverSocket() -> String? {
+        discoverSockets().first
+    }
+
+    // =========================================================================
+    // MARK: - Connection
+    // =========================================================================
+
+    /// Connects to an AtticServer socket.
+    ///
+    /// - Parameter path: Path to the Unix socket.
+    /// - Throws: CLIProtocolError if connection fails.
+    public func connect(to path: String) async throws {
+        guard !isConnected else {
+            throw CLIProtocolError.connectionFailed("Already connected")
+        }
+
+        // Create Unix domain socket
+        socket = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+        guard socket >= 0 else {
+            throw CLIProtocolError.connectionFailed("Failed to create socket: \(errno)")
+        }
+
+        // Build address structure
+        var addr = sockaddr_un()
+        addr.sun_family = sa_family_t(AF_UNIX)
+
+        let pathBytes = path.utf8CString
+        withUnsafeMutablePointer(to: &addr.sun_path) { sunPathPtr in
+            let rawPtr = UnsafeMutableRawPointer(sunPathPtr)
+            let destPtr = rawPtr.assumingMemoryBound(to: CChar.self)
+            for (i, byte) in pathBytes.enumerated() {
+                if i < MemoryLayout.size(ofValue: addr.sun_path) - 1 {
+                    destPtr[i] = byte
+                }
+            }
+        }
+
+        // Connect to server
+        let connectResult = withUnsafePointer(to: &addr) { addrPtr in
+            addrPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
+                Darwin.connect(socket, sockaddrPtr, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+
+        guard connectResult == 0 else {
+            Darwin.close(socket)
+            socket = -1
+            throw CLIProtocolError.connectionFailed("Failed to connect: \(errno)")
+        }
+
+        isConnected = true
+        connectedPath = path
+        readBuffer = Data()
+
+        // Start event reader task
+        eventReaderTask = Task { [weak self] in
+            await self?.eventReaderLoop()
+        }
+
+        // Verify connection with ping
+        do {
+            let response = try await send(.ping)
+            guard case .ok(let data) = response, data == "pong" else {
+                await disconnect()
+                throw CLIProtocolError.connectionFailed("Server ping failed")
+            }
+        } catch {
+            await disconnect()
+            throw error
+        }
+
+        print("[CLIClient] Connected to \(path)")
+    }
+
+    /// Disconnects from the server.
+    public func disconnect() async {
+        guard isConnected else { return }
+
+        isConnected = false
+
+        // Cancel event reader
+        eventReaderTask?.cancel()
+        eventReaderTask = nil
+
+        // Cancel pending response
+        if let continuation = pendingResponse {
+            pendingResponse = nil
+            continuation.resume(throwing: CLIProtocolError.connectionFailed("Disconnected"))
+        }
+
+        // Close socket
+        if socket >= 0 {
+            Darwin.close(socket)
+            socket = -1
+        }
+
+        connectedPath = nil
+        print("[CLIClient] Disconnected")
+    }
+
+    // =========================================================================
+    // MARK: - Command Sending
+    // =========================================================================
+
+    /// Sends a command to the server and waits for a response.
+    ///
+    /// - Parameter command: The command to send.
+    /// - Returns: The server's response.
+    /// - Throws: CLIProtocolError if sending fails or times out.
+    public func send(_ command: CLICommand) async throws -> CLIResponse {
+        guard isConnected else {
+            throw CLIProtocolError.connectionFailed("Not connected")
+        }
+
+        // Format command
+        let commandStr = formatCommand(command)
+        let line = "\(CLIProtocolConstants.commandPrefix)\(commandStr)\n"
+
+        guard let data = line.data(using: .utf8) else {
+            throw CLIProtocolError.connectionFailed("Failed to encode command")
+        }
+
+        // Send command
+        let bytesSent = data.withUnsafeBytes { ptr in
+            write(socket, ptr.baseAddress, data.count)
+        }
+
+        guard bytesSent == data.count else {
+            throw CLIProtocolError.connectionFailed("Failed to send command: \(errno)")
+        }
+
+        // Wait for response with timeout
+        return try await withCheckedThrowingContinuation { continuation in
+            Task {
+                await self.setPendingResponse(continuation)
+
+                // Set up timeout
+                try? await Task.sleep(nanoseconds: UInt64(CLIProtocolConstants.commandTimeout * 1_000_000_000))
+
+                // If still pending after timeout, fail
+                if await self.cancelPendingResponse(continuation) {
+                    continuation.resume(throwing: CLIProtocolError.timeout)
+                }
+            }
+        }
+    }
+
+    /// Sends a raw command string to the server.
+    ///
+    /// - Parameter commandLine: The raw command line (without CMD: prefix).
+    /// - Returns: The server's response.
+    /// - Throws: CLIProtocolError if sending fails.
+    public func sendRaw(_ commandLine: String) async throws -> CLIResponse {
+        guard isConnected else {
+            throw CLIProtocolError.connectionFailed("Not connected")
+        }
+
+        let line = "\(CLIProtocolConstants.commandPrefix)\(commandLine)\n"
+
+        guard let data = line.data(using: .utf8) else {
+            throw CLIProtocolError.connectionFailed("Failed to encode command")
+        }
+
+        let bytesSent = data.withUnsafeBytes { ptr in
+            write(socket, ptr.baseAddress, data.count)
+        }
+
+        guard bytesSent == data.count else {
+            throw CLIProtocolError.connectionFailed("Failed to send command: \(errno)")
+        }
+
+        // Wait for response
+        return try await withCheckedThrowingContinuation { continuation in
+            Task {
+                await self.setPendingResponse(continuation)
+
+                try? await Task.sleep(nanoseconds: UInt64(CLIProtocolConstants.commandTimeout * 1_000_000_000))
+
+                if await self.cancelPendingResponse(continuation) {
+                    continuation.resume(throwing: CLIProtocolError.timeout)
+                }
+            }
+        }
+    }
+
+    // =========================================================================
+    // MARK: - Private Implementation
+    // =========================================================================
+
+    /// Formats a command for transmission.
+    private func formatCommand(_ command: CLICommand) -> String {
+        switch command {
+        case .ping:
+            return "ping"
+        case .version:
+            return "version"
+        case .quit:
+            return "quit"
+        case .shutdown:
+            return "shutdown"
+        case .pause:
+            return "pause"
+        case .resume:
+            return "resume"
+        case .step(let count):
+            return count == 1 ? "step" : "step \(count)"
+        case .reset(let cold):
+            return cold ? "reset cold" : "reset warm"
+        case .status:
+            return "status"
+        case .read(let address, let count):
+            return "read $\(String(format: "%04X", address)) \(count)"
+        case .write(let address, let data):
+            let hexBytes = data.map { String(format: "%02X", $0) }.joined(separator: ",")
+            return "write $\(String(format: "%04X", address)) \(hexBytes)"
+        case .registers(let modifications):
+            if let mods = modifications {
+                let modStrs = mods.map { "\($0.0)=$\(String(format: "%04X", $0.1))" }
+                return "registers \(modStrs.joined(separator: " "))"
+            }
+            return "registers"
+        case .breakpointSet(let address):
+            return "breakpoint set $\(String(format: "%04X", address))"
+        case .breakpointClear(let address):
+            return "breakpoint clear $\(String(format: "%04X", address))"
+        case .breakpointClearAll:
+            return "breakpoint clearall"
+        case .breakpointList:
+            return "breakpoint list"
+        case .mount(let drive, let path):
+            return "mount \(drive) \(path)"
+        case .unmount(let drive):
+            return "unmount \(drive)"
+        case .drives:
+            return "drives"
+        case .stateSave(let path):
+            return "state save \(path)"
+        case .stateLoad(let path):
+            return "state load \(path)"
+        case .screenshot(let path):
+            if let path = path {
+                return "screenshot \(path)"
+            }
+            return "screenshot"
+        case .injectBasic(let base64Data):
+            return "inject basic \(base64Data)"
+        case .injectKeys(let text):
+            // Escape special characters
+            let escaped = text
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "\n", with: "\\n")
+                .replacingOccurrences(of: "\t", with: "\\t")
+                .replacingOccurrences(of: "\r", with: "\\r")
+            return "inject keys \(escaped)"
+        }
+    }
+
+    /// Event reader loop - reads responses and events from the server.
+    private func eventReaderLoop() async {
+        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: 4096)
+        defer { buffer.deallocate() }
+
+        while isConnected && !Task.isCancelled {
+            // Use select with timeout to allow cancellation checks
+            var readSet = fd_set()
+            fdZero(&readSet)
+            fdSet(socket, &readSet)
+
+            var timeout = timeval(tv_sec: 1, tv_usec: 0)
+            let selectResult = select(socket + 1, &readSet, nil, nil, &timeout)
+
+            if selectResult < 0 {
+                // Error
+                await handleDisconnect(error: CLIProtocolError.connectionFailed("Read error: \(errno)"))
+                break
+            } else if selectResult == 0 {
+                // Timeout, continue
+                continue
+            }
+
+            // Read from socket
+            let bytesRead = read(socket, buffer, 4096)
+            if bytesRead <= 0 {
+                // EOF or error
+                await handleDisconnect(error: bytesRead == 0 ? nil : CLIProtocolError.connectionFailed("Read error"))
+                break
+            }
+
+            // Append to buffer
+            readBuffer.append(buffer, count: bytesRead)
+
+            // Process complete lines
+            while let newlineIndex = readBuffer.firstIndex(of: 0x0A) {
+                let lineData = readBuffer[..<newlineIndex]
+                readBuffer = Data(readBuffer[readBuffer.index(after: newlineIndex)...])
+
+                if let line = String(data: lineData, encoding: .utf8) {
+                    await processLine(line)
+                }
+            }
+        }
+    }
+
+    /// Processes a received line.
+    private func processLine(_ line: String) async {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        do {
+            let parsed = try responseParser.parse(trimmed)
+
+            switch parsed {
+            case .response(let response):
+                // Complete pending request
+                if let continuation = pendingResponse {
+                    pendingResponse = nil
+                    continuation.resume(returning: response)
+                }
+
+            case .event(let event):
+                // Notify delegate
+                await delegate?.client(self, didReceiveEvent: event)
+            }
+        } catch {
+            // Parse error - log but don't fail
+            print("[CLIClient] Failed to parse response: \(error)")
+        }
+    }
+
+    /// Handles disconnection.
+    private func handleDisconnect(error: Error?) async {
+        guard isConnected else { return }
+
+        isConnected = false
+
+        if let continuation = pendingResponse {
+            pendingResponse = nil
+            continuation.resume(throwing: error ?? CLIProtocolError.connectionFailed("Disconnected"))
+        }
+
+        await delegate?.client(self, didDisconnectWithError: error)
+    }
+
+    /// Sets the pending response continuation.
+    private func setPendingResponse(_ continuation: CheckedContinuation<CLIResponse, Error>) {
+        pendingResponse = continuation
+    }
+
+    /// Cancels the pending response if it matches.
+    private func cancelPendingResponse(_ continuation: CheckedContinuation<CLIResponse, Error>) -> Bool {
+        if pendingResponse != nil {
+            pendingResponse = nil
+            return true
+        }
+        return false
+    }
+}
+
+// =============================================================================
+// MARK: - fd_set Helpers (Duplicated for client module)
+// =============================================================================
+
+/// Clears an fd_set.
+private func fdZero(_ set: inout fd_set) {
+    #if canImport(Darwin)
+    withUnsafeMutablePointer(to: &set) { ptr in
+        memset(ptr, 0, MemoryLayout<fd_set>.size)
+    }
+    #else
+    __FD_ZERO(&set)
+    #endif
+}
+
+/// Adds a file descriptor to an fd_set.
+private func fdSet(_ fd: Int32, _ set: inout fd_set) {
+    #if canImport(Darwin)
+    let intOffset = Int(fd) / 32
+    let bitOffset = Int(fd) % 32
+    withUnsafeMutablePointer(to: &set) { ptr in
+        let rawPtr = UnsafeMutableRawPointer(ptr)
+        let arrayPtr = rawPtr.assumingMemoryBound(to: Int32.self)
+        arrayPtr[intOffset] |= Int32(1 << bitOffset)
+    }
+    #else
+    __FD_SET(fd, &set)
+    #endif
+}
