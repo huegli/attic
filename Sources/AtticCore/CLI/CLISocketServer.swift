@@ -101,6 +101,13 @@ public actor CLISocketServer {
     /// The delegate for handling commands.
     public weak var delegate: CLISocketServerDelegate?
 
+    /// Sets the delegate for handling commands.
+    /// This method is required because actor-isolated properties cannot be
+    /// directly set from outside the actor context.
+    public func setDelegate(_ delegate: CLISocketServerDelegate?) {
+        self.delegate = delegate
+    }
+
     /// The socket file descriptor.
     private var serverSocket: Int32 = -1
 
@@ -172,11 +179,12 @@ public actor CLISocketServer {
 
         // Copy path to sun_path
         let pathBytes = socketPath.utf8CString
+        let sunPathSize = MemoryLayout.size(ofValue: addr.sun_path)
         withUnsafeMutablePointer(to: &addr.sun_path) { sunPathPtr in
             let rawPtr = UnsafeMutableRawPointer(sunPathPtr)
             let destPtr = rawPtr.assumingMemoryBound(to: CChar.self)
             for (i, byte) in pathBytes.enumerated() {
-                if i < MemoryLayout.size(ofValue: addr.sun_path) - 1 {
+                if i < sunPathSize - 1 {
                     destPtr[i] = byte
                 }
             }
@@ -324,16 +332,17 @@ public actor CLISocketServer {
 
             // Create client ID and add to list
             let clientId = UUID()
-            await addClient(clientId, socket: clientSocket)
+            addClient(clientId, socket: clientSocket)
 
             // Notify delegate
             await delegate?.server(self, clientDidConnect: clientId)
 
             // Start reading from client in background task
             let task = Task { [weak self] in
-                await self?.clientReadLoop(clientId: clientId, socket: clientSocket)
+                guard let self = self else { return }
+                await self.clientReadLoop(clientId: clientId, socket: clientSocket)
             }
-            await setClientTask(clientId, task: task)
+            setClientTask(clientId, task: task)
 
             print("[CLISocket] Client connected: \(clientId)")
         }
@@ -381,7 +390,7 @@ public actor CLISocketServer {
         }
 
         // Client disconnected
-        await removeClient(clientId)
+        removeClient(clientId)
         close(clientSocket)
         await delegate?.server(self, clientDidDisconnect: clientId)
         print("[CLISocket] Client disconnected: \(clientId)")
@@ -445,7 +454,7 @@ public actor CLISocketServer {
 private func fdZero(_ set: inout fd_set) {
     #if canImport(Darwin)
     // macOS: __darwin_fd_set is an array of Int32
-    withUnsafeMutablePointer(to: &set) { ptr in
+    _ = withUnsafeMutablePointer(to: &set) { ptr in
         memset(ptr, 0, MemoryLayout<fd_set>.size)
     }
     #else

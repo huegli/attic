@@ -502,13 +502,14 @@ func printHelp(mode: SocketREPLMode) {
 // =============================================================================
 
 /// The global socket client for CLI communication.
-var socketClient: CLISocketClient?
+/// Uses @MainActor for thread-safety as the CLI runs on the main actor.
+@MainActor var socketClient: CLISocketClient?
 
 /// Connects to AtticServer via Unix socket.
 ///
 /// - Parameter path: Path to the Unix socket.
 /// - Returns: True if connection successful.
-func connectToSocket(path: String) async -> Bool {
+@MainActor func connectToSocket(path: String) async -> Bool {
     let client = CLISocketClient()
 
     do {

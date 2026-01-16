@@ -597,7 +597,7 @@ struct AtticServer {
 
             if let server = cliServer, let del = cliDelegate {
                 del.setServer(server)
-                await server.delegate = del
+                await server.setDelegate(del)
 
                 do {
                     try await server.start()

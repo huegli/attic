@@ -190,11 +190,12 @@ public actor CLISocketClient {
         addr.sun_family = sa_family_t(AF_UNIX)
 
         let pathBytes = path.utf8CString
+        let sunPathSize = MemoryLayout.size(ofValue: addr.sun_path)
         withUnsafeMutablePointer(to: &addr.sun_path) { sunPathPtr in
             let rawPtr = UnsafeMutableRawPointer(sunPathPtr)
             let destPtr = rawPtr.assumingMemoryBound(to: CChar.self)
             for (i, byte) in pathBytes.enumerated() {
-                if i < MemoryLayout.size(ofValue: addr.sun_path) - 1 {
+                if i < sunPathSize - 1 {
                     destPtr[i] = byte
                 }
             }
@@ -528,7 +529,7 @@ public actor CLISocketClient {
 /// Clears an fd_set.
 private func fdZero(_ set: inout fd_set) {
     #if canImport(Darwin)
-    withUnsafeMutablePointer(to: &set) { ptr in
+    _ = withUnsafeMutablePointer(to: &set) { ptr in
         memset(ptr, 0, MemoryLayout<fd_set>.size)
     }
     #else
