@@ -584,52 +584,90 @@ AESP enables separating the emulator into a standalone server process, allowing 
 
 ---
 
-## Phase 9: CLI Socket Protocol
+## Phase 9: CLI Socket Protocol ✅
 
-**Goal:** CLI can communicate with GUI via text-based protocol for REPL.
+**Status:** Complete
 
-**Note:** This is the existing CLI/GUI communication for the Emacs REPL interface, separate from AESP. AESP is binary and optimized for video/audio; this protocol is text-based for debugging commands.
+**Goal:** CLI can communicate with AtticServer via text-based protocol for REPL.
+
+**Note:** This protocol enables communication between the CLI tool and AtticServer for Emacs REPL integration. It is separate from AESP (the binary protocol for video/audio streaming). The CLI connects directly to AtticServer, not through the GUI.
+
+### Implementation Notes
+
+**Architecture:**
+- CLI connects directly to AtticServer via Unix socket at `/tmp/attic-<pid>.sock`
+- Text-based protocol: `CMD:<command>\n` → `OK:<response>\n` or `ERR:<message>\n`
+- Async events: `EVENT:<type> <data>\n`
+- Multi-line responses use `\x1E` (Record Separator) as delimiter
+
+**Key Files Created:**
+- `Sources/AtticCore/CLI/CLIProtocol.swift` - Protocol types, command parser, response builder
+- `Sources/AtticCore/CLI/CLISocketServer.swift` - Unix socket server actor for AtticServer
+- `Sources/AtticCore/CLI/CLISocketClient.swift` - Unix socket client for AtticCLI
+
+**Features Implemented:**
+- Full command set: ping, pause, resume, step, reset, status
+- Memory operations: read, write, registers
+- Breakpoints: set, clear, clearall, list
+- Disk operations: mount, unmount, drives
+- State management: save, load
+- Socket discovery: scans `/tmp/attic-*.sock`
+- Server launch: CLI can spawn AtticServer if not running
+
+**Protocol Commands:**
+| Command | Description |
+|---------|-------------|
+| `ping` | Connection test, returns `OK:pong` |
+| `pause` | Pause emulation |
+| `resume` | Resume emulation |
+| `step [n]` | Step n frames (default: 1) |
+| `reset cold/warm` | Reset emulator |
+| `status` | Get emulator status |
+| `read $XXXX count` | Read memory bytes |
+| `write $XXXX XX,XX,...` | Write memory bytes |
+| `registers [A=$XX ...]` | Get/set CPU registers |
+| `breakpoint set/clear/list` | Manage breakpoints |
+| `mount n path` | Mount disk image |
+| `state save/load path` | Save/load state |
 
 ### Tasks
 
-1. **SocketServer (GUI side)**
-   ```swift
-   class SocketServer {
-       func start() throws -> URL  // Returns socket path
-       func accept() -> SocketClient
-       func close()
-   }
-   ```
+1. **CLISocketServer (AtticServer side)** ✅
+   - Unix socket listener at `/tmp/attic-<pid>.sock`
+   - Handles multiple CLI connections
+   - Executes commands against EmulatorEngine
+   - Sends async events (breakpoints, errors)
 
-2. **SocketClient (CLI side)**
-   ```swift
-   class SocketClient {
-       func connect(to path: URL) throws
-       func send(_ command: String) throws
-       func receive() throws -> String
-       func close()
-   }
-   ```
+2. **CLISocketClient (CLI side)** ✅
+   - Discovers sockets via `/tmp/attic-*.sock`
+   - Connects and sends commands
+   - Receives responses and events
+   - Handles connection lifecycle
 
-3. **Protocol implementation**
-   - Command parsing
-   - Response formatting
-   - Async event handling
+3. **Protocol implementation** ✅
+   - CLICommandParser parses text commands
+   - CLIResponse formats success/error responses
+   - CLIEvent handles async notifications
 
-4. **GUI launch from CLI**
-   - Subprocess management
-   - Socket discovery
+4. **Server launch from CLI** ✅
+   - Discovers running AtticServer via socket scan
+   - Launches AtticServer if not found
+   - Waits for socket to appear with retry
 
 ### Testing
 
-- CLI connects to running GUI
-- Commands execute correctly
-- Events delivered
+- ✅ CLI connects to running AtticServer
+- ✅ Commands execute and return correct responses
+- ✅ Server auto-launch when no socket found
+- ✅ Socket discovery works with multiple servers
 
 ### Deliverables
 
-- CLI and GUI communicate
-- Basic commands work (ping, pause, resume)
+- ✅ CLI and AtticServer communicate via text protocol
+- ✅ All control commands work (ping, pause, resume, reset, status)
+- ✅ Memory operations work (read, write, registers)
+- ✅ Breakpoint management works
+- ✅ Socket discovery and server launch
 
 ---
 
@@ -1097,7 +1135,7 @@ This is the final phase, implementing a complete web frontend that connects to A
 | 6 | AESP Protocol Library | ✅ Complete |
 | 7 | Emulator Server | ✅ Complete |
 | 8 | GUI as Protocol Client | ✅ Complete |
-| 9 | CLI Socket Protocol | Pending |
+| 9 | CLI Socket Protocol | ✅ Complete |
 | 10 | 6502 Disassembler | Pending |
 | 11 | Monitor Mode | Pending |
 | 12 | ATR File System | Pending |
@@ -1165,7 +1203,7 @@ Phase 11 (Monitor)           Phase 13 (DOS)
 |-----------|--------|-------------|--------|
 | M1 | 1-5 | Playable emulator with GUI | ✅ Complete (keyboard input, joystick deferred) |
 | M2 | 6-8 | Emulator/GUI separation | ✅ Complete |
-| M3 | 9-11 | Debugging via Emacs | Pending |
+| M3 | 9-11 | Debugging via Emacs | In Progress (Phase 9 complete) |
 | M4 | 12-15 | Full REPL functionality | Pending |
 | M5 | 16-17 | Production native release | Pending |
 | M6 | 18-19 | Web browser support | Pending |
