@@ -81,6 +81,9 @@ public enum Command: Sendable {
     /// Step instructions (s [count])
     case step(count: Int)
 
+    /// Step over subroutine (so)
+    case stepOver
+
     /// Pause execution (pause)
     case pause
 
@@ -334,53 +337,254 @@ public struct CommandParser {
     }
 
     // =========================================================================
-    // MARK: - Monitor Command Parsing (Stub)
+    // MARK: - Monitor Command Parsing
     // =========================================================================
 
     private func parseMonitorCommand(_ input: String) throws -> Command {
-        let parts = input.split(separator: " ")
+        let parts = input.split(separator: " ", maxSplits: 1)
         guard let first = parts.first else {
             throw AtticError.invalidCommand(input, suggestion: nil)
         }
 
         let command = String(first).lowercased()
+        let argsString = parts.count > 1 ? String(parts[1]) : ""
 
-        // Stub implementation - full parsing will be implemented in Phase 8
         switch command {
+        // Execution control
         case "g":
-            return .go(address: nil)
+            return try parseGo(argsString)
         case "s":
-            let count = parts.count > 1 ? Int(parts[1]) ?? 1 : 1
-            return .step(count: count)
+            return try parseStepMonitor(argsString)
+        case "so":
+            return .stepOver
         case "pause":
             return .pause
+        case "until":
+            return try parseUntil(argsString)
+
+        // Registers
         case "r":
-            return .registers(modifications: nil)
+            return try parseRegistersMonitor(argsString)
+
+        // Memory
+        case "m":
+            return try parseMemoryDump(argsString)
+        case ">":
+            return try parseMemoryWriteMonitor(argsString)
+        case "f":
+            return try parseMemoryFillMonitor(argsString)
+
+        // Disassembly
         case "d":
-            return .disassemble(address: nil, lines: 16)
+            return try parseDisassembleMonitor(argsString)
+
+        // Assembly
+        case "a":
+            return try parseAssembleMonitor(argsString)
+
+        // Breakpoints
         case "bp":
-            if parts.count > 1 {
-                if let addr = parseAddress(String(parts[1])) {
-                    return .breakpointSet(address: addr)
-                }
-            }
-            return .breakpointList
+            return try parseBreakpointSetOrList(argsString)
         case "bc":
-            if parts.count > 1 {
-                if parts[1] == "*" {
-                    return .breakpointClearAll
-                }
-                if let addr = parseAddress(String(parts[1])) {
-                    return .breakpointClear(address: addr)
-                }
-            }
-            throw AtticError.invalidCommand("bc", suggestion: "Usage: bc <address> or bc *")
+            return try parseBreakpointClear(argsString)
+
         default:
             throw AtticError.invalidCommand(
                 command,
-                suggestion: "Unknown monitor command. Type .help for available commands."
+                suggestion: "Unknown monitor command. Commands: g, s, so, pause, until, r, m, >, f, d, a, bp, bc"
             )
         }
+    }
+
+    // MARK: - Monitor Command Helpers
+
+    private func parseGo(_ args: String) throws -> Command {
+        if args.isEmpty {
+            return .go(address: nil)
+        }
+        guard let address = parseAddress(args) else {
+            throw AtticError.invalidCommand("g \(args)", suggestion: "Invalid address. Use: g [$address]")
+        }
+        return .go(address: address)
+    }
+
+    private func parseStepMonitor(_ args: String) throws -> Command {
+        if args.isEmpty {
+            return .step(count: 1)
+        }
+        guard let count = Int(args), count > 0 else {
+            throw AtticError.invalidCommand("s \(args)", suggestion: "Invalid count. Use: s [count]")
+        }
+        return .step(count: count)
+    }
+
+    private func parseUntil(_ args: String) throws -> Command {
+        guard !args.isEmpty else {
+            throw AtticError.invalidCommand("until", suggestion: "Usage: until <address>")
+        }
+        guard let address = parseAddress(args) else {
+            throw AtticError.invalidCommand("until \(args)", suggestion: "Invalid address")
+        }
+        return .runUntil(address: address)
+    }
+
+    private func parseRegistersMonitor(_ args: String) throws -> Command {
+        if args.isEmpty {
+            return .registers(modifications: nil)
+        }
+
+        // Parse register assignments like "A=$50 X=$10 PC=$0600"
+        var modifications: [(String, UInt16)] = []
+        let assignments = args.split(separator: " ")
+
+        for assignment in assignments {
+            let parts = assignment.split(separator: "=", maxSplits: 1)
+            guard parts.count == 2 else {
+                throw AtticError.invalidCommand("r \(args)", suggestion: "Use format: r A=$XX X=$XX")
+            }
+
+            let regName = String(parts[0]).uppercased()
+            guard ["A", "X", "Y", "S", "P", "PC"].contains(regName) else {
+                throw AtticError.invalidCommand("r \(args)", suggestion: "Valid registers: A, X, Y, S, P, PC")
+            }
+
+            guard let value = parseAddress(String(parts[1])) else {
+                throw AtticError.invalidCommand("r \(args)", suggestion: "Invalid value for \(regName)")
+            }
+
+            modifications.append((regName, value))
+        }
+
+        return .registers(modifications: modifications)
+    }
+
+    private func parseMemoryDump(_ args: String) throws -> Command {
+        let parts = args.split(separator: " ", omittingEmptySubsequences: true)
+        guard !parts.isEmpty else {
+            throw AtticError.invalidCommand("m", suggestion: "Usage: m <address> [length]")
+        }
+
+        guard let address = parseAddress(String(parts[0])) else {
+            throw AtticError.invalidCommand("m \(args)", suggestion: "Invalid address")
+        }
+
+        let length = parts.count > 1 ? (Int(parts[1]) ?? 64) : 64
+        return .memoryDump(address: address, length: length)
+    }
+
+    private func parseMemoryWriteMonitor(_ args: String) throws -> Command {
+        let parts = args.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+        guard parts.count == 2 else {
+            throw AtticError.invalidCommand("> \(args)", suggestion: "Usage: > <address> <bytes>")
+        }
+
+        guard let address = parseAddress(String(parts[0])) else {
+            throw AtticError.invalidCommand("> \(args)", suggestion: "Invalid address")
+        }
+
+        // Parse bytes (space or comma separated, with optional $ prefix)
+        let bytesStr = String(parts[1])
+        var bytes: [UInt8] = []
+
+        let byteStrs = bytesStr.split { $0 == " " || $0 == "," }
+        for byteStr in byteStrs {
+            var str = String(byteStr).trimmingCharacters(in: .whitespaces)
+            if str.hasPrefix("$") {
+                str = String(str.dropFirst())
+            }
+            guard let byte = UInt8(str, radix: 16) else {
+                throw AtticError.invalidCommand("> \(args)", suggestion: "Invalid byte value: \(byteStr)")
+            }
+            bytes.append(byte)
+        }
+
+        guard !bytes.isEmpty else {
+            throw AtticError.invalidCommand("> \(args)", suggestion: "No bytes specified")
+        }
+
+        return .memoryWrite(address: address, bytes: bytes)
+    }
+
+    private func parseMemoryFillMonitor(_ args: String) throws -> Command {
+        let parts = args.split(separator: " ", omittingEmptySubsequences: true)
+        guard parts.count >= 3 else {
+            throw AtticError.invalidCommand("f \(args)", suggestion: "Usage: f <start> <end> <value>")
+        }
+
+        guard let start = parseAddress(String(parts[0])) else {
+            throw AtticError.invalidCommand("f \(args)", suggestion: "Invalid start address")
+        }
+
+        guard let end = parseAddress(String(parts[1])) else {
+            throw AtticError.invalidCommand("f \(args)", suggestion: "Invalid end address")
+        }
+
+        var valueStr = String(parts[2])
+        if valueStr.hasPrefix("$") {
+            valueStr = String(valueStr.dropFirst())
+        }
+        guard let value = UInt8(valueStr, radix: 16) else {
+            throw AtticError.invalidCommand("f \(args)", suggestion: "Invalid fill value")
+        }
+
+        return .memoryFill(start: start, end: end, value: value)
+    }
+
+    private func parseDisassembleMonitor(_ args: String) throws -> Command {
+        let parts = args.split(separator: " ", omittingEmptySubsequences: true)
+
+        var address: UInt16? = nil
+        var lines: Int = 16
+
+        if !parts.isEmpty {
+            address = parseAddress(String(parts[0]))
+        }
+
+        if parts.count > 1, let l = Int(parts[1]) {
+            lines = l
+        }
+
+        return .disassemble(address: address, lines: lines)
+    }
+
+    private func parseAssembleMonitor(_ args: String) throws -> Command {
+        guard !args.isEmpty else {
+            throw AtticError.invalidCommand("a", suggestion: "Usage: a <address>")
+        }
+
+        guard let address = parseAddress(args.trimmingCharacters(in: .whitespaces)) else {
+            throw AtticError.invalidCommand("a \(args)", suggestion: "Invalid address")
+        }
+
+        return .assemble(address: address)
+    }
+
+    private func parseBreakpointSetOrList(_ args: String) throws -> Command {
+        if args.isEmpty {
+            return .breakpointList
+        }
+
+        guard let address = parseAddress(args) else {
+            throw AtticError.invalidCommand("bp \(args)", suggestion: "Invalid address")
+        }
+
+        return .breakpointSet(address: address)
+    }
+
+    private func parseBreakpointClear(_ args: String) throws -> Command {
+        guard !args.isEmpty else {
+            throw AtticError.invalidCommand("bc", suggestion: "Usage: bc <address> or bc *")
+        }
+
+        if args == "*" {
+            return .breakpointClearAll
+        }
+
+        guard let address = parseAddress(args) else {
+            throw AtticError.invalidCommand("bc \(args)", suggestion: "Invalid address")
+        }
+
+        return .breakpointClear(address: address)
     }
 
     // =========================================================================

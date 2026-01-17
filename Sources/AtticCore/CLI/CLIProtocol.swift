@@ -121,6 +121,22 @@ public enum CLICommand: Sendable, Equatable {
     case breakpointClearAll
     case breakpointList
 
+    // Disassembly
+    case disassemble(address: UInt16?, lines: Int)
+
+    // Assembly
+    case assemble(address: UInt16)
+    case assembleLine(address: UInt16, instruction: String)
+
+    // Step over
+    case stepOver
+
+    // Run until
+    case runUntil(address: UInt16)
+
+    // Memory fill
+    case memoryFill(start: UInt16, end: UInt16, value: UInt8)
+
     // Disk operations
     case mount(drive: Int, path: String)
     case unmount(drive: Int)
@@ -274,6 +290,26 @@ public struct CLICommandParser: Sendable {
         // Breakpoints
         case "breakpoint":
             return try parseBreakpoint(argsString)
+
+        // Disassembly
+        case "disasm", "disassemble", "d":
+            return try parseDisassemble(argsString)
+
+        // Assembly
+        case "asm", "assemble", "a":
+            return try parseAssemble(argsString)
+
+        // Step over
+        case "stepover", "so":
+            return .stepOver
+
+        // Run until
+        case "until", "rununtil":
+            return try parseRunUntil(argsString)
+
+        // Memory fill
+        case "fill":
+            return try parseFill(argsString)
 
         // Disk operations
         case "mount":
@@ -432,6 +468,78 @@ public struct CLICommandParser: Sendable {
         default:
             throw CLIProtocolError.invalidCommand("breakpoint \(subcommand)")
         }
+    }
+
+    private func parseDisassemble(_ args: String) throws -> CLICommand {
+        let parts = args.split(separator: " ", omittingEmptySubsequences: true)
+
+        var address: UInt16? = nil
+        var lines: Int = 16
+
+        if parts.count >= 1 {
+            // First argument is address
+            address = parseAddress(String(parts[0]))
+        }
+
+        if parts.count >= 2 {
+            // Second argument is line count
+            lines = Int(parts[1]) ?? 16
+        }
+
+        return .disassemble(address: address, lines: lines)
+    }
+
+    private func parseAssemble(_ args: String) throws -> CLICommand {
+        let parts = args.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+        guard !parts.isEmpty else {
+            throw CLIProtocolError.missingArgument("assemble requires address")
+        }
+
+        guard let address = parseAddress(String(parts[0])) else {
+            throw CLIProtocolError.invalidAddress(String(parts[0]))
+        }
+
+        // If there's an instruction on the same line, it's a single-line assembly
+        if parts.count > 1 {
+            let instruction = String(parts[1])
+            return .assembleLine(address: address, instruction: instruction)
+        }
+
+        // Otherwise, start interactive assembly mode
+        return .assemble(address: address)
+    }
+
+    private func parseRunUntil(_ args: String) throws -> CLICommand {
+        guard !args.isEmpty else {
+            throw CLIProtocolError.missingArgument("until requires address")
+        }
+
+        guard let address = parseAddress(args.trimmingCharacters(in: .whitespaces)) else {
+            throw CLIProtocolError.invalidAddress(args)
+        }
+
+        return .runUntil(address: address)
+    }
+
+    private func parseFill(_ args: String) throws -> CLICommand {
+        let parts = args.split(separator: " ", omittingEmptySubsequences: true)
+        guard parts.count >= 3 else {
+            throw CLIProtocolError.missingArgument("fill requires start, end, and value")
+        }
+
+        guard let start = parseAddress(String(parts[0])) else {
+            throw CLIProtocolError.invalidAddress(String(parts[0]))
+        }
+
+        guard let end = parseAddress(String(parts[1])) else {
+            throw CLIProtocolError.invalidAddress(String(parts[1]))
+        }
+
+        guard let value = parseHexByte(String(parts[2])) else {
+            throw CLIProtocolError.invalidByte(String(parts[2]))
+        }
+
+        return .memoryFill(start: start, end: end, value: value)
     }
 
     private func parseMount(_ args: String) throws -> CLICommand {

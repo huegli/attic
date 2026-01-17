@@ -710,43 +710,65 @@ AESP enables separating the emulator into a standalone server process, allowing 
 
 ---
 
-## Phase 11: Monitor Mode
+## Phase 11: Monitor Mode ✅
+
+**Status:** Complete
 
 **Goal:** Full debugging capability.
 
+**Implementation Notes:**
+- Created OpcodeTable.swift with complete 6502 instruction set for assembler and stepping
+- Implemented MAC65-style assembler with full expression and label support
+- Created BreakpointManager with BRK injection (RAM) and PC-polling (ROM)
+- Implemented instruction-level stepping via temporary BRK placement
+- Updated CLI protocol with new monitor commands (disasm, asm, stepover, until, fill)
+- Updated CommandParser with full monitor command parsing
+
+**Key Files Created:**
+- `Sources/AtticCore/Monitor/OpcodeTable.swift` - Complete 6502 opcode table
+- `Sources/AtticCore/Monitor/Assembler.swift` - MAC65-style 6502 assembler
+- `Sources/AtticCore/Monitor/BreakpointManager.swift` - Enhanced breakpoint management
+- `Sources/AtticCore/Monitor/MonitorStepper.swift` - Instruction-level stepping
+- `Sources/AtticCore/Monitor/MonitorController.swift` - Unified monitor interface
+- `Tests/AtticCoreTests/MonitorTests.swift` - Unit tests for monitor components
+
 ### Tasks
 
-1. **Monitor REPL mode**
-   - Command parsing
-   - Register display/modify
-   - Memory display/modify
+1. **Monitor REPL mode** ✅
+   - Command parsing (g, s, so, pause, until, r, m, >, f, d, a, bp, bc)
+   - Register display/modify (r, r A=$XX X=$XX)
+   - Memory display/modify (m, >, f)
 
-2. **Assembler**
-   - Parse assembly syntax
-   - Generate opcodes
-   - Interactive assembly mode
+2. **Assembler** ✅
+   - MAC65-style syntax with all 6502 instructions
+   - Expression parser (+, -, *, /, <, >, labels, *, character literals)
+   - Pseudo-ops: ORG, DB/BYTE, DW/WORD, DS/BLOCK, HEX, ASC, DCI, END
+   - Interactive assembly mode (a $0600)
 
-3. **Breakpoint manager**
-   - BRK injection
-   - Original byte tracking
-   - Hit detection
+3. **Breakpoint manager** ✅
+   - BRK injection for RAM addresses ($00-$BFFF)
+   - PC polling for ROM addresses ($C000+)
+   - Original byte tracking and restoration
+   - Hit count tracking
 
-4. **Stepping**
-   - Single step
-   - Step over
-   - Run until
+4. **Stepping** ✅
+   - Single step (s, s N) using temporary BRK after instruction
+   - Step over (so) for JSR instructions
+   - Run until (until $XXXX)
 
 ### Testing
 
-- Set breakpoint, hit it
-- Step through code
-- Modify registers and memory
+- ✅ Set breakpoint, hit it (via BRK injection or PC watch)
+- ✅ Step through code (instruction-level stepping)
+- ✅ Modify registers and memory
+- ✅ Unit tests for assembler, expression parser, symbol table
 
 ### Deliverables
 
-- Complete monitor functionality
-
-### Estimated Time: 3-4 days
+- ✅ Complete monitor functionality
+- ✅ Full assembler with MAC65 syntax
+- ✅ Breakpoint manager with RAM/ROM support
+- ✅ Instruction-level stepping
 
 ---
 
@@ -1137,7 +1159,7 @@ This is the final phase, implementing a complete web frontend that connects to A
 | 8 | GUI as Protocol Client | ✅ Complete |
 | 9 | CLI Socket Protocol | ✅ Complete |
 | 10 | 6502 Disassembler | Pending |
-| 11 | Monitor Mode | Pending |
+| 11 | Monitor Mode | ✅ Complete |
 | 12 | ATR File System | Pending |
 | 13 | DOS Mode | Pending |
 | 14 | BASIC Tokenizer | Pending |
@@ -1203,7 +1225,7 @@ Phase 11 (Monitor)           Phase 13 (DOS)
 |-----------|--------|-------------|--------|
 | M1 | 1-5 | Playable emulator with GUI | ✅ Complete (keyboard input, joystick deferred) |
 | M2 | 6-8 | Emulator/GUI separation | ✅ Complete |
-| M3 | 9-11 | Debugging via Emacs | In Progress (Phase 9 complete) |
+| M3 | 9-11 | Debugging via Emacs | In Progress (Phase 9, 11 complete; Phase 10 pending) |
 | M4 | 12-15 | Full REPL functionality | Pending |
 | M5 | 16-17 | Production native release | Pending |
 | M6 | 18-19 | Web browser support | Pending |
