@@ -218,10 +218,14 @@ public actor CLISocketClient {
         connectedPath = path
         readBuffer = Data()
 
-        // Start event reader task
-        eventReaderTask = Task { [weak self] in
+        // Start event reader task as detached so it can run concurrently with send()
+        // The event reader uses blocking I/O (select/read), so it must run independently
+        eventReaderTask = Task.detached { [weak self] in
             await self?.eventReaderLoop()
         }
+
+        // Yield to allow the event reader task to start
+        await Task.yield()
 
         // Verify connection with ping
         do {
@@ -434,17 +438,18 @@ public actor CLISocketClient {
     }
 
     /// Event reader loop - reads responses and events from the server.
+    /// Note: This runs in a detached task to allow concurrent operation with send().
     private func eventReaderLoop() async {
         let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: 4096)
         defer { buffer.deallocate() }
 
         while isConnected && !Task.isCancelled {
-            // Use select with timeout to allow cancellation checks
+            // Use select with short timeout to allow responsive cancellation
             var readSet = fd_set()
             fdZero(&readSet)
             fdSet(socket, &readSet)
 
-            var timeout = timeval(tv_sec: 1, tv_usec: 0)
+            var timeout = timeval(tv_sec: 0, tv_usec: 100_000)  // 100ms timeout
             let selectResult = select(socket + 1, &readSet, nil, nil, &timeout)
 
             if selectResult < 0 {
@@ -452,7 +457,8 @@ public actor CLISocketClient {
                 await handleDisconnect(error: CLIProtocolError.connectionFailed("Read error: \(errno)"))
                 break
             } else if selectResult == 0 {
-                // Timeout, continue
+                // Timeout - yield to allow other tasks to run
+                await Task.yield()
                 continue
             }
 
@@ -476,6 +482,9 @@ public actor CLISocketClient {
                     await processLine(line)
                 }
             }
+
+            // Yield after processing to allow other tasks to run
+            await Task.yield()
         }
     }
 
