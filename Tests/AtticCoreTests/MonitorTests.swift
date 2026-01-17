@@ -150,6 +150,76 @@ final class OpcodeTableTests: XCTestCase {
         XCTAssertTrue(mnemonics.contains("NOP"))
         XCTAssertTrue(mnemonics.contains("BRK"))
     }
+
+    /// Test looking up an invalid/undocumented opcode returns nil.
+    func test_lookup_invalidOpcode() {
+        // 0x02 is an undocumented/invalid opcode on the standard 6502
+        let info = OpcodeTable.lookup(0x02)
+        XCTAssertNil(info)
+
+        // 0xFF is also invalid
+        let info2 = OpcodeTable.lookup(0xFF)
+        XCTAssertNil(info2)
+    }
+
+    /// Test instructionLength for invalid opcode returns 1.
+    func test_instructionLength_invalidOpcode() {
+        // Invalid opcodes should return length 1 (safe default)
+        XCTAssertEqual(OpcodeTable.instructionLength(0x02), 1)
+        XCTAssertEqual(OpcodeTable.instructionLength(0xFF), 1)
+    }
+
+    /// Test isSubroutineCall helper.
+    func test_isSubroutineCall() {
+        XCTAssertTrue(OpcodeTable.isSubroutineCall("JSR"))
+        XCTAssertTrue(OpcodeTable.isSubroutineCall("jsr"))  // Case insensitive
+        XCTAssertFalse(OpcodeTable.isSubroutineCall("JMP"))
+        XCTAssertFalse(OpcodeTable.isSubroutineCall("RTS"))
+        XCTAssertFalse(OpcodeTable.isSubroutineCall("BNE"))
+    }
+
+    /// Test all branch mnemonics are recognized.
+    func test_allBranchMnemonics() {
+        let branches = ["BCC", "BCS", "BEQ", "BMI", "BNE", "BPL", "BVC", "BVS"]
+        for branch in branches {
+            XCTAssertTrue(OpcodeTable.isBranch(branch), "\(branch) should be recognized as branch")
+        }
+    }
+
+    /// Test opcodesFor returns empty for invalid mnemonic.
+    func test_opcodesFor_invalidMnemonic() {
+        let opcodes = OpcodeTable.opcodesFor(mnemonic: "XXX")
+        XCTAssertTrue(opcodes.isEmpty)
+    }
+
+    /// Test opcode lookup with invalid mnemonic/mode combination.
+    func test_opcode_invalidCombination() {
+        // NOP doesn't have an immediate mode
+        XCTAssertNil(OpcodeTable.opcode(for: "NOP", mode: .immediate))
+        // Invalid mnemonic
+        XCTAssertNil(OpcodeTable.opcode(for: "XXX", mode: .implied))
+    }
+
+    /// Test looking up stack operations.
+    func test_lookup_stackOps() {
+        // PHA
+        let pha = OpcodeTable.lookup(0x48)
+        XCTAssertNotNil(pha)
+        XCTAssertEqual(pha?.mnemonic, "PHA")
+        XCTAssertEqual(pha?.mode, .implied)
+
+        // PLA
+        let pla = OpcodeTable.lookup(0x68)
+        XCTAssertNotNil(pla)
+        XCTAssertEqual(pla?.mnemonic, "PLA")
+    }
+
+    /// Test branchTarget with page crossing.
+    func test_branchTarget_pageCrossing() {
+        // Branch that crosses page boundary
+        let target = OpcodeTable.branchTarget(from: 0x10FE, offset: 10)
+        XCTAssertEqual(target, 0x1108)
+    }
 }
 
 // =============================================================================
@@ -169,6 +239,16 @@ final class AddressingModeTests: XCTestCase {
         XCTAssertEqual(AddressingMode.relative.bytes, 2)
     }
 
+    /// Test all byte counts for completeness.
+    func test_bytes_allModes() {
+        XCTAssertEqual(AddressingMode.zeroPageX.bytes, 2)
+        XCTAssertEqual(AddressingMode.zeroPageY.bytes, 2)
+        XCTAssertEqual(AddressingMode.absoluteX.bytes, 3)
+        XCTAssertEqual(AddressingMode.absoluteY.bytes, 3)
+        XCTAssertEqual(AddressingMode.indexedIndirect.bytes, 2)
+        XCTAssertEqual(AddressingMode.indirectIndexed.bytes, 2)
+    }
+
     /// Test page-crossing modes.
     func test_canCrossPage() {
         XCTAssertTrue(AddressingMode.absoluteX.canCrossPage)
@@ -176,6 +256,78 @@ final class AddressingModeTests: XCTestCase {
         XCTAssertTrue(AddressingMode.indirectIndexed.canCrossPage)
         XCTAssertFalse(AddressingMode.absolute.canCrossPage)
         XCTAssertFalse(AddressingMode.zeroPage.canCrossPage)
+    }
+
+    /// Test all modes that don't cross pages.
+    func test_canCrossPage_allFalse() {
+        XCTAssertFalse(AddressingMode.implied.canCrossPage)
+        XCTAssertFalse(AddressingMode.accumulator.canCrossPage)
+        XCTAssertFalse(AddressingMode.immediate.canCrossPage)
+        XCTAssertFalse(AddressingMode.zeroPageX.canCrossPage)
+        XCTAssertFalse(AddressingMode.zeroPageY.canCrossPage)
+        XCTAssertFalse(AddressingMode.indirect.canCrossPage)
+        XCTAssertFalse(AddressingMode.indexedIndirect.canCrossPage)
+        XCTAssertFalse(AddressingMode.relative.canCrossPage)
+    }
+
+    /// Test rawValue strings.
+    func test_rawValue() {
+        XCTAssertEqual(AddressingMode.implied.rawValue, "IMP")
+        XCTAssertEqual(AddressingMode.immediate.rawValue, "IMM")
+        XCTAssertEqual(AddressingMode.zeroPage.rawValue, "ZP")
+        XCTAssertEqual(AddressingMode.absolute.rawValue, "ABS")
+        XCTAssertEqual(AddressingMode.indirect.rawValue, "IND")
+        XCTAssertEqual(AddressingMode.relative.rawValue, "REL")
+    }
+
+    /// Test CaseIterable returns all modes.
+    func test_caseIterable() {
+        let allCases = AddressingMode.allCases
+        XCTAssertEqual(allCases.count, 13)  // 13 addressing modes
+    }
+}
+
+// =============================================================================
+// MARK: - OpcodeInfo Tests
+// =============================================================================
+
+/// Tests for OpcodeInfo structure.
+final class OpcodeInfoTests: XCTestCase {
+    /// Test OpcodeInfo pageCross property.
+    func test_pageCross() {
+        // LDA absolute X has page cross penalty
+        let ldaAbsX = OpcodeTable.lookup(0xBD)
+        XCTAssertNotNil(ldaAbsX)
+        XCTAssertTrue(ldaAbsX?.pageCross ?? false)
+
+        // LDA absolute does not have page cross penalty
+        let ldaAbs = OpcodeTable.lookup(0xAD)
+        XCTAssertNotNil(ldaAbs)
+        XCTAssertFalse(ldaAbs?.pageCross ?? true)
+    }
+
+    /// Test OpcodeInfo cycles property.
+    func test_cycles() {
+        let nop = OpcodeTable.lookup(0xEA)
+        XCTAssertEqual(nop?.cycles, 2)
+
+        let ldaImm = OpcodeTable.lookup(0xA9)
+        XCTAssertEqual(ldaImm?.cycles, 2)
+
+        let ldaAbs = OpcodeTable.lookup(0xAD)
+        XCTAssertEqual(ldaAbs?.cycles, 4)
+    }
+
+    /// Test bytes derived from mode.
+    func test_bytes() {
+        let nop = OpcodeTable.lookup(0xEA)
+        XCTAssertEqual(nop?.bytes, 1)
+
+        let ldaImm = OpcodeTable.lookup(0xA9)
+        XCTAssertEqual(ldaImm?.bytes, 2)
+
+        let jmpAbs = OpcodeTable.lookup(0x4C)
+        XCTAssertEqual(jmpAbs?.bytes, 3)
     }
 }
 
@@ -412,6 +564,122 @@ final class AssemblerPseudoOpTests: XCTestCase {
 
         XCTAssertEqual(result.bytes, [72, 69, 76, 76, 79])  // ASCII values
     }
+
+    /// Test DCI pseudo-op (ASCII with high bit set on last byte).
+    func test_dci() throws {
+        let result = try assembler.assembleLine("DCI \"HI\"")
+
+        // "HI" = 72, 73 but last byte has high bit set: 72, 73 | 0x80 = 72, 201
+        XCTAssertEqual(result.bytes, [72, 73 | 0x80])
+    }
+
+    /// Test DS with fill value (reserves zero-filled space).
+    func test_ds_reserve() throws {
+        let result = try assembler.assembleLine("DS 3")
+
+        XCTAssertEqual(result.bytes, [0, 0, 0])
+        XCTAssertEqual(assembler.currentPC, 0x0603)
+    }
+
+    /// Test END pseudo-op.
+    func test_end() throws {
+        let result = try assembler.assembleLine("END")
+
+        XCTAssertTrue(result.bytes.isEmpty)
+    }
+}
+
+// =============================================================================
+// MARK: - Assembler Error Tests
+// =============================================================================
+
+/// Tests for assembler error handling.
+final class AssemblerErrorTests: XCTestCase {
+    var assembler: Assembler!
+
+    override func setUp() {
+        super.setUp()
+        assembler = Assembler(startAddress: 0x0600)
+    }
+
+    /// Test invalid instruction error.
+    func test_invalidInstruction() {
+        XCTAssertThrowsError(try assembler.assembleLine("XYZ")) { error in
+            guard case AssemblerError.invalidInstruction(let instr) = error else {
+                XCTFail("Expected invalidInstruction error")
+                return
+            }
+            XCTAssertEqual(instr, "XYZ")
+        }
+    }
+
+    /// Test invalid addressing mode error.
+    func test_invalidAddressingMode() {
+        // NOP doesn't support immediate mode
+        XCTAssertThrowsError(try assembler.assembleLine("NOP #$00")) { error in
+            guard case AssemblerError.invalidAddressingMode = error else {
+                XCTFail("Expected invalidAddressingMode error")
+                return
+            }
+        }
+    }
+
+    /// Test branch out of range error.
+    func test_branchOutOfRange() {
+        // Define a label far away
+        try? assembler.symbols.define("FAR", value: 0x1000)
+
+        XCTAssertThrowsError(try assembler.assembleLine("BNE FAR")) { error in
+            guard case AssemblerError.branchOutOfRange = error else {
+                XCTFail("Expected branchOutOfRange error")
+                return
+            }
+        }
+    }
+
+    /// Test value out of range error for immediate.
+    func test_valueOutOfRange_immediate() {
+        XCTAssertThrowsError(try assembler.assembleLine("LDA #$1FF")) { error in
+            guard case AssemblerError.valueOutOfRange = error else {
+                XCTFail("Expected valueOutOfRange error")
+                return
+            }
+        }
+    }
+
+    /// Test invalid pseudo-op error.
+    func test_invalidPseudoOp_orgWithoutAddress() {
+        XCTAssertThrowsError(try assembler.assembleLine("ORG")) { error in
+            guard case AssemblerError.invalidPseudoOp = error else {
+                XCTFail("Expected invalidPseudoOp error")
+                return
+            }
+        }
+    }
+
+    /// Test AssemblerError error descriptions.
+    func test_errorDescriptions() {
+        XCTAssertNotNil(AssemblerError.invalidInstruction("XYZ").errorDescription)
+        XCTAssertNotNil(AssemblerError.invalidOperand("bad").errorDescription)
+        XCTAssertNotNil(AssemblerError.invalidAddressingMode("LDA", "#$FFF").errorDescription)
+        XCTAssertNotNil(AssemblerError.undefinedLabel("UNKNOWN").errorDescription)
+        XCTAssertNotNil(AssemblerError.duplicateLabel("DUP").errorDescription)
+        XCTAssertNotNil(AssemblerError.invalidExpression("???").errorDescription)
+        XCTAssertNotNil(AssemblerError.valueOutOfRange("byte", 300, 0, 255).errorDescription)
+        XCTAssertNotNil(AssemblerError.invalidPseudoOp("BAD").errorDescription)
+        XCTAssertNotNil(AssemblerError.syntaxError("test").errorDescription)
+        XCTAssertNotNil(AssemblerError.branchOutOfRange("FAR", 200).errorDescription)
+    }
+
+    /// Test AssemblerError equatable conformance.
+    func test_errorEquatable() {
+        let err1 = AssemblerError.invalidInstruction("XYZ")
+        let err2 = AssemblerError.invalidInstruction("XYZ")
+        let err3 = AssemblerError.invalidInstruction("ABC")
+
+        XCTAssertEqual(err1, err2)
+        XCTAssertNotEqual(err1, err3)
+    }
 }
 
 // =============================================================================
@@ -521,6 +789,94 @@ final class ExpressionParserTests: XCTestCase {
     func test_characterLiteral() throws {
         let parser = ExpressionParser(symbols: symbols, currentPC: 0)
         XCTAssertEqual(try parser.evaluate("'A"), 65)
+    }
+
+    /// Test unary minus.
+    func test_unaryMinus() throws {
+        let parser = ExpressionParser(symbols: symbols, currentPC: 0)
+        XCTAssertEqual(try parser.evaluate("-5"), -5)
+        XCTAssertEqual(try parser.evaluate("-$10"), -16)
+    }
+
+    /// Test unary plus.
+    func test_unaryPlus() throws {
+        let parser = ExpressionParser(symbols: symbols, currentPC: 0)
+        XCTAssertEqual(try parser.evaluate("+5"), 5)
+        XCTAssertEqual(try parser.evaluate("+$10"), 16)
+    }
+
+    /// Test nested parentheses.
+    func test_nestedParentheses() throws {
+        let parser = ExpressionParser(symbols: symbols, currentPC: 0)
+        // ((1 + 2) * (3 + 4)) = 3 * 7 = 21
+        XCTAssertEqual(try parser.evaluate("((1+2)*(3+4))"), 21)
+    }
+
+    /// Test complex expression with multiple operators.
+    func test_complexExpression() throws {
+        let parser = ExpressionParser(symbols: symbols, currentPC: 0)
+        // 10 + 20 * 2 - 5 = 10 + 40 - 5 = 45
+        XCTAssertEqual(try parser.evaluate("10+20*2-5"), 45)
+    }
+
+    /// Test division by zero throws error.
+    func test_divisionByZero() {
+        let parser = ExpressionParser(symbols: symbols, currentPC: 0)
+        XCTAssertThrowsError(try parser.evaluate("10/0")) { error in
+            guard case AssemblerError.invalidExpression(let msg) = error else {
+                XCTFail("Expected invalidExpression error")
+                return
+            }
+            XCTAssertTrue(msg.contains("zero"))
+        }
+    }
+
+    /// Test 0x prefix for hex numbers.
+    func test_0xHexPrefix() throws {
+        let parser = ExpressionParser(symbols: symbols, currentPC: 0)
+        XCTAssertEqual(try parser.evaluate("0xFF"), 255)
+        XCTAssertEqual(try parser.evaluate("0x1234"), 0x1234)
+    }
+
+    /// Test whitespace handling.
+    func test_whitespaceHandling() throws {
+        let parser = ExpressionParser(symbols: symbols, currentPC: 0)
+        XCTAssertEqual(try parser.evaluate("  $10  +  $20  "), 0x30)
+    }
+
+    /// Test location counter with arithmetic.
+    func test_locationCounterArithmetic() throws {
+        let parser = ExpressionParser(symbols: symbols, currentPC: 0x1000)
+        XCTAssertEqual(try parser.evaluate("* - $100"), 0x0F00)
+    }
+
+    /// Test missing closing parenthesis error.
+    func test_missingClosingParen() {
+        let parser = ExpressionParser(symbols: symbols, currentPC: 0)
+        XCTAssertThrowsError(try parser.evaluate("(1+2"))
+    }
+
+    /// Test empty expression error.
+    func test_emptyExpression() {
+        let parser = ExpressionParser(symbols: symbols, currentPC: 0)
+        XCTAssertThrowsError(try parser.evaluate(""))
+        XCTAssertThrowsError(try parser.evaluate("   "))
+    }
+
+    /// Test low/high byte with complex expression.
+    func test_lowHighByteComplex() throws {
+        try symbols.define("ADDR", value: 0xABCD)
+        let parser = ExpressionParser(symbols: symbols, currentPC: 0)
+
+        XCTAssertEqual(try parser.evaluate("<ADDR"), 0xCD)
+        XCTAssertEqual(try parser.evaluate(">ADDR"), 0xAB)
+        XCTAssertEqual(try parser.evaluate("<(ADDR+1)"), 0xCE)
+    }
+
+    /// Test character literal with closing quote.
+    func test_characterLiteralWithClosingQuote() throws {
+        let parser = ExpressionParser(symbols: symbols, currentPC: 0)
+        XCTAssertEqual(try parser.evaluate("'A'"), 65)
     }
 }
 
@@ -708,6 +1064,176 @@ final class BreakpointManagerTests: XCTestCase {
         XCTAssertTrue(romBP.formatted.contains("$E477"))
         XCTAssertTrue(romBP.formatted.contains("ROM watch"))
     }
+
+    /// Test breakpoint formatting with hit count.
+    func test_breakpointFormatted_withHitCount() async {
+        let manager = BreakpointManager()
+
+        await manager.setBreakpointTracking(at: 0x0600, originalByte: 0xA9)
+        await manager.recordHit(at: 0x0600)
+        await manager.recordHit(at: 0x0600)
+
+        let bp = await manager.getBreakpoint(at: 0x0600)
+        XCTAssertNotNil(bp)
+        XCTAssertTrue(bp!.formatted.contains("hits: 2"))
+    }
+
+    /// Test getOriginalByte returns nil for ROM breakpoints.
+    func test_getOriginalByte_rom() async {
+        let manager = BreakpointManager()
+
+        await manager.setBreakpointTracking(at: 0xE477, originalByte: nil)
+
+        let original = await manager.getOriginalByte(at: 0xE477)
+        XCTAssertNil(original)
+    }
+
+    /// Test getOriginalByte returns correct value for RAM breakpoints.
+    func test_getOriginalByte_ram() async {
+        let manager = BreakpointManager()
+
+        await manager.setBreakpointTracking(at: 0x0600, originalByte: 0xA9)
+
+        let original = await manager.getOriginalByte(at: 0x0600)
+        XCTAssertEqual(original, 0xA9)
+    }
+
+    /// Test isTemporaryBreakpoint.
+    func test_isTemporaryBreakpoint() async {
+        let manager = BreakpointManager()
+        let mockMemory = MockMemoryAccess()
+
+        // Before setting temporary breakpoint
+        XCTAssertFalse(await manager.isTemporaryBreakpoint(at: 0x0600))
+
+        // Set temporary breakpoint
+        await manager.setTemporaryBreakpoint(at: 0x0600, memory: mockMemory)
+
+        XCTAssertTrue(await manager.isTemporaryBreakpoint(at: 0x0600))
+        XCTAssertFalse(await manager.isTemporaryBreakpoint(at: 0x0601))
+
+        // Clear it
+        await manager.clearTemporaryBreakpoint(memory: mockMemory)
+
+        XCTAssertFalse(await manager.isTemporaryBreakpoint(at: 0x0600))
+    }
+
+    /// Test temporary breakpoint in ROM uses PC watching.
+    func test_temporaryBreakpoint_rom() async {
+        let manager = BreakpointManager()
+        let mockMemory = MockMemoryAccess()
+
+        await manager.setTemporaryBreakpoint(at: 0xE477, memory: mockMemory)
+
+        // ROM breakpoint should be in the ROM breakpoints set
+        XCTAssertTrue(await manager.isTemporaryBreakpoint(at: 0xE477))
+        XCTAssertTrue(await manager.romBreakpoints.contains(0xE477))
+
+        // Clear it
+        await manager.clearTemporaryBreakpoint(memory: mockMemory)
+
+        XCTAssertFalse(await manager.romBreakpoints.contains(0xE477))
+    }
+
+    /// Test clearing breakpoint tracking.
+    func test_clearBreakpointTracking() async {
+        let manager = BreakpointManager()
+
+        await manager.setBreakpointTracking(at: 0x0600, originalByte: 0xA9)
+        await manager.setBreakpointTracking(at: 0x0700, originalByte: 0x8D)
+
+        XCTAssertEqual(await manager.getAllBreakpoints().count, 2)
+    }
+
+    /// Test BRK opcode constant.
+    func test_brkOpcodeConstant() {
+        XCTAssertEqual(BreakpointManager.brkOpcode, 0x00)
+    }
+
+    /// Test ROM start address constant.
+    func test_romStartAddress() {
+        XCTAssertEqual(BreakpointManager.romStartAddress, 0xC000)
+    }
+
+    /// Test I/O address classification.
+    func test_ioAddressClassification() async {
+        let manager = BreakpointManager()
+
+        // I/O addresses should be classified as ROM (can't breakpoint)
+        XCTAssertEqual(await manager.classifyAddress(0xD000), .rom)
+        XCTAssertEqual(await manager.classifyAddress(0xD400), .rom)
+        XCTAssertEqual(await manager.classifyAddress(0xD7FF), .rom)
+    }
+
+    /// Test Breakpoint equality.
+    func test_breakpointEquality() {
+        let bp1 = Breakpoint(address: 0x0600, type: .ram, originalByte: 0xA9)
+        let bp2 = Breakpoint(address: 0x0600, type: .rom)  // Same address, different type
+        let bp3 = Breakpoint(address: 0x0700, type: .ram)
+
+        // Equality is based on address only
+        XCTAssertEqual(bp1, bp2)
+        XCTAssertNotEqual(bp1, bp3)
+    }
+
+    /// Test Breakpoint default values.
+    func test_breakpointDefaults() {
+        let bp = Breakpoint(address: 0x0600, type: .ram)
+
+        XCTAssertEqual(bp.hitCount, 0)
+        XCTAssertTrue(bp.enabled)
+        XCTAssertNil(bp.condition)
+        XCTAssertNil(bp.originalByte)
+    }
+}
+
+// =============================================================================
+// MARK: - Breakpoint Error Tests
+// =============================================================================
+
+/// Tests for BreakpointError.
+final class BreakpointErrorTests: XCTestCase {
+    /// Test error descriptions.
+    func test_errorDescriptions() {
+        XCTAssertNotNil(BreakpointError.alreadySet(0x0600).errorDescription)
+        XCTAssertTrue(BreakpointError.alreadySet(0x0600).errorDescription!.contains("0600"))
+
+        XCTAssertNotNil(BreakpointError.notFound(0x0700).errorDescription)
+        XCTAssertTrue(BreakpointError.notFound(0x0700).errorDescription!.contains("0700"))
+
+        XCTAssertNotNil(BreakpointError.cannotModifyROM(0xE000).errorDescription)
+        XCTAssertTrue(BreakpointError.cannotModifyROM(0xE000).errorDescription!.contains("E000"))
+
+        XCTAssertNotNil(BreakpointError.invalidAddress(0xFFFF).errorDescription)
+        XCTAssertTrue(BreakpointError.invalidAddress(0xFFFF).errorDescription!.contains("FFFF"))
+    }
+}
+
+// =============================================================================
+// MARK: - Mock Memory Access
+// =============================================================================
+
+/// Mock implementation of MemoryAccess for testing.
+final class MockMemoryAccess: MemoryAccess, @unchecked Sendable {
+    private var memory: [UInt16: UInt8] = [:]
+
+    func readMemory(at address: UInt16) async -> UInt8 {
+        memory[address] ?? 0
+    }
+
+    func writeMemory(at address: UInt16, value: UInt8) async {
+        memory[address] = value
+    }
+
+    /// Sets a value for testing (synchronous).
+    func set(_ address: UInt16, _ value: UInt8) {
+        memory[address] = value
+    }
+
+    /// Gets a value for testing (synchronous).
+    func get(_ address: UInt16) -> UInt8 {
+        memory[address] ?? 0
+    }
 }
 
 // =============================================================================
@@ -752,5 +1278,198 @@ final class InteractiveAssemblerTests: XCTestCase {
 
         ia.reset(to: 0x0800)
         XCTAssertEqual(ia.currentAddress, 0x0800)
+    }
+
+    /// Test symbols property access.
+    func test_symbols() throws {
+        let ia = InteractiveAssembler(startAddress: 0x0600)
+
+        // Define a label
+        _ = try ia.assembleLine("START LDA #$00")
+
+        // Access symbols
+        XCTAssertEqual(ia.symbols.lookup("START"), 0x0600)
+    }
+}
+
+// =============================================================================
+// MARK: - MonitorStepResult Tests
+// =============================================================================
+
+/// Tests for MonitorStepResult.
+final class MonitorStepResultTests: XCTestCase {
+    /// Test success factory method.
+    func test_success() {
+        let regs = CPURegisters(a: 0x00, x: 0x01, y: 0x02, s: 0xFF, p: 0x20, pc: 0x0600)
+        let result = MonitorStepResult.success(registers: regs, stoppedAt: 0x0602)
+
+        XCTAssertTrue(result.success)
+        XCTAssertFalse(result.breakpointHit)
+        XCTAssertNil(result.breakpointAddress)
+        XCTAssertNil(result.errorMessage)
+        XCTAssertEqual(result.stoppedAt, 0x0602)
+        XCTAssertEqual(result.instructionsExecuted, 1)
+        XCTAssertEqual(result.registers.pc, 0x0600)
+    }
+
+    /// Test success with custom instruction count.
+    func test_success_customCount() {
+        let regs = CPURegisters(a: 0x00, x: 0x00, y: 0x00, s: 0xFF, p: 0x20, pc: 0x0600)
+        let result = MonitorStepResult.success(registers: regs, stoppedAt: 0x060A, instructionsExecuted: 5)
+
+        XCTAssertEqual(result.instructionsExecuted, 5)
+    }
+
+    /// Test breakpoint factory method.
+    func test_breakpoint() {
+        let regs = CPURegisters(a: 0x00, x: 0x00, y: 0x00, s: 0xFF, p: 0x20, pc: 0x0700)
+        let result = MonitorStepResult.breakpoint(registers: regs, address: 0x0700, instructionsExecuted: 10)
+
+        XCTAssertTrue(result.success)
+        XCTAssertTrue(result.breakpointHit)
+        XCTAssertEqual(result.breakpointAddress, 0x0700)
+        XCTAssertEqual(result.stoppedAt, 0x0700)
+        XCTAssertEqual(result.instructionsExecuted, 10)
+    }
+
+    /// Test error factory method.
+    func test_error() {
+        let regs = CPURegisters(a: 0x00, x: 0x00, y: 0x00, s: 0xFF, p: 0x20, pc: 0x0600)
+        let result = MonitorStepResult.error("Step failed", registers: regs)
+
+        XCTAssertFalse(result.success)
+        XCTAssertFalse(result.breakpointHit)
+        XCTAssertNil(result.breakpointAddress)
+        XCTAssertEqual(result.errorMessage, "Step failed")
+        XCTAssertEqual(result.stoppedAt, 0x0600)
+        XCTAssertEqual(result.instructionsExecuted, 0)
+    }
+}
+
+// =============================================================================
+// MARK: - ParsedOperand Tests
+// =============================================================================
+
+/// Tests for ParsedOperand enum.
+final class ParsedOperandTests: XCTestCase {
+    /// Test none operand.
+    func test_none() {
+        let op = ParsedOperand.none
+
+        XCTAssertEqual(op.mode, .implied)
+        XCTAssertEqual(op.value, 0)
+    }
+
+    /// Test accumulator operand.
+    func test_accumulator() {
+        let op = ParsedOperand.accumulator
+
+        XCTAssertEqual(op.mode, .accumulator)
+        XCTAssertEqual(op.value, 0)
+    }
+
+    /// Test immediate operand.
+    func test_immediate() {
+        let op = ParsedOperand.immediate(0x42)
+
+        XCTAssertEqual(op.mode, .immediate)
+        XCTAssertEqual(op.value, 0x42)
+    }
+
+    /// Test zeroPage operand.
+    func test_zeroPage() {
+        let op = ParsedOperand.zeroPage(0x80)
+
+        XCTAssertEqual(op.mode, .zeroPage)
+        XCTAssertEqual(op.value, 0x80)
+    }
+
+    /// Test absolute operand.
+    func test_absolute() {
+        let op = ParsedOperand.absolute(0x1234)
+
+        XCTAssertEqual(op.mode, .absolute)
+        XCTAssertEqual(op.value, 0x1234)
+    }
+
+    /// Test indexed operands.
+    func test_indexed() {
+        XCTAssertEqual(ParsedOperand.zeroPageX(0x50).mode, .zeroPageX)
+        XCTAssertEqual(ParsedOperand.zeroPageY(0x60).mode, .zeroPageY)
+        XCTAssertEqual(ParsedOperand.absoluteX(0x1000).mode, .absoluteX)
+        XCTAssertEqual(ParsedOperand.absoluteY(0x2000).mode, .absoluteY)
+    }
+
+    /// Test indirect operands.
+    func test_indirect() {
+        XCTAssertEqual(ParsedOperand.indirect(0x1234).mode, .indirect)
+        XCTAssertEqual(ParsedOperand.indexedIndirect(0x80).mode, .indexedIndirect)
+        XCTAssertEqual(ParsedOperand.indirectIndexed(0x90).mode, .indirectIndexed)
+    }
+
+    /// Test relative operand.
+    func test_relative() {
+        let op = ParsedOperand.relative(0x060A)
+
+        XCTAssertEqual(op.mode, .relative)
+        XCTAssertEqual(op.value, 0x060A)
+    }
+
+    /// Test equatable conformance.
+    func test_equatable() {
+        let op1 = ParsedOperand.immediate(0x42)
+        let op2 = ParsedOperand.immediate(0x42)
+        let op3 = ParsedOperand.immediate(0x43)
+
+        XCTAssertEqual(op1, op2)
+        XCTAssertNotEqual(op1, op3)
+    }
+}
+
+// =============================================================================
+// MARK: - AssemblyResult Tests
+// =============================================================================
+
+/// Tests for AssemblyResult structure.
+final class AssemblyResultTests: XCTestCase {
+    /// Test basic properties.
+    func test_basicProperties() {
+        let result = AssemblyResult(
+            bytes: [0xA9, 0x00],
+            address: 0x0600,
+            sourceLine: "LDA #$00",
+            label: nil
+        )
+
+        XCTAssertEqual(result.bytes, [0xA9, 0x00])
+        XCTAssertEqual(result.address, 0x0600)
+        XCTAssertEqual(result.sourceLine, "LDA #$00")
+        XCTAssertNil(result.label)
+        XCTAssertEqual(result.length, 2)
+    }
+
+    /// Test with label.
+    func test_withLabel() {
+        let result = AssemblyResult(
+            bytes: [0xA9, 0x00],
+            address: 0x0600,
+            sourceLine: "START LDA #$00",
+            label: "START"
+        )
+
+        XCTAssertEqual(result.label, "START")
+    }
+
+    /// Test empty bytes (pseudo-op like ORG).
+    func test_emptyBytes() {
+        let result = AssemblyResult(
+            bytes: [],
+            address: 0x0800,
+            sourceLine: "ORG $0800",
+            label: nil
+        )
+
+        XCTAssertTrue(result.bytes.isEmpty)
+        XCTAssertEqual(result.length, 0)
     }
 }
