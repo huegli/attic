@@ -96,7 +96,7 @@ public enum CLIProtocolConstants {
 /// These commands are a subset of what the REPL supports, focused on
 /// the commands that make sense over a socket connection. They map
 /// closely to the protocol specification in docs/PROTOCOL.md.
-public enum CLICommand: Sendable, Equatable {
+public enum CLICommand: Sendable {
     // Connection
     case ping
     case version

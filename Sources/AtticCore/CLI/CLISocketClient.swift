@@ -190,11 +190,12 @@ public actor CLISocketClient {
         addr.sun_family = sa_family_t(AF_UNIX)
 
         let pathBytes = path.utf8CString
+        let sunPathSize = MemoryLayout.size(ofValue: addr.sun_path)
         withUnsafeMutablePointer(to: &addr.sun_path) { sunPathPtr in
             let rawPtr = UnsafeMutableRawPointer(sunPathPtr)
             let destPtr = rawPtr.assumingMemoryBound(to: CChar.self)
             for (i, byte) in pathBytes.enumerated() {
-                if i < MemoryLayout.size(ofValue: addr.sun_path) - 1 {
+                if i < sunPathSize - 1 {
                     destPtr[i] = byte
                 }
             }
@@ -217,10 +218,14 @@ public actor CLISocketClient {
         connectedPath = path
         readBuffer = Data()
 
-        // Start event reader task
-        eventReaderTask = Task { [weak self] in
+        // Start event reader task as detached so it can run concurrently with send()
+        // The event reader uses blocking I/O (select/read), so it must run independently
+        eventReaderTask = Task.detached { [weak self] in
             await self?.eventReaderLoop()
         }
+
+        // Yield to allow the event reader task to start
+        await Task.yield()
 
         // Verify connection with ping
         do {
@@ -285,21 +290,26 @@ public actor CLISocketClient {
             throw CLIProtocolError.connectionFailed("Failed to encode command")
         }
 
-        // Send command
-        let bytesSent = data.withUnsafeBytes { ptr in
-            write(socket, ptr.baseAddress, data.count)
-        }
-
-        guard bytesSent == data.count else {
-            throw CLIProtocolError.connectionFailed("Failed to send command: \(errno)")
-        }
-
         // Wait for response with timeout
+        // IMPORTANT: Set up pendingResponse BEFORE sending to avoid race condition
         return try await withCheckedThrowingContinuation { continuation in
-            Task {
-                await self.setPendingResponse(continuation)
+            // Set pending response synchronously (we're on the actor)
+            self.pendingResponse = continuation
 
-                // Set up timeout
+            // Send command
+            let bytesSent = data.withUnsafeBytes { ptr in
+                write(self.socket, ptr.baseAddress, data.count)
+            }
+
+            if bytesSent != data.count {
+                // Send failed - clear pending and resume with error
+                self.pendingResponse = nil
+                continuation.resume(throwing: CLIProtocolError.connectionFailed("Failed to send command: \(errno)"))
+                return
+            }
+
+            // Start timeout task
+            Task {
                 try? await Task.sleep(nanoseconds: UInt64(CLIProtocolConstants.commandTimeout * 1_000_000_000))
 
                 // If still pending after timeout, fail
@@ -326,19 +336,26 @@ public actor CLISocketClient {
             throw CLIProtocolError.connectionFailed("Failed to encode command")
         }
 
-        let bytesSent = data.withUnsafeBytes { ptr in
-            write(socket, ptr.baseAddress, data.count)
-        }
-
-        guard bytesSent == data.count else {
-            throw CLIProtocolError.connectionFailed("Failed to send command: \(errno)")
-        }
-
-        // Wait for response
+        // Wait for response with timeout
+        // IMPORTANT: Set up pendingResponse BEFORE sending to avoid race condition
         return try await withCheckedThrowingContinuation { continuation in
-            Task {
-                await self.setPendingResponse(continuation)
+            // Set pending response synchronously (we're on the actor)
+            self.pendingResponse = continuation
 
+            // Send command
+            let bytesSent = data.withUnsafeBytes { ptr in
+                write(self.socket, ptr.baseAddress, data.count)
+            }
+
+            if bytesSent != data.count {
+                // Send failed - clear pending and resume with error
+                self.pendingResponse = nil
+                continuation.resume(throwing: CLIProtocolError.connectionFailed("Failed to send command: \(errno)"))
+                return
+            }
+
+            // Start timeout task
+            Task {
                 try? await Task.sleep(nanoseconds: UInt64(CLIProtocolConstants.commandTimeout * 1_000_000_000))
 
                 if await self.cancelPendingResponse(continuation) {
@@ -421,17 +438,18 @@ public actor CLISocketClient {
     }
 
     /// Event reader loop - reads responses and events from the server.
+    /// Note: This runs in a detached task to allow concurrent operation with send().
     private func eventReaderLoop() async {
         let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: 4096)
         defer { buffer.deallocate() }
 
         while isConnected && !Task.isCancelled {
-            // Use select with timeout to allow cancellation checks
+            // Use select with short timeout to allow responsive cancellation
             var readSet = fd_set()
             fdZero(&readSet)
             fdSet(socket, &readSet)
 
-            var timeout = timeval(tv_sec: 1, tv_usec: 0)
+            var timeout = timeval(tv_sec: 0, tv_usec: 100_000)  // 100ms timeout
             let selectResult = select(socket + 1, &readSet, nil, nil, &timeout)
 
             if selectResult < 0 {
@@ -439,7 +457,8 @@ public actor CLISocketClient {
                 await handleDisconnect(error: CLIProtocolError.connectionFailed("Read error: \(errno)"))
                 break
             } else if selectResult == 0 {
-                // Timeout, continue
+                // Timeout - yield to allow other tasks to run
+                await Task.yield()
                 continue
             }
 
@@ -463,6 +482,9 @@ public actor CLISocketClient {
                     await processLine(line)
                 }
             }
+
+            // Yield after processing to allow other tasks to run
+            await Task.yield()
         }
     }
 
@@ -528,7 +550,7 @@ public actor CLISocketClient {
 /// Clears an fd_set.
 private func fdZero(_ set: inout fd_set) {
     #if canImport(Darwin)
-    withUnsafeMutablePointer(to: &set) { ptr in
+    _ = withUnsafeMutablePointer(to: &set) { ptr in
         memset(ptr, 0, MemoryLayout<fd_set>.size)
     }
     #else
