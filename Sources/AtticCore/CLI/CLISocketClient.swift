@@ -286,21 +286,26 @@ public actor CLISocketClient {
             throw CLIProtocolError.connectionFailed("Failed to encode command")
         }
 
-        // Send command
-        let bytesSent = data.withUnsafeBytes { ptr in
-            write(socket, ptr.baseAddress, data.count)
-        }
-
-        guard bytesSent == data.count else {
-            throw CLIProtocolError.connectionFailed("Failed to send command: \(errno)")
-        }
-
         // Wait for response with timeout
+        // IMPORTANT: Set up pendingResponse BEFORE sending to avoid race condition
         return try await withCheckedThrowingContinuation { continuation in
-            Task {
-                await self.setPendingResponse(continuation)
+            // Set pending response synchronously (we're on the actor)
+            self.pendingResponse = continuation
 
-                // Set up timeout
+            // Send command
+            let bytesSent = data.withUnsafeBytes { ptr in
+                write(self.socket, ptr.baseAddress, data.count)
+            }
+
+            if bytesSent != data.count {
+                // Send failed - clear pending and resume with error
+                self.pendingResponse = nil
+                continuation.resume(throwing: CLIProtocolError.connectionFailed("Failed to send command: \(errno)"))
+                return
+            }
+
+            // Start timeout task
+            Task {
                 try? await Task.sleep(nanoseconds: UInt64(CLIProtocolConstants.commandTimeout * 1_000_000_000))
 
                 // If still pending after timeout, fail
@@ -327,19 +332,26 @@ public actor CLISocketClient {
             throw CLIProtocolError.connectionFailed("Failed to encode command")
         }
 
-        let bytesSent = data.withUnsafeBytes { ptr in
-            write(socket, ptr.baseAddress, data.count)
-        }
-
-        guard bytesSent == data.count else {
-            throw CLIProtocolError.connectionFailed("Failed to send command: \(errno)")
-        }
-
-        // Wait for response
+        // Wait for response with timeout
+        // IMPORTANT: Set up pendingResponse BEFORE sending to avoid race condition
         return try await withCheckedThrowingContinuation { continuation in
-            Task {
-                await self.setPendingResponse(continuation)
+            // Set pending response synchronously (we're on the actor)
+            self.pendingResponse = continuation
 
+            // Send command
+            let bytesSent = data.withUnsafeBytes { ptr in
+                write(self.socket, ptr.baseAddress, data.count)
+            }
+
+            if bytesSent != data.count {
+                // Send failed - clear pending and resume with error
+                self.pendingResponse = nil
+                continuation.resume(throwing: CLIProtocolError.connectionFailed("Failed to send command: \(errno)"))
+                return
+            }
+
+            // Start timeout task
+            Task {
                 try? await Task.sleep(nanoseconds: UInt64(CLIProtocolConstants.commandTimeout * 1_000_000_000))
 
                 if await self.cancelPendingResponse(continuation) {

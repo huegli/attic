@@ -305,15 +305,18 @@ public actor CLISocketServer {
     private func acceptLoop() async {
         while isRunning && !Task.isCancelled {
             // Use select() with timeout to allow for cancellation checks
+            // IMPORTANT: Use a short timeout to allow other actor tasks to run
             var readSet = fd_set()
             fdZero(&readSet)
             fdSet(serverSocket, &readSet)
 
-            var timeout = timeval(tv_sec: 1, tv_usec: 0)
+            var timeout = timeval(tv_sec: 0, tv_usec: 100_000)  // 100ms timeout
             let selectResult = select(serverSocket + 1, &readSet, nil, nil, &timeout)
 
             if selectResult <= 0 {
-                continue  // Timeout or error, check if still running
+                // Timeout or error - yield to allow other tasks to run
+                await Task.yield()
+                continue
             }
 
             // Accept new connection
@@ -337,36 +340,44 @@ public actor CLISocketServer {
             // Notify delegate
             await delegate?.server(self, clientDidConnect: clientId)
 
-            // Start reading from client in background task
-            let task = Task { [weak self] in
+            // Start reading from client in a detached task so it's not blocked by this actor
+            // The task captures clientId and clientSocket by value
+            let task = Task.detached { [weak self] in
                 guard let self = self else { return }
                 await self.clientReadLoop(clientId: clientId, socket: clientSocket)
             }
             setClientTask(clientId, task: task)
 
             print("[CLISocket] Client connected: \(clientId)")
+
+            // Yield to allow the new client task to start
+            await Task.yield()
         }
     }
 
     /// Read loop for a single client.
+    /// Note: This runs in a detached task to avoid blocking the actor's accept loop.
     private func clientReadLoop(clientId: UUID, socket clientSocket: Int32) async {
         var buffer = Data()
         let readBuffer = UnsafeMutablePointer<UInt8>.allocate(capacity: 4096)
         defer { readBuffer.deallocate() }
 
         while !Task.isCancelled {
-            // Check if socket is readable
+            // Check if socket is readable with short timeout
+            // Using 100ms allows other actor tasks to run between checks
             var readSet = fd_set()
             fdZero(&readSet)
             fdSet(clientSocket, &readSet)
 
-            var timeout = timeval(tv_sec: 1, tv_usec: 0)
+            var timeout = timeval(tv_sec: 0, tv_usec: 100_000)  // 100ms timeout
             let selectResult = select(clientSocket + 1, &readSet, nil, nil, &timeout)
 
             if selectResult < 0 {
                 break  // Error
             } else if selectResult == 0 {
-                continue  // Timeout, check cancellation
+                // Timeout - yield to allow other tasks to run
+                await Task.yield()
+                continue
             }
 
             // Read from socket
@@ -387,6 +398,9 @@ public actor CLISocketServer {
                     await processLine(line, clientId: clientId, socket: clientSocket)
                 }
             }
+
+            // Yield after processing to allow other tasks to run
+            await Task.yield()
         }
 
         // Client disconnected
