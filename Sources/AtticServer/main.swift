@@ -465,7 +465,53 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
         case .injectKeys(let text):
             // TODO: Implement keyboard injection
             return .ok("injected keys \(text.count)")
+
+        // Disassembly
+        case .disassemble(let address, let lines):
+            return await handleDisassemble(address: address, lines: lines)
         }
+    }
+
+    /// Handles the disassemble command.
+    ///
+    /// - Parameters:
+    ///   - address: Starting address, or nil to use current PC.
+    ///   - lines: Number of lines to disassemble, or nil for default (16).
+    /// - Returns: CLI response with disassembly output.
+    private func handleDisassemble(address: UInt16?, lines: Int?) async -> CLIResponse {
+        // Get starting address (from parameter or current PC)
+        let startAddress: UInt16
+        if let addr = address {
+            startAddress = addr
+        } else {
+            let regs = await emulator.getRegisters()
+            startAddress = regs.pc
+        }
+
+        // Default to 16 lines
+        let lineCount = lines ?? 16
+
+        // Create disassembler with standard Atari labels
+        let disasm = Disassembler(labels: AddressLabels.atariStandard)
+
+        // Get memory bus from emulator for reading
+        // We need to read bytes through the emulator's memory access
+        // Since MemoryBus requires synchronous reads and emulator is async,
+        // we read the needed bytes first
+        let maxBytesNeeded = lineCount * 3  // Max 3 bytes per instruction
+        let memoryBytes = await emulator.readMemoryBlock(at: startAddress, count: maxBytesNeeded)
+
+        // Create an array-backed memory bus for the disassembler
+        let memoryBus = ArrayMemoryBus(data: memoryBytes, baseAddress: startAddress)
+
+        // Disassemble the range
+        let instructions = disasm.disassembleRange(from: startAddress, lines: lineCount, memory: memoryBus)
+
+        // Format output
+        let outputLines = instructions.map { $0.formattedWithLabel }
+        let output = outputLines.joined(separator: CLIProtocolConstants.multiLineSeparator)
+
+        return .ok(output)
     }
 
     func server(_ server: CLISocketServer, clientDidConnect clientId: UUID) async {

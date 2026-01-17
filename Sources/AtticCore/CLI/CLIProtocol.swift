@@ -136,6 +136,12 @@ public enum CLICommand: Sendable {
     // BASIC injection
     case injectBasic(base64Data: String)
     case injectKeys(text: String)
+
+    // Disassembly
+    /// Disassemble memory at the specified address for the given number of lines.
+    /// If address is nil, disassemble from the current PC.
+    /// If lines is nil, default to 16 lines.
+    case disassemble(address: UInt16?, lines: Int?)
 }
 
 // =============================================================================
@@ -294,6 +300,10 @@ public struct CLICommandParser: Sendable {
         // Injection
         case "inject":
             return try parseInject(argsString)
+
+        // Disassembly
+        case "disassemble", "d":
+            return try parseDisassemble(argsString)
 
         default:
             throw CLIProtocolError.invalidCommand(command)
@@ -496,6 +506,46 @@ public struct CLICommandParser: Sendable {
         default:
             throw CLIProtocolError.invalidCommand("inject \(subcommand)")
         }
+    }
+
+    /// Parses a disassemble command.
+    ///
+    /// Syntax: `disassemble [address] [lines]`
+    /// - If no address is given, disassembles from current PC.
+    /// - If no line count is given, defaults to 16 lines.
+    ///
+    /// Examples:
+    /// - `d` - Disassemble 16 lines from PC
+    /// - `d $0600` - Disassemble 16 lines from $0600
+    /// - `d $0600 8` - Disassemble 8 lines from $0600
+    private func parseDisassemble(_ args: String) throws -> CLICommand {
+        if args.isEmpty {
+            // No arguments: disassemble from PC, 16 lines
+            return .disassemble(address: nil, lines: nil)
+        }
+
+        let parts = args.split(separator: " ", omittingEmptySubsequences: true)
+
+        // First argument is the address (optional)
+        var address: UInt16?
+        var lines: Int?
+
+        if !parts.isEmpty {
+            address = parseAddress(String(parts[0]))
+            if address == nil {
+                throw CLIProtocolError.invalidAddress(String(parts[0]))
+            }
+        }
+
+        // Second argument is the line count (optional)
+        if parts.count >= 2 {
+            guard let count = Int(parts[1]), count > 0 else {
+                throw CLIProtocolError.invalidCount(String(parts[1]))
+            }
+            lines = count
+        }
+
+        return .disassemble(address: address, lines: lines)
     }
 
     // MARK: - Helper Functions
