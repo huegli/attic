@@ -434,6 +434,21 @@ public actor CLISocketClient {
                 .replacingOccurrences(of: "\t", with: "\\t")
                 .replacingOccurrences(of: "\r", with: "\\r")
             return "inject keys \(escaped)"
+        case .disassemble(let address, let lines):
+            // Format: disassemble [address] [lines]
+            var cmd = "disassemble"
+            if let addr = address {
+                cmd += " $\(String(format: "%04X", addr))"
+            }
+            if let count = lines {
+                // Only include lines if we have an address, or use default address marker
+                if address == nil {
+                    cmd += " . \(count)"  // '.' typically means current PC
+                } else {
+                    cmd += " \(count)"
+                }
+            }
+            return cmd
         }
     }
 

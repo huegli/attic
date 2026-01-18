@@ -976,12 +976,16 @@ final class AddressLabelsTests: XCTestCase {
     }
 
     /// Test POKEY register labels.
+    /// Note: POKEY registers use combined "Write/Read" names for dual-purpose addresses.
     func test_pokeyLabels() {
         let labels = AddressLabels.pokeyRegisters
 
-        XCTAssertEqual(labels.lookup(0xD200), "AUDF1")
-        XCTAssertEqual(labels.lookup(0xD20A), "RANDOM")
-        XCTAssertEqual(labels.lookup(0xD20F), "SKCTL")
+        // $D200 is AUDF1 (write) / POT0 (read)
+        XCTAssertEqual(labels.lookup(0xD200), "AUDF1/POT0")
+        // $D20A is SKRES (write) / RANDOM (read)
+        XCTAssertEqual(labels.lookup(0xD20A), "SKRES/RANDOM")
+        // $D20F is SKCTL (write) / SKSTAT (read)
+        XCTAssertEqual(labels.lookup(0xD20F), "SKCTL/SKSTAT")
     }
 
     /// Test OS vector labels.

@@ -138,65 +138,49 @@ extension AddressLabels {
     /// GTIA handles graphics priority, player-missile graphics, and collision
     /// detection. It also controls some video mode features.
     public static var gtiaRegisters: AddressLabels {
+        // Note: GTIA registers have different meanings for read vs write at same addresses.
+        // We use combined "Write/Read" naming for dual-purpose registers.
+        // Write registers are listed first as they are more commonly used in user code.
         AddressLabels(labels: [
-            // Read registers (active during horizontal blank)
-            0xD000: "M0PF",      // Missile 0 to playfield collision
-            0xD001: "M1PF",      // Missile 1 to playfield collision
-            0xD002: "M2PF",      // Missile 2 to playfield collision
-            0xD003: "M3PF",      // Missile 3 to playfield collision
-            0xD004: "P0PF",      // Player 0 to playfield collision
-            0xD005: "P1PF",      // Player 1 to playfield collision
-            0xD006: "P2PF",      // Player 2 to playfield collision
-            0xD007: "P3PF",      // Player 3 to playfield collision
-            0xD008: "M0PL",      // Missile 0 to player collision
-            0xD009: "M1PL",      // Missile 1 to player collision
-            0xD00A: "M2PL",      // Missile 2 to player collision
-            0xD00B: "M3PL",      // Missile 3 to player collision
-            0xD00C: "P0PL",      // Player 0 to player collision
-            0xD00D: "P1PL",      // Player 1 to player collision
-            0xD00E: "P2PL",      // Player 2 to player collision
-            0xD00F: "P3PL",      // Player 3 to player collision
+            // $D000-$D007: Write = horizontal position, Read = collision
+            0xD000: "HPOSP0/M0PF",   // W: Horizontal position player 0, R: Missile 0 to playfield collision
+            0xD001: "HPOSP1/M1PF",   // W: Horizontal position player 1, R: Missile 1 to playfield collision
+            0xD002: "HPOSP2/M2PF",   // W: Horizontal position player 2, R: Missile 2 to playfield collision
+            0xD003: "HPOSP3/M3PF",   // W: Horizontal position player 3, R: Missile 3 to playfield collision
+            0xD004: "HPOSM0/P0PF",   // W: Horizontal position missile 0, R: Player 0 to playfield collision
+            0xD005: "HPOSM1/P1PF",   // W: Horizontal position missile 1, R: Player 1 to playfield collision
+            0xD006: "HPOSM2/P2PF",   // W: Horizontal position missile 2, R: Player 2 to playfield collision
+            0xD007: "HPOSM3/P3PF",   // W: Horizontal position missile 3, R: Player 3 to playfield collision
 
-            // Trigger/Console input
-            0xD010: "TRIG0",     // Joystick trigger 0
-            0xD011: "TRIG1",     // Joystick trigger 1
-            0xD012: "TRIG2",     // Joystick trigger 2
-            0xD013: "TRIG3",     // Joystick trigger 3
-            0xD014: "PAL",       // PAL/NTSC flag (0=NTSC, 1=PAL)
+            // $D008-$D00F: Write = size/graphics, Read = collision
+            0xD008: "SIZEP0/M0PL",   // W: Player 0 size, R: Missile 0 to player collision
+            0xD009: "SIZEP1/M1PL",   // W: Player 1 size, R: Missile 1 to player collision
+            0xD00A: "SIZEP2/M2PL",   // W: Player 2 size, R: Missile 2 to player collision
+            0xD00B: "SIZEP3/M3PL",   // W: Player 3 size, R: Missile 3 to player collision
+            0xD00C: "SIZEM/P0PL",    // W: Missile sizes (all 4), R: Player 0 to player collision
+            0xD00D: "GRAFP0/P1PL",   // W: Player 0 graphics, R: Player 1 to player collision
+            0xD00E: "GRAFP1/P2PL",   // W: Player 1 graphics, R: Player 2 to player collision
+            0xD00F: "GRAFP2/P3PL",   // W: Player 2 graphics, R: Player 3 to player collision
 
-            // Write registers
-            0xD000: "HPOSP0",    // Horizontal position player 0
-            0xD001: "HPOSP1",    // Horizontal position player 1
-            0xD002: "HPOSP2",    // Horizontal position player 2
-            0xD003: "HPOSP3",    // Horizontal position player 3
-            0xD004: "HPOSM0",    // Horizontal position missile 0
-            0xD005: "HPOSM1",    // Horizontal position missile 1
-            0xD006: "HPOSM2",    // Horizontal position missile 2
-            0xD007: "HPOSM3",    // Horizontal position missile 3
-            0xD008: "SIZEP0",    // Player 0 size
-            0xD009: "SIZEP1",    // Player 1 size
-            0xD00A: "SIZEP2",    // Player 2 size
-            0xD00B: "SIZEP3",    // Player 3 size
-            0xD00C: "SIZEM",     // Missile sizes (all 4)
-            0xD00D: "GRAFP0",    // Player 0 graphics (shape)
-            0xD00E: "GRAFP1",    // Player 1 graphics
-            0xD00F: "GRAFP2",    // Player 2 graphics
-            0xD010: "GRAFP3",    // Player 3 graphics
-            0xD011: "GRAFM",     // Missile graphics (all 4)
-            0xD012: "COLPM0",    // Player/missile 0 color
-            0xD013: "COLPM1",    // Player/missile 1 color
-            0xD014: "COLPM2",    // Player/missile 2 color
-            0xD015: "COLPM3",    // Player/missile 3 color
-            0xD016: "COLPF0",    // Playfield 0 color
-            0xD017: "COLPF1",    // Playfield 1 color
-            0xD018: "COLPF2",    // Playfield 2 color
-            0xD019: "COLPF3",    // Playfield 3 color
-            0xD01A: "COLBK",     // Background color
-            0xD01B: "PRIOR",     // Priority/GTIA mode select
-            0xD01C: "VDELAY",    // Vertical delay for P/M graphics
-            0xD01D: "GRACTL",    // Graphics control
-            0xD01E: "HITCLR",    // Clear collision registers (write)
-            0xD01F: "CONSOL",    // Console buttons/speaker
+            // $D010-$D014: Write = graphics/color, Read = trigger/PAL
+            0xD010: "GRAFP3/TRIG0",  // W: Player 3 graphics, R: Joystick trigger 0
+            0xD011: "GRAFM/TRIG1",   // W: Missile graphics (all 4), R: Joystick trigger 1
+            0xD012: "COLPM0/TRIG2",  // W: Player/missile 0 color, R: Joystick trigger 2
+            0xD013: "COLPM1/TRIG3",  // W: Player/missile 1 color, R: Joystick trigger 3
+            0xD014: "COLPM2/PAL",    // W: Player/missile 2 color, R: PAL/NTSC flag
+
+            // Write-only registers (no read equivalent)
+            0xD015: "COLPM3",     // Player/missile 3 color
+            0xD016: "COLPF0",     // Playfield 0 color
+            0xD017: "COLPF1",     // Playfield 1 color
+            0xD018: "COLPF2",     // Playfield 2 color
+            0xD019: "COLPF3",     // Playfield 3 color
+            0xD01A: "COLBK",      // Background color
+            0xD01B: "PRIOR",      // Priority/GTIA mode select
+            0xD01C: "VDELAY",     // Vertical delay for P/M graphics
+            0xD01D: "GRACTL",     // Graphics control
+            0xD01E: "HITCLR",     // Clear collision registers (write)
+            0xD01F: "CONSOL",     // Console buttons/speaker
         ])
     }
 }
@@ -211,39 +195,32 @@ extension AddressLabels {
     /// POKEY handles sound generation, keyboard scanning, serial I/O,
     /// random number generation, and paddle/pot reading.
     public static var pokeyRegisters: AddressLabels {
+        // Note: POKEY registers have different meanings for read vs write at same addresses.
+        // We use combined "Write/Read" naming for dual-purpose registers.
+        // Write registers are listed first as they are more commonly used in user code.
         AddressLabels(labels: [
-            // Read registers
-            0xD200: "POT0",      // Potentiometer (paddle) 0
-            0xD201: "POT1",      // Potentiometer 1
-            0xD202: "POT2",      // Potentiometer 2
-            0xD203: "POT3",      // Potentiometer 3
-            0xD204: "POT4",      // Potentiometer 4
-            0xD205: "POT5",      // Potentiometer 5
-            0xD206: "POT6",      // Potentiometer 6
-            0xD207: "POT7",      // Potentiometer 7
-            0xD208: "ALLPOT",    // All pot port status
-            0xD209: "KBCODE",    // Keyboard code
-            0xD20A: "RANDOM",    // Random number generator
-            0xD20D: "SERIN",     // Serial port input
-            0xD20E: "IRQST",     // IRQ status
-            0xD20F: "SKSTAT",    // Serial port and keyboard status
+            // $D200-$D207: Write = audio, Read = pot
+            0xD200: "AUDF1/POT0",    // W: Audio frequency 1, R: Potentiometer (paddle) 0
+            0xD201: "AUDC1/POT1",    // W: Audio control 1, R: Potentiometer 1
+            0xD202: "AUDF2/POT2",    // W: Audio frequency 2, R: Potentiometer 2
+            0xD203: "AUDC2/POT3",    // W: Audio control 2, R: Potentiometer 3
+            0xD204: "AUDF3/POT4",    // W: Audio frequency 3, R: Potentiometer 4
+            0xD205: "AUDC3/POT5",    // W: Audio control 3, R: Potentiometer 5
+            0xD206: "AUDF4/POT6",    // W: Audio frequency 4, R: Potentiometer 6
+            0xD207: "AUDC4/POT7",    // W: Audio control 4, R: Potentiometer 7
 
-            // Write registers
-            0xD200: "AUDF1",     // Audio frequency 1
-            0xD201: "AUDC1",     // Audio control 1
-            0xD202: "AUDF2",     // Audio frequency 2
-            0xD203: "AUDC2",     // Audio control 2
-            0xD204: "AUDF3",     // Audio frequency 3
-            0xD205: "AUDC3",     // Audio control 3
-            0xD206: "AUDF4",     // Audio frequency 4
-            0xD207: "AUDC4",     // Audio control 4
-            0xD208: "AUDCTL",    // Audio control
-            0xD209: "STIMER",    // Start timers
-            0xD20A: "SKRES",     // Serial/keyboard reset
-            0xD20B: "POTGO",     // Start pot scan
-            0xD20D: "SEROUT",    // Serial port output
-            0xD20E: "IRQEN",     // IRQ enable
-            0xD20F: "SKCTL",     // Serial/keyboard control
+            // $D208-$D20A: Write = control, Read = status
+            0xD208: "AUDCTL/ALLPOT", // W: Audio control, R: All pot port status
+            0xD209: "STIMER/KBCODE", // W: Start timers, R: Keyboard code
+            0xD20A: "SKRES/RANDOM",  // W: Serial/keyboard reset, R: Random number generator
+
+            // Write-only registers
+            0xD20B: "POTGO",         // Start pot scan (write only)
+
+            // $D20D-$D20F: Write = serial out/control, Read = serial in/status
+            0xD20D: "SEROUT/SERIN",  // W: Serial port output, R: Serial port input
+            0xD20E: "IRQEN/IRQST",   // W: IRQ enable, R: IRQ status
+            0xD20F: "SKCTL/SKSTAT",  // W: Serial/keyboard control, R: Serial port and keyboard status
         ])
     }
 }
@@ -276,25 +253,28 @@ extension AddressLabels {
     /// ANTIC is the display processor that generates the video display
     /// based on a display list and data from memory.
     public static var anticRegisters: AddressLabels {
+        // Note: ANTIC register $D40F has different meanings for read vs write.
+        // We use combined "Write/Read" naming for this register.
         AddressLabels(labels: [
-            // Read registers
-            0xD40B: "VCOUNT",    // Vertical line counter
-            0xD40C: "PENH",      // Light pen horizontal position
-            0xD40D: "PENV",      // Light pen vertical position
-            0xD40F: "NMIST",     // NMI status
+            // Write-only registers
+            0xD400: "DMACTL",        // DMA control
+            0xD401: "CHACTL",        // Character control
+            0xD402: "DLISTL",        // Display list low byte
+            0xD403: "DLISTH",        // Display list high byte
+            0xD404: "HSCROL",        // Horizontal scroll
+            0xD405: "VSCROL",        // Vertical scroll
+            0xD407: "PMBASE",        // Player/Missile base address (high byte)
+            0xD409: "CHBASE",        // Character base address (high byte)
+            0xD40A: "WSYNC",         // Wait for horizontal sync
+            0xD40E: "NMIEN",         // NMI enable
 
-            // Write registers
-            0xD400: "DMACTL",    // DMA control
-            0xD401: "CHACTL",    // Character control
-            0xD402: "DLISTL",    // Display list low byte
-            0xD403: "DLISTH",    // Display list high byte
-            0xD404: "HSCROL",    // Horizontal scroll
-            0xD405: "VSCROL",    // Vertical scroll
-            0xD407: "PMBASE",    // Player/Missile base address (high byte)
-            0xD409: "CHBASE",    // Character base address (high byte)
-            0xD40A: "WSYNC",     // Wait for horizontal sync
-            0xD40E: "NMIEN",     // NMI enable
-            0xD40F: "NMIRES",    // NMI reset
+            // Read-only registers
+            0xD40B: "VCOUNT",        // Vertical line counter
+            0xD40C: "PENH",          // Light pen horizontal position
+            0xD40D: "PENV",          // Light pen vertical position
+
+            // $D40F: Write = reset, Read = status
+            0xD40F: "NMIRES/NMIST",  // W: NMI reset, R: NMI status
         ])
     }
 }
@@ -448,8 +428,7 @@ extension AddressLabels {
             0x0091: "MEMTOP+1",  // BASIC memory top (high)
 
             // Floating point workspace
-            0x00D4: "FR0",       // Floating point register 0
-            0x00D4: "FR0",       // FP reg 0 byte 0
+            0x00D4: "FR0",       // Floating point register 0 (6 bytes)
             0x00E0: "FR1",       // Floating point register 1
             0x00E6: "CIX",       // Input index
             0x00F3: "INBUFF",    // Input buffer pointer (low)
@@ -472,7 +451,21 @@ extension AddressLabels {
             0x031A: "HATABS",    // Handler address table
 
             // Device control blocks (IOCBs)
-            0x0340: "IOCB0",     // I/O control block 0
+            // Each IOCB is 16 bytes. The first byte is ICHID (Handler ID).
+            // IOCB0 starts at $0340, and also serves as the ICHID0 location.
+            0x0340: "IOCB0",     // I/O control block 0 / ICHID0 (Handler ID)
+            0x0341: "ICDNO0",    // Device number
+            0x0342: "ICCOM0",    // Command
+            0x0343: "ICSTA0",    // Status
+            0x0344: "ICBAL0",    // Buffer address (low)
+            0x0345: "ICBAH0",    // Buffer address (high)
+            0x0346: "ICPTL0",    // Put byte routine (low)
+            0x0347: "ICPTH0",    // Put byte routine (high)
+            0x0348: "ICBLL0",    // Buffer length (low)
+            0x0349: "ICBLH0",    // Buffer length (high)
+            0x034A: "ICAX10",    // Auxiliary byte 1
+            0x034B: "ICAX20",    // Auxiliary byte 2
+
             0x0350: "IOCB1",     // I/O control block 1
             0x0360: "IOCB2",     // I/O control block 2
             0x0370: "IOCB3",     // I/O control block 3
@@ -480,20 +473,6 @@ extension AddressLabels {
             0x0390: "IOCB5",     // I/O control block 5
             0x03A0: "IOCB6",     // I/O control block 6
             0x03B0: "IOCB7",     // I/O control block 7
-
-            // IOCB structure offsets (example for IOCB0)
-            0x0340: "ICHID",     // Handler ID
-            0x0341: "ICDNO",     // Device number
-            0x0342: "ICCOM",     // Command
-            0x0343: "ICSTA",     // Status
-            0x0344: "ICBAL",     // Buffer address (low)
-            0x0345: "ICBAH",     // Buffer address (high)
-            0x0346: "ICPTL",     // Put byte routine (low)
-            0x0347: "ICPTH",     // Put byte routine (high)
-            0x0348: "ICBLL",     // Buffer length (low)
-            0x0349: "ICBLH",     // Buffer length (high)
-            0x034A: "ICAX1",     // Auxiliary byte 1
-            0x034B: "ICAX2",     // Auxiliary byte 2
 
             // Printer buffer
             0x03C0: "PRNBUF",    // Printer buffer (40 bytes)
