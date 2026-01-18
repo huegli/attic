@@ -637,11 +637,31 @@ public struct CommandParser {
     }
 
     // =========================================================================
-    // MARK: - DOS Command Parsing (Stub)
+    // MARK: - DOS Command Parsing
     // =========================================================================
 
+    /// Parses DOS mode commands for disk and file management.
+    ///
+    /// DOS mode supports the following commands:
+    /// - `mount <n> <path>` - Mount ATR at drive n (1-8)
+    /// - `unmount <n>` - Unmount drive n
+    /// - `drives` - Show all drives
+    /// - `cd <n>` - Change current drive
+    /// - `dir [pattern]` - List files
+    /// - `info <file>` - Show file info
+    /// - `type <file>` - Display text file
+    /// - `dump <file>` - Hex dump of file
+    /// - `copy <src> <dest>` - Copy file
+    /// - `rename <old> <new>` - Rename file
+    /// - `delete <file>` - Delete file
+    /// - `lock <file>` - Lock file (read-only)
+    /// - `unlock <file>` - Unlock file
+    /// - `export <file> <path>` - Export to host
+    /// - `import <path> <file>` - Import from host
+    /// - `newdisk <path> [type]` - Create new ATR
+    /// - `format` - Format current disk
     private func parseDOSCommand(_ input: String) throws -> Command {
-        let parts = input.split(separator: " ")
+        let parts = input.split(separator: " ", omittingEmptySubsequences: true)
         guard let first = parts.first else {
             throw AtticError.invalidCommand(input, suggestion: nil)
         }
@@ -649,13 +669,217 @@ public struct CommandParser {
         let command = String(first).lowercased()
 
         switch command {
+        // =================================================================
+        // Drive Management
+        // =================================================================
+
+        case "mount":
+            // mount <drive> <path>
+            guard parts.count >= 3 else {
+                throw AtticError.invalidCommand(
+                    "mount",
+                    suggestion: "Usage: mount <drive> <path>  (e.g., mount 1 ~/disks/game.atr)"
+                )
+            }
+            guard let drive = Int(parts[1]), drive >= 1 && drive <= 8 else {
+                throw AtticError.invalidCommand(
+                    "mount",
+                    suggestion: "Drive must be 1-8"
+                )
+            }
+            // Join remaining parts as path (handles spaces in path)
+            let path = parts.dropFirst(2).joined(separator: " ")
+            return .dosMountDisk(drive: drive, path: path)
+
+        case "unmount":
+            // unmount <drive>
+            guard parts.count >= 2 else {
+                throw AtticError.invalidCommand(
+                    "unmount",
+                    suggestion: "Usage: unmount <drive>  (e.g., unmount 1)"
+                )
+            }
+            guard let drive = Int(parts[1]), drive >= 1 && drive <= 8 else {
+                throw AtticError.invalidCommand(
+                    "unmount",
+                    suggestion: "Drive must be 1-8"
+                )
+            }
+            return .dosUnmount(drive: drive)
+
         case "drives":
             return .dosDrives
+
+        case "cd":
+            // cd <drive>
+            guard parts.count >= 2 else {
+                throw AtticError.invalidCommand(
+                    "cd",
+                    suggestion: "Usage: cd <drive>  (e.g., cd 2)"
+                )
+            }
+            guard let drive = Int(parts[1]), drive >= 1 && drive <= 8 else {
+                throw AtticError.invalidCommand(
+                    "cd",
+                    suggestion: "Drive must be 1-8"
+                )
+            }
+            return .dosChangeDrive(drive: drive)
+
+        // =================================================================
+        // Directory Operations
+        // =================================================================
+
         case "dir":
+            // dir [pattern]
             let pattern = parts.count > 1 ? String(parts[1]) : nil
             return .dosDirectory(pattern: pattern)
+
+        case "info":
+            // info <filename>
+            guard parts.count >= 2 else {
+                throw AtticError.invalidCommand(
+                    "info",
+                    suggestion: "Usage: info <filename>  (e.g., info GAME.COM)"
+                )
+            }
+            return .dosFileInfo(filename: String(parts[1]))
+
+        // =================================================================
+        // File Viewing
+        // =================================================================
+
+        case "type":
+            // type <filename>
+            guard parts.count >= 2 else {
+                throw AtticError.invalidCommand(
+                    "type",
+                    suggestion: "Usage: type <filename>  (e.g., type README.TXT)"
+                )
+            }
+            return .dosType(filename: String(parts[1]))
+
+        case "dump":
+            // dump <filename>
+            guard parts.count >= 2 else {
+                throw AtticError.invalidCommand(
+                    "dump",
+                    suggestion: "Usage: dump <filename>  (e.g., dump GAME.COM)"
+                )
+            }
+            return .dosDump(filename: String(parts[1]))
+
+        // =================================================================
+        // File Operations
+        // =================================================================
+
+        case "copy":
+            // copy <source> <destination>
+            guard parts.count >= 3 else {
+                throw AtticError.invalidCommand(
+                    "copy",
+                    suggestion: "Usage: copy <source> <dest>  (e.g., copy GAME.COM D2:BACKUP.COM)"
+                )
+            }
+            return .dosCopy(source: String(parts[1]), destination: String(parts[2]))
+
+        case "rename":
+            // rename <oldname> <newname>
+            guard parts.count >= 3 else {
+                throw AtticError.invalidCommand(
+                    "rename",
+                    suggestion: "Usage: rename <old> <new>  (e.g., rename GAME.COM ARCADE.COM)"
+                )
+            }
+            return .dosRename(oldName: String(parts[1]), newName: String(parts[2]))
+
+        case "delete", "del":
+            // delete <filename>
+            guard parts.count >= 2 else {
+                throw AtticError.invalidCommand(
+                    "delete",
+                    suggestion: "Usage: delete <filename>  (e.g., delete SAVE.DAT)"
+                )
+            }
+            return .dosDelete(filename: String(parts[1]))
+
+        case "lock":
+            // lock <filename>
+            guard parts.count >= 2 else {
+                throw AtticError.invalidCommand(
+                    "lock",
+                    suggestion: "Usage: lock <filename>  (e.g., lock GAME.COM)"
+                )
+            }
+            return .dosLock(filename: String(parts[1]))
+
+        case "unlock":
+            // unlock <filename>
+            guard parts.count >= 2 else {
+                throw AtticError.invalidCommand(
+                    "unlock",
+                    suggestion: "Usage: unlock <filename>  (e.g., unlock GAME.COM)"
+                )
+            }
+            return .dosUnlock(filename: String(parts[1]))
+
+        // =================================================================
+        // Host Transfer
+        // =================================================================
+
+        case "export":
+            // export <filename> <hostpath>
+            guard parts.count >= 3 else {
+                throw AtticError.invalidCommand(
+                    "export",
+                    suggestion: "Usage: export <file> <path>  (e.g., export GAME.COM ~/Desktop/game.com)"
+                )
+            }
+            let filename = String(parts[1])
+            // Join remaining parts as path (handles spaces)
+            let path = parts.dropFirst(2).joined(separator: " ")
+            return .dosExport(filename: filename, path: path)
+
+        case "import":
+            // import <hostpath> <filename>
+            guard parts.count >= 3 else {
+                throw AtticError.invalidCommand(
+                    "import",
+                    suggestion: "Usage: import <path> <file>  (e.g., import ~/Desktop/game.com GAME.COM)"
+                )
+            }
+            // For import, the path is first, so we need to be careful about spaces
+            // If filename is last part, path is everything before it
+            let filename = String(parts.last!)
+            let path = parts.dropFirst().dropLast().joined(separator: " ")
+            return .dosImport(path: path, filename: filename)
+
+        // =================================================================
+        // Disk Management
+        // =================================================================
+
+        case "newdisk":
+            // newdisk <path> [type]
+            guard parts.count >= 2 else {
+                throw AtticError.invalidCommand(
+                    "newdisk",
+                    suggestion: "Usage: newdisk <path> [type]  (types: ss/sd, ss/ed, ss/dd)"
+                )
+            }
+            // Check if last part is a disk type
+            let lastPart = String(parts.last!).lowercased()
+            let validTypes = ["ss/sd", "ss/ed", "ss/dd"]
+            if validTypes.contains(lastPart) && parts.count >= 3 {
+                let path = parts.dropFirst().dropLast().joined(separator: " ")
+                return .dosNewDisk(path: path, type: lastPart)
+            } else {
+                let path = parts.dropFirst().joined(separator: " ")
+                return .dosNewDisk(path: path, type: nil)
+            }
+
         case "format":
             return .dosFormat
+
         default:
             throw AtticError.invalidCommand(
                 command,

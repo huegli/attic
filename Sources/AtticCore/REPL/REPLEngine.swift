@@ -50,8 +50,9 @@ public actor REPLEngine {
     /// Current REPL mode.
     private(set) public var mode: REPLMode
 
-    /// Current drive for DOS mode (1-8).
-    private var currentDrive: Int = 1
+    /// Disk manager for DOS mode file operations.
+    /// Provides direct ATR file access independent of emulator disk I/O.
+    private let diskManager: DiskManager
 
     /// Whether the REPL should continue running.
     private var isRunning: Bool = true
@@ -73,6 +74,7 @@ public actor REPLEngine {
         self.emulator = emulator
         self.parser = CommandParser()
         self.mode = initialMode
+        self.diskManager = DiskManager()
     }
 
     // =========================================================================
@@ -94,6 +96,7 @@ public actor REPLEngine {
             case .basic:
                 return mode.prompt()
             case .dos:
+                let currentDrive = await diskManager.currentDrive
                 return mode.prompt(drive: currentDrive)
             }
         }
@@ -346,61 +349,332 @@ public actor REPLEngine {
             return "Export to \(path) [not yet implemented]"
 
         // =====================================================================
-        // DOS Commands (Stubs)
+        // DOS Commands
         // =====================================================================
 
         case .dosMountDisk(let drive, let path):
-            return "Mount D\(drive): \(path) [not yet implemented]"
+            return await executeDOSMount(drive: drive, path: path)
 
         case .dosUnmount(let drive):
-            return "Unmount D\(drive): [not yet implemented]"
+            return await executeDOSUnmount(drive: drive)
 
         case .dosDrives:
-            return "Drives [not yet implemented]"
+            return await executeDOSDrives()
 
         case .dosChangeDrive(let drive):
-            currentDrive = drive
-            return "Changed to D\(drive):"
+            return await executeDOSChangeDrive(drive: drive)
 
         case .dosDirectory(let pattern):
-            return "DIR \(pattern ?? "*.*") [not yet implemented]"
+            return await executeDOSDirectory(pattern: pattern)
 
         case .dosFileInfo(let filename):
-            return "INFO \(filename) [not yet implemented]"
+            return await executeDOSFileInfo(filename: filename)
 
         case .dosType(let filename):
-            return "TYPE \(filename) [not yet implemented]"
+            return await executeDOSType(filename: filename)
 
         case .dosDump(let filename):
-            return "DUMP \(filename) [not yet implemented]"
+            return await executeDOSDump(filename: filename)
 
         case .dosCopy(let source, let dest):
-            return "COPY \(source) \(dest) [not yet implemented]"
+            return await executeDOSCopy(source: source, dest: dest)
 
         case .dosRename(let oldName, let newName):
-            return "RENAME \(oldName) \(newName) [not yet implemented]"
+            return await executeDOSRename(oldName: oldName, newName: newName)
 
         case .dosDelete(let filename):
-            return "DELETE \(filename) [not yet implemented]"
+            return await executeDOSDelete(filename: filename)
 
         case .dosLock(let filename):
-            return "LOCK \(filename) [not yet implemented]"
+            return await executeDOSLock(filename: filename)
 
         case .dosUnlock(let filename):
-            return "UNLOCK \(filename) [not yet implemented]"
+            return await executeDOSUnlock(filename: filename)
 
         case .dosExport(let filename, let path):
-            return "Export \(filename) to \(path) [not yet implemented]"
+            return await executeDOSExport(filename: filename, path: path)
 
         case .dosImport(let path, let filename):
-            return "Import \(path) as \(filename) [not yet implemented]"
+            return await executeDOSImport(path: path, filename: filename)
 
         case .dosNewDisk(let path, let type):
-            return "Create \(path) type=\(type ?? "ss/sd") [not yet implemented]"
+            return await executeDOSNewDisk(path: path, type: type)
 
         case .dosFormat:
-            return "FORMAT [not yet implemented]"
+            return await executeDOSFormat()
         }
+    }
+
+    // =========================================================================
+    // MARK: - DOS Command Implementations
+    // =========================================================================
+
+    /// Mounts an ATR disk image.
+    private func executeDOSMount(drive: Int, path: String) async -> String {
+        do {
+            let info = try await diskManager.mount(drive: drive, path: path)
+            let typeStr = info.diskType?.shortDescription ?? "Unknown"
+            return "Mounted D\(drive): \(info.filename) (\(typeStr), \(info.fileCount) files, \(info.freeSectors) free)"
+        } catch {
+            return formatDOSError(error)
+        }
+    }
+
+    /// Unmounts a disk.
+    private func executeDOSUnmount(drive: Int) async -> String {
+        do {
+            try await diskManager.unmount(drive: drive)
+            return "Unmounted D\(drive):"
+        } catch {
+            return formatDOSError(error)
+        }
+    }
+
+    /// Lists all drives.
+    private func executeDOSDrives() async -> String {
+        let drives = await diskManager.listDrives()
+        return drives.map { $0.displayString }.joined(separator: "\n")
+    }
+
+    /// Changes the current drive.
+    private func executeDOSChangeDrive(drive: Int) async -> String {
+        do {
+            try await diskManager.changeDrive(to: drive)
+            return "Changed to D\(drive):"
+        } catch {
+            return formatDOSError(error)
+        }
+    }
+
+    /// Lists directory contents.
+    private func executeDOSDirectory(pattern: String?) async -> String {
+        do {
+            let entries = try await diskManager.listDirectory(pattern: pattern)
+
+            if entries.isEmpty {
+                return "No files found"
+            }
+
+            // Format directory listing
+            var output = ""
+            var totalSectors = 0
+
+            for entry in entries {
+                let name = entry.filename.trimmingCharacters(in: .whitespaces)
+                let ext = entry.ext.trimmingCharacters(in: .whitespaces)
+                let lockedStr = entry.isLocked ? "*" : " "
+                output += String(format: "%@ %-8s %-3s %4d\n", lockedStr, name, ext, entry.sectorCount)
+                totalSectors += Int(entry.sectorCount)
+            }
+
+            // Get disk stats for free sectors
+            let currentDrive = await diskManager.currentDrive
+            if let info = try? await diskManager.getInfo(drive: currentDrive) {
+                output += "\(entries.count) files, \(totalSectors) sectors used, \(info.freeSectors) free"
+            } else {
+                output += "\(entries.count) files, \(totalSectors) sectors used"
+            }
+
+            return output
+        } catch {
+            return formatDOSError(error)
+        }
+    }
+
+    /// Shows file information.
+    private func executeDOSFileInfo(filename: String) async -> String {
+        do {
+            let info = try await diskManager.getFileInfo(name: filename)
+            return """
+              Filename: \(info.name)
+              Size: \(info.sectorCount) sectors (\(info.size) bytes)
+              Start sector: \(info.startSector)
+              Flags: \(info.isLocked ? "Locked" : "Normal")
+            """
+        } catch {
+            return formatDOSError(error)
+        }
+    }
+
+    /// Displays a text file.
+    private func executeDOSType(filename: String) async -> String {
+        do {
+            let data = try await diskManager.readFile(name: filename)
+
+            // Convert to string, handling ATASCII to ASCII conversion
+            // ATASCII uses $9B for end of line (EOL)
+            var text = ""
+            for byte in data {
+                if byte == 0x9B {
+                    text += "\n"
+                } else if byte >= 0x20 && byte < 0x7F {
+                    text += String(Character(UnicodeScalar(byte)))
+                } else if byte == 0x00 {
+                    // Null byte - often padding, skip
+                    continue
+                } else {
+                    // Other control characters - show as placeholder
+                    text += "."
+                }
+            }
+
+            return text.trimmingCharacters(in: .whitespacesAndNewlines)
+        } catch {
+            return formatDOSError(error)
+        }
+    }
+
+    /// Hex dumps a file.
+    private func executeDOSDump(filename: String) async -> String {
+        do {
+            let data = try await diskManager.readFile(name: filename)
+            return formatHexDump(data: Array(data), baseAddress: 0)
+        } catch {
+            return formatDOSError(error)
+        }
+    }
+
+    /// Copies a file (placeholder - cross-drive copy not yet implemented).
+    private func executeDOSCopy(source: String, dest: String) async -> String {
+        // Parse destination for drive prefix (e.g., "D2:FILE.COM")
+        // For now, only same-drive copy is conceptually supported,
+        // but actual file writing requires Phase 12 write support
+        return "Error: File copy not yet implemented (requires write support)"
+    }
+
+    /// Renames a file.
+    private func executeDOSRename(oldName: String, newName: String) async -> String {
+        do {
+            try await diskManager.renameFile(from: oldName, to: newName)
+            return "Renamed \(oldName) to \(newName)"
+        } catch {
+            return formatDOSError(error)
+        }
+    }
+
+    /// Deletes a file.
+    private func executeDOSDelete(filename: String) async -> String {
+        do {
+            try await diskManager.deleteFile(name: filename)
+            return "Deleted \(filename)"
+        } catch {
+            return formatDOSError(error)
+        }
+    }
+
+    /// Locks a file (makes read-only).
+    private func executeDOSLock(filename: String) async -> String {
+        do {
+            try await diskManager.lockFile(name: filename)
+            return "Locked \(filename)"
+        } catch {
+            return formatDOSError(error)
+        }
+    }
+
+    /// Unlocks a file.
+    private func executeDOSUnlock(filename: String) async -> String {
+        do {
+            try await diskManager.unlockFile(name: filename)
+            return "Unlocked \(filename)"
+        } catch {
+            return formatDOSError(error)
+        }
+    }
+
+    /// Exports a file to the host filesystem.
+    private func executeDOSExport(filename: String, path: String) async -> String {
+        do {
+            let bytes = try await diskManager.exportFile(name: filename, to: path)
+            let expandedPath = NSString(string: path).expandingTildeInPath
+            return "Exported \(filename) to \(expandedPath) (\(bytes) bytes)"
+        } catch {
+            return formatDOSError(error)
+        }
+    }
+
+    /// Imports a file from the host filesystem.
+    private func executeDOSImport(path: String, filename: String) async -> String {
+        do {
+            let bytes = try await diskManager.importFile(from: path, name: filename)
+            return "Imported \(path) as \(filename) (\(bytes) bytes)"
+        } catch {
+            return formatDOSError(error)
+        }
+    }
+
+    /// Creates a new disk image.
+    private func executeDOSNewDisk(path: String, type: String?) async -> String {
+        do {
+            let diskType = type.flatMap { ATRDiskType(from: $0) } ?? .singleDensity
+            let url = try await diskManager.createDisk(at: path, type: diskType)
+            return "Created new disk image: \(url.path) (\(diskType.description))"
+        } catch {
+            return formatDOSError(error)
+        }
+    }
+
+    /// Formats the current disk (placeholder - requires confirmation).
+    private func executeDOSFormat() async -> String {
+        // Formatting is destructive - in a real implementation we'd ask for confirmation
+        // For now, just execute it
+        do {
+            let currentDrive = await diskManager.currentDrive
+            try await diskManager.formatDisk(drive: currentDrive)
+            return "Formatted D\(currentDrive):"
+        } catch {
+            return formatDOSError(error)
+        }
+    }
+
+    /// Formats a DOS-related error for display.
+    private func formatDOSError(_ error: Error) -> String {
+        if let diskError = error as? DiskManagerError {
+            return "Error: \(diskError.errorDescription ?? String(describing: diskError))"
+        } else if let fsError = error as? FileSystemError {
+            return "Error: \(fsError.errorDescription ?? String(describing: fsError))"
+        } else if let atrError = error as? ATRError {
+            return "Error: \(atrError.errorDescription ?? String(describing: atrError))"
+        } else {
+            return "Error: \(error.localizedDescription)"
+        }
+    }
+
+    /// Formats data as a hex dump.
+    private func formatHexDump(data: [UInt8], baseAddress: Int) -> String {
+        var output = ""
+
+        for chunk in stride(from: 0, to: data.count, by: 16) {
+            let end = min(chunk + 16, data.count)
+            let lineBytes = Array(data[chunk..<end])
+            let addr = baseAddress + chunk
+
+            // Address
+            output += String(format: "%04X: ", addr)
+
+            // Hex bytes
+            for (i, byte) in lineBytes.enumerated() {
+                output += String(format: "%02X ", byte)
+                if i == 7 { output += " " }  // Extra space in middle
+            }
+
+            // Padding for incomplete line
+            if lineBytes.count < 16 {
+                let missing = 16 - lineBytes.count
+                output += String(repeating: "   ", count: missing)
+                if lineBytes.count < 8 { output += " " }
+            }
+
+            // ASCII representation
+            output += " |"
+            for byte in lineBytes {
+                let char = (byte >= 0x20 && byte < 0x7F) ? Character(UnicodeScalar(byte)) : "."
+                output.append(char)
+            }
+            output += "|\n"
+        }
+
+        return output.trimmingCharacters(in: .newlines)
     }
 
     // =========================================================================

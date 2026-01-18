@@ -132,6 +132,15 @@ public enum AtticError: Error, LocalizedError {
     /// File operation error.
     case fileError(String)
 
+    /// Disk/drive operation error.
+    case diskError(String)
+
+    /// ATR image format error.
+    case atrError(String)
+
+    /// DOS file system error.
+    case dosError(String)
+
     /// Human-readable error description for display.
     public var errorDescription: String? {
         switch self {
@@ -158,6 +167,12 @@ public enum AtticError: Error, LocalizedError {
             return "Invalid command '\(cmd)'"
         case .fileError(let reason):
             return "File error: \(reason)"
+        case .diskError(let reason):
+            return "Disk error: \(reason)"
+        case .atrError(let reason):
+            return "ATR error: \(reason)"
+        case .dosError(let reason):
+            return "DOS error: \(reason)"
         }
     }
 }
