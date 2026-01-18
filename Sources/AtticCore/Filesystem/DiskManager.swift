@@ -32,6 +32,9 @@
 //     // Read a file
 //     let data = try await manager.readFile(drive: 1, name: "GAME.COM")
 //
+//     // Write a file
+//     try await manager.writeFile(drive: 1, name: "HELLO.TXT", data: data)
+//
 //     // Unmount
 //     await manager.unmount(drive: 1)
 //
@@ -97,7 +100,7 @@ public struct MountedDiskInfo: Sendable {
     public let filename: String
 
     /// The disk type (SS/SD, SS/ED, SS/DD, etc.).
-    public let diskType: ATRDiskType?
+    public let diskType: DiskType
 
     /// Number of free sectors.
     public let freeSectors: Int
@@ -110,6 +113,50 @@ public struct MountedDiskInfo: Sendable {
 
     /// Whether the disk has unsaved changes.
     public let isModified: Bool
+}
+
+// =============================================================================
+// MARK: - Drive Status Structure
+// =============================================================================
+
+/// Status information for a drive.
+public struct DriveStatus: Sendable {
+    /// The drive number (1-8).
+    public let drive: Int
+
+    /// Whether a disk is mounted in this drive.
+    public let mounted: Bool
+
+    /// The path to the mounted ATR file (nil if empty).
+    public let path: String?
+
+    /// The disk type (nil if empty or unknown).
+    public let diskType: DiskType?
+
+    /// Number of free sectors (0 if empty).
+    public let freeSectors: Int
+
+    /// Number of files on the disk (0 if empty).
+    public let fileCount: Int
+
+    /// Whether the disk is mounted read-only.
+    public let isReadOnly: Bool
+
+    /// Whether the disk has unsaved changes.
+    public let isModified: Bool
+
+    /// Formatted description for display.
+    public var displayString: String {
+        if mounted {
+            let typeStr = diskType?.shortName ?? "???"
+            let filename = path.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "?"
+            let roStr = isReadOnly ? " [R/O]" : ""
+            let modStr = isModified ? "*" : ""
+            return "D\(drive): \(filename) (\(typeStr), \(fileCount) files, \(freeSectors) free)\(roStr)\(modStr)"
+        } else {
+            return "D\(drive): (empty)"
+        }
+    }
 }
 
 // =============================================================================
@@ -138,7 +185,6 @@ public actor DiskManager {
     // =========================================================================
 
     /// Mounted disks indexed by drive number (1-8).
-    /// Index 0 is unused to match Atari's 1-based drive numbering.
     private var mountedDisks: [Int: MountedDisk] = [:]
 
     /// The current drive for DOS mode operations.
@@ -151,7 +197,7 @@ public actor DiskManager {
     /// Internal structure to hold disk and file system references.
     private struct MountedDisk {
         let image: ATRImage
-        let fileSystem: AtariFileSystem
+        let fileSystem: ATRFileSystem
         let path: String
         let isReadOnly: Bool
     }
@@ -204,7 +250,7 @@ public actor DiskManager {
         }
 
         // Create file system interface
-        let fileSystem = AtariFileSystem(disk: image)
+        let fileSystem = try ATRFileSystem(disk: image)
 
         // Store the mounted disk
         mountedDisks[drive] = MountedDisk(
@@ -271,14 +317,14 @@ public actor DiskManager {
         for drive in 1...DiskManager.maxDrives {
             if let mounted = mountedDisks[drive] {
                 do {
-                    let stats = try mounted.fileSystem.getDiskStats()
+                    let info = try mounted.fileSystem.getDiskInfo()
                     status.append(DriveStatus(
                         drive: drive,
                         mounted: true,
                         path: mounted.path,
                         diskType: mounted.image.diskType,
-                        freeSectors: stats.freeSectors,
-                        fileCount: stats.fileCount,
+                        freeSectors: info.freeSectors,
+                        fileCount: info.fileCount,
                         isReadOnly: mounted.isReadOnly,
                         isModified: mounted.image.isModified
                     ))
@@ -326,7 +372,7 @@ public actor DiskManager {
             throw DiskManagerError.driveEmpty(drive)
         }
 
-        let stats = try mounted.fileSystem.getDiskStats()
+        let info = try mounted.fileSystem.getDiskInfo()
         let url = URL(fileURLWithPath: mounted.path)
 
         return MountedDiskInfo(
@@ -334,8 +380,8 @@ public actor DiskManager {
             path: mounted.path,
             filename: url.lastPathComponent,
             diskType: mounted.image.diskType,
-            freeSectors: stats.freeSectors,
-            fileCount: stats.fileCount,
+            freeSectors: info.freeSectors,
+            fileCount: info.fileCount,
             isReadOnly: mounted.isReadOnly,
             isModified: mounted.image.isModified
         )
@@ -351,7 +397,7 @@ public actor DiskManager {
     ///   - drive: The drive number (1-8), or nil for current drive.
     ///   - pattern: Optional wildcard pattern (e.g., "*.COM").
     /// - Returns: Array of directory entries.
-    /// - Throws: DiskManagerError or FileSystemError.
+    /// - Throws: DiskManagerError or ATRError.
     public func listDirectory(drive: Int? = nil, pattern: String? = nil) throws -> [DirectoryEntry] {
         let driveNum = drive ?? currentDrive
 
@@ -359,7 +405,11 @@ public actor DiskManager {
             throw DiskManagerError.driveEmpty(driveNum)
         }
 
-        return try mounted.fileSystem.listFiles(matching: pattern)
+        if let pattern = pattern {
+            return try mounted.fileSystem.listFiles(matching: pattern)
+        } else {
+            return try mounted.fileSystem.listDirectory()
+        }
     }
 
     /// Gets information about a specific file.
@@ -368,15 +418,15 @@ public actor DiskManager {
     ///   - drive: The drive number (1-8), or nil for current drive.
     ///   - name: The filename.
     /// - Returns: File information.
-    /// - Throws: DiskManagerError or FileSystemError.
-    public func getFileInfo(drive: Int? = nil, name: String) throws -> FileInfo {
+    /// - Throws: DiskManagerError or ATRError.
+    public func getFileInfo(drive: Int? = nil, name: String) throws -> ATRFileInfo {
         let driveNum = drive ?? currentDrive
 
         guard let mounted = mountedDisks[driveNum] else {
             throw DiskManagerError.driveEmpty(driveNum)
         }
 
-        return try mounted.fileSystem.getFileInfo(named: name)
+        return try mounted.fileSystem.getFileInfo(name)
     }
 
     /// Reads a file's contents.
@@ -385,7 +435,7 @@ public actor DiskManager {
     ///   - drive: The drive number (1-8), or nil for current drive.
     ///   - name: The filename.
     /// - Returns: The file data.
-    /// - Throws: DiskManagerError or FileSystemError.
+    /// - Throws: DiskManagerError or ATRError.
     public func readFile(drive: Int? = nil, name: String) throws -> Data {
         let driveNum = drive ?? currentDrive
 
@@ -393,7 +443,30 @@ public actor DiskManager {
             throw DiskManagerError.driveEmpty(driveNum)
         }
 
-        return try mounted.fileSystem.readFile(named: name)
+        return try mounted.fileSystem.readFile(name)
+    }
+
+    /// Writes a file to the disk.
+    ///
+    /// - Parameters:
+    ///   - drive: The drive number (1-8), or nil for current drive.
+    ///   - name: The filename.
+    ///   - data: The file data.
+    /// - Returns: The number of sectors used.
+    /// - Throws: DiskManagerError or ATRError.
+    @discardableResult
+    public func writeFile(drive: Int? = nil, name: String, data: Data) throws -> Int {
+        let driveNum = drive ?? currentDrive
+
+        guard let mounted = mountedDisks[driveNum] else {
+            throw DiskManagerError.driveEmpty(driveNum)
+        }
+
+        guard !mounted.isReadOnly else {
+            throw DiskManagerError.diskReadOnly(driveNum)
+        }
+
+        return try mounted.fileSystem.writeFile(name, data: data)
     }
 
     /// Deletes a file from the disk.
@@ -401,7 +474,7 @@ public actor DiskManager {
     /// - Parameters:
     ///   - drive: The drive number (1-8), or nil for current drive.
     ///   - name: The filename to delete.
-    /// - Throws: DiskManagerError or FileSystemError.
+    /// - Throws: DiskManagerError or ATRError.
     public func deleteFile(drive: Int? = nil, name: String) throws {
         let driveNum = drive ?? currentDrive
 
@@ -413,7 +486,7 @@ public actor DiskManager {
             throw DiskManagerError.diskReadOnly(driveNum)
         }
 
-        try mounted.fileSystem.deleteFile(named: name)
+        try mounted.fileSystem.deleteFile(name)
     }
 
     /// Renames a file.
@@ -422,7 +495,7 @@ public actor DiskManager {
     ///   - drive: The drive number (1-8), or nil for current drive.
     ///   - oldName: The current filename.
     ///   - newName: The new filename.
-    /// - Throws: DiskManagerError or FileSystemError.
+    /// - Throws: DiskManagerError or ATRError.
     public func renameFile(drive: Int? = nil, from oldName: String, to newName: String) throws {
         let driveNum = drive ?? currentDrive
 
@@ -434,7 +507,7 @@ public actor DiskManager {
             throw DiskManagerError.diskReadOnly(driveNum)
         }
 
-        try mounted.fileSystem.renameFile(from: oldName, to: newName)
+        try mounted.fileSystem.renameFile(oldName, to: newName)
     }
 
     /// Locks a file (makes it read-only).
@@ -442,7 +515,7 @@ public actor DiskManager {
     /// - Parameters:
     ///   - drive: The drive number (1-8), or nil for current drive.
     ///   - name: The filename to lock.
-    /// - Throws: DiskManagerError or FileSystemError.
+    /// - Throws: DiskManagerError or ATRError.
     public func lockFile(drive: Int? = nil, name: String) throws {
         let driveNum = drive ?? currentDrive
 
@@ -454,7 +527,7 @@ public actor DiskManager {
             throw DiskManagerError.diskReadOnly(driveNum)
         }
 
-        try mounted.fileSystem.lockFile(named: name)
+        try mounted.fileSystem.lockFile(name)
     }
 
     /// Unlocks a file.
@@ -462,7 +535,7 @@ public actor DiskManager {
     /// - Parameters:
     ///   - drive: The drive number (1-8), or nil for current drive.
     ///   - name: The filename to unlock.
-    /// - Throws: DiskManagerError or FileSystemError.
+    /// - Throws: DiskManagerError or ATRError.
     public func unlockFile(drive: Int? = nil, name: String) throws {
         let driveNum = drive ?? currentDrive
 
@@ -474,7 +547,7 @@ public actor DiskManager {
             throw DiskManagerError.diskReadOnly(driveNum)
         }
 
-        try mounted.fileSystem.unlockFile(named: name)
+        try mounted.fileSystem.unlockFile(name)
     }
 
     // =========================================================================
@@ -488,7 +561,7 @@ public actor DiskManager {
     ///   - name: The filename on the disk.
     ///   - hostPath: The destination path on the host.
     /// - Returns: The number of bytes exported.
-    /// - Throws: DiskManagerError, FileSystemError, or file write error.
+    /// - Throws: DiskManagerError, ATRError, or file write error.
     @discardableResult
     public func exportFile(drive: Int? = nil, name: String, to hostPath: String) throws -> Int {
         let driveNum = drive ?? currentDrive
@@ -498,7 +571,7 @@ public actor DiskManager {
         }
 
         // Read file from disk
-        let data = try mounted.fileSystem.readFile(named: name)
+        let data = try mounted.fileSystem.readFile(name)
 
         // Expand path and write to host
         let expandedPath = NSString(string: hostPath).expandingTildeInPath
@@ -511,15 +584,12 @@ public actor DiskManager {
 
     /// Imports a file from the host file system to the disk.
     ///
-    /// Note: This is a placeholder for Phase 13 - full implementation requires
-    /// file writing support in AtariFileSystem.
-    ///
     /// - Parameters:
     ///   - hostPath: The source path on the host.
     ///   - drive: The drive number (1-8), or nil for current drive.
     ///   - name: The filename to use on the disk.
-    /// - Returns: The number of bytes imported.
-    /// - Throws: DiskManagerError, FileSystemError, or file read error.
+    /// - Returns: The number of sectors used.
+    /// - Throws: DiskManagerError, ATRError, or file read error.
     @discardableResult
     public func importFile(from hostPath: String, drive: Int? = nil, name: String) throws -> Int {
         let driveNum = drive ?? currentDrive
@@ -540,11 +610,43 @@ public actor DiskManager {
             throw DiskManagerError.pathNotFound(hostPath)
         }
 
-        let data = try Data(contentsOf: url)
+        return try mounted.fileSystem.importFile(from: url, as: name)
+    }
 
-        // TODO: Implement file writing in AtariFileSystem
-        // For now, throw a not-implemented error
-        throw FileSystemError.invalidFilename("File import not yet implemented (requires Phase 12 write support)")
+    /// Copies a file from one disk to another.
+    ///
+    /// - Parameters:
+    ///   - sourceDrive: The source drive number (1-8).
+    ///   - sourceName: The source filename.
+    ///   - destDrive: The destination drive number (1-8).
+    ///   - destName: The destination filename (optional, defaults to source name).
+    /// - Returns: The number of sectors used.
+    /// - Throws: DiskManagerError or ATRError.
+    @discardableResult
+    public func copyFile(
+        from sourceDrive: Int,
+        name sourceName: String,
+        to destDrive: Int,
+        as destName: String? = nil
+    ) throws -> Int {
+        guard let sourceMount = mountedDisks[sourceDrive] else {
+            throw DiskManagerError.driveEmpty(sourceDrive)
+        }
+
+        guard let destMount = mountedDisks[destDrive] else {
+            throw DiskManagerError.driveEmpty(destDrive)
+        }
+
+        guard !destMount.isReadOnly else {
+            throw DiskManagerError.diskReadOnly(destDrive)
+        }
+
+        // Read from source
+        let data = try sourceMount.fileSystem.readFile(sourceName)
+
+        // Write to destination
+        let targetName = destName ?? sourceName
+        return try destMount.fileSystem.writeFile(targetName, data: data)
     }
 
     // =========================================================================
@@ -556,22 +658,15 @@ public actor DiskManager {
     /// - Parameters:
     ///   - path: The path where the ATR should be created.
     ///   - type: The disk type (default: single density).
-    /// - Returns: Information about the created disk.
+    /// - Returns: The URL of the created disk.
     /// - Throws: ATRError if creation fails.
     @discardableResult
-    public func createDisk(at path: String, type: ATRDiskType = .singleDensity) throws -> URL {
+    public func createDisk(at path: String, type: DiskType = .singleDensity) throws -> URL {
         let expandedPath = NSString(string: path).expandingTildeInPath
         let url = URL(fileURLWithPath: expandedPath)
 
-        // Create the ATR image
-        let image = try ATRImage.create(at: url, type: type)
-
-        // Format with DOS 2.x filesystem
-        let fs = AtariFileSystem(disk: image)
-        try fs.format()
-
-        // Save changes
-        try image.save()
+        // Create formatted disk
+        _ = try ATRImage.createFormatted(at: url, type: type)
 
         return url
     }
@@ -644,49 +739,5 @@ public actor DiskManager {
             return false
         }
         return mountedDisks[drive] != nil
-    }
-}
-
-// =============================================================================
-// MARK: - Drive Status Structure
-// =============================================================================
-
-/// Status information for a drive.
-public struct DriveStatus: Sendable {
-    /// The drive number (1-8).
-    public let drive: Int
-
-    /// Whether a disk is mounted in this drive.
-    public let mounted: Bool
-
-    /// The path to the mounted ATR file (nil if empty).
-    public let path: String?
-
-    /// The disk type (nil if empty or unknown).
-    public let diskType: ATRDiskType?
-
-    /// Number of free sectors (0 if empty).
-    public let freeSectors: Int
-
-    /// Number of files on the disk (0 if empty).
-    public let fileCount: Int
-
-    /// Whether the disk is mounted read-only.
-    public let isReadOnly: Bool
-
-    /// Whether the disk has unsaved changes.
-    public let isModified: Bool
-
-    /// Formatted description for display.
-    public var displayString: String {
-        if mounted {
-            let typeStr = diskType?.shortDescription ?? "???"
-            let filename = path.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "?"
-            let roStr = isReadOnly ? " [R/O]" : ""
-            let modStr = isModified ? "*" : ""
-            return "D\(drive): \(filename) (\(typeStr), \(fileCount) files, \(freeSectors) free)\(roStr)\(modStr)"
-        } else {
-            return "D\(drive): (empty)"
-        }
     }
 }

@@ -808,7 +808,8 @@ AESP enables separating the emulator into a standalone server process, allowing 
 - DOS 2.x and 2.5 filesystem support with VTOC bitmap management
 - Directory entry parsing with wildcard pattern matching
 - Sector link chain following for file reading
-- Read-only operations implemented; write operations deferred to Phase 13
+- Full read/write operations including writeFile, deleteFile, renameFile, lockFile, unlockFile
+- Sector allocation via MutableVTOC for file writes
 - Comprehensive error handling with recovery support in lenient mode
 - Creates formatted disk images ready for use
 
@@ -844,7 +845,12 @@ AESP enables separating the emulator into a standalone server process, allowing 
 
 3. **File operations** ✅
    - Read file chain (following sector links)
+   - Write files with automatic sector allocation
+   - Delete files with sector chain deallocation
+   - Rename files (directory entry update)
+   - Lock/Unlock files (modify flags)
    - Export files to host filesystem
+   - Import files from host filesystem
    - File info and validation
 
 ### Testing
@@ -873,18 +879,19 @@ AESP enables separating the emulator into a standalone server process, allowing 
 **Goal:** Disk management from REPL.
 
 **Implementation Notes:**
-- Created `ATRImage` class for direct ATR file parsing (independent of libatari800)
-- Created `AtariFileSystem` class for DOS 2.x filesystem operations
+- Uses the consolidated `Filesystem` module (ATRImage, ATRFileSystem, DiskType, etc.)
 - Created `DiskManager` actor for thread-safe mounted disk management
 - All DOS commands implemented in `REPLEngine` with proper error handling
+- Full file write support: writeFile, deleteFile, renameFile, lockFile, unlockFile
+- Copy and import commands fully implemented with sector allocation
 - Comprehensive unit tests and integration tests added
 
-### Key Files Created
+### Key Files Created/Modified
 
-- `Sources/AtticCore/FileSystem/ATRImage.swift` - ATR container handling
-- `Sources/AtticCore/FileSystem/AtariFileSystem.swift` - DOS 2.x filesystem, VTOC, directory parsing
-- `Sources/AtticCore/FileSystem/DiskManager.swift` - Mounted disk management actor
-- `Tests/AtticCoreTests/ATRFileSystemTests.swift` - Unit tests for ATR and filesystem
+- `Sources/AtticCore/Filesystem/DiskManager.swift` - Mounted disk management actor
+- `Sources/AtticCore/Filesystem/VTOC.swift` - Added MutableVTOC for sector allocation
+- `Sources/AtticCore/Filesystem/ATRFileSystem.swift` - Added write operations
+- `Sources/AtticCore/REPL/REPLEngine.swift` - DOS command implementations
 - `Tests/AtticCoreTests/DOSModeIntegrationTests.swift` - Integration tests through REPL
 
 ### Tasks ✅
@@ -897,7 +904,7 @@ AESP enables separating the emulator into a standalone server process, allowing 
 
 2. **Host transfer** ✅
    - Export to macOS (fully implemented)
-   - Import from macOS (structure ready, requires Phase 12 write support)
+   - Import from macOS (fully implemented)
 
 3. **Disk creation** ✅
    - New empty ATR (ss/sd, ss/ed, ss/dd types)

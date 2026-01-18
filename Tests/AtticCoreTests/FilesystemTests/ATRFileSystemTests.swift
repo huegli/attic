@@ -463,6 +463,169 @@ final class ATRFileSystemTests: XCTestCase {
     }
 
     // =========================================================================
+    // MARK: - Write Operations
+    // =========================================================================
+
+    func testWriteFile_basic() throws {
+        let disk = try createFormattedDisk()
+        let fs = try ATRFileSystem(disk: disk)
+
+        // Write a simple file
+        let testData = Data("Hello, Atari!".utf8)
+        let sectors = try fs.writeFile("HELLO.TXT", data: testData)
+
+        XCTAssertEqual(sectors, 1)
+
+        // Verify file can be read back
+        let readData = try fs.readFile("HELLO.TXT")
+        XCTAssertEqual(readData, testData)
+
+        // Verify directory entry was created
+        let files = try fs.listDirectory()
+        XCTAssertEqual(files.count, 1)
+        XCTAssertEqual(files[0].fullName, "HELLO.TXT")
+    }
+
+    func testWriteFile_multiSector() throws {
+        let disk = try createFormattedDisk()
+        let fs = try ATRFileSystem(disk: disk)
+
+        // Create data that spans multiple sectors (>125 bytes)
+        let testData = Data(repeating: 0x55, count: 500)
+        let sectors = try fs.writeFile("BIG.DAT", data: testData)
+
+        XCTAssertEqual(sectors, 4)  // 500 bytes / 125 bytes per sector = 4 sectors
+
+        // Verify file can be read back
+        let readData = try fs.readFile("BIG.DAT")
+        XCTAssertEqual(readData.count, testData.count)
+        XCTAssertEqual(readData, testData)
+    }
+
+    func testWriteFile_duplicateName_throwsError() throws {
+        let disk = try createFormattedDisk()
+        let fs = try ATRFileSystem(disk: disk)
+
+        let testData = Data("Test".utf8)
+        try fs.writeFile("TEST.TXT", data: testData)
+
+        XCTAssertThrowsError(try fs.writeFile("TEST.TXT", data: testData)) { error in
+            guard case ATRError.fileExists = error else {
+                XCTFail("Expected fileExists error")
+                return
+            }
+        }
+    }
+
+    func testDeleteFile_basic() throws {
+        let disk = try createFormattedDisk()
+        let fs = try ATRFileSystem(disk: disk)
+
+        // Write then delete
+        let testData = Data("To be deleted".utf8)
+        try fs.writeFile("DELETE.ME", data: testData)
+        XCTAssertEqual(try fs.listDirectory().count, 1)
+
+        try fs.deleteFile("DELETE.ME")
+        XCTAssertEqual(try fs.listDirectory().count, 0)
+    }
+
+    func testDeleteFile_locked_throwsError() throws {
+        let disk = try createFormattedDisk()
+        let fs = try ATRFileSystem(disk: disk)
+
+        let testData = Data("Locked file".utf8)
+        try fs.writeFile("LOCKED.TXT", data: testData)
+        try fs.lockFile("LOCKED.TXT")
+
+        XCTAssertThrowsError(try fs.deleteFile("LOCKED.TXT")) { error in
+            guard case ATRError.fileLocked = error else {
+                XCTFail("Expected fileLocked error")
+                return
+            }
+        }
+    }
+
+    func testRenameFile_basic() throws {
+        let disk = try createFormattedDisk()
+        let fs = try ATRFileSystem(disk: disk)
+
+        let testData = Data("Rename me".utf8)
+        try fs.writeFile("OLD.TXT", data: testData)
+
+        try fs.renameFile("OLD.TXT", to: "NEW.TXT")
+
+        // Old name should not exist
+        XCTAssertThrowsError(try fs.readFile("OLD.TXT"))
+
+        // New name should exist with same data
+        let readData = try fs.readFile("NEW.TXT")
+        XCTAssertEqual(readData, testData)
+    }
+
+    func testLockUnlockFile() throws {
+        let disk = try createFormattedDisk()
+        let fs = try ATRFileSystem(disk: disk)
+
+        let testData = Data("Lock test".utf8)
+        try fs.writeFile("LOCK.TXT", data: testData)
+
+        // File should not be locked initially
+        var info = try fs.getFileInfo("LOCK.TXT")
+        XCTAssertFalse(info.isLocked)
+
+        // Lock the file
+        try fs.lockFile("LOCK.TXT")
+        info = try fs.getFileInfo("LOCK.TXT")
+        XCTAssertTrue(info.isLocked)
+
+        // Unlock the file
+        try fs.unlockFile("LOCK.TXT")
+        info = try fs.getFileInfo("LOCK.TXT")
+        XCTAssertFalse(info.isLocked)
+    }
+
+    func testImportFile() throws {
+        let disk = try createFormattedDisk()
+        let fs = try ATRFileSystem(disk: disk)
+
+        // Create a temporary file on host
+        let sourceURL = FileManager.default.temporaryDirectory.appendingPathComponent("import_test.txt")
+        let testData = Data("Imported from host".utf8)
+        try testData.write(to: sourceURL)
+        defer { try? FileManager.default.removeItem(at: sourceURL) }
+
+        // Import the file
+        let sectors = try fs.importFile(from: sourceURL, as: "IMPORT.TXT")
+        XCTAssertGreaterThan(sectors, 0)
+
+        // Verify file content
+        let readData = try fs.readFile("IMPORT.TXT")
+        XCTAssertEqual(readData, testData)
+    }
+
+    func testWriteFile_freesSpaceCorrectly() throws {
+        let disk = try createFormattedDisk()
+        let fs = try ATRFileSystem(disk: disk)
+
+        let initialInfo = try fs.getDiskInfo()
+        let initialFree = initialInfo.freeSectors
+
+        // Write a file
+        let testData = Data(repeating: 0xAA, count: 250)  // 2 sectors
+        try fs.writeFile("TEST.DAT", data: testData)
+
+        let afterWriteInfo = try fs.getDiskInfo()
+        XCTAssertEqual(afterWriteInfo.freeSectors, initialFree - 2)
+
+        // Delete the file
+        try fs.deleteFile("TEST.DAT")
+
+        let afterDeleteInfo = try fs.getDiskInfo()
+        XCTAssertEqual(afterDeleteInfo.freeSectors, initialFree)
+    }
+
+    // =========================================================================
     // MARK: - Description
     // =========================================================================
 

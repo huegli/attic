@@ -620,6 +620,336 @@ public final class ATRFileSystem: @unchecked Sendable {
     }
 
     // =========================================================================
+    // MARK: - File Write Operations
+    // =========================================================================
+
+    /// Writes a file to the disk.
+    ///
+    /// Creates a new file with the given data. If a file with the same name
+    /// exists, it must be deleted first.
+    ///
+    /// - Parameters:
+    ///   - name: The filename for the new file (e.g., "GAME.BAS").
+    ///   - data: The file data to write.
+    /// - Returns: The number of sectors used.
+    /// - Throws: ATRError if write fails.
+    ///
+    /// Usage:
+    ///
+    ///     let data = "HELLO WORLD".data(using: .ascii)!
+    ///     let sectors = try fs.writeFile("HELLO.TXT", data: data)
+    ///     try disk.save()  // Don't forget to save!
+    ///
+    @discardableResult
+    public func writeFile(_ name: String, data: Data) throws -> Int {
+        guard !disk.isReadOnly else {
+            throw ATRError.readOnly
+        }
+
+        // Parse and validate filename
+        guard let (parsedName, parsedExt) = DirectoryEntry.parseFilename(name) else {
+            throw ATRError.invalidFilename(filename: name, reason: "Cannot parse filename")
+        }
+
+        if let error = DirectoryEntry.validateFilename(parsedName, extension: parsedExt) {
+            throw ATRError.invalidFilename(filename: name, reason: error)
+        }
+
+        // Check if file already exists
+        if let existingEntry = try? findFile(name) {
+            throw ATRError.fileExists(name)
+        }
+
+        // Find a free directory entry
+        guard let entryIndex = try findFreeDirectoryEntry() else {
+            throw ATRError.directoryFull
+        }
+
+        // Calculate sectors needed
+        let sectorSize = disk.sectorSize
+        let dataPerSector = sectorSize - 3  // 3 bytes for link
+        let sectorsNeeded = max(1, (data.count + dataPerSector - 1) / dataPerSector)
+
+        // Allocate sectors
+        let vtocData = try disk.readSector(DOSLayout.vtocSector)
+        var mutableVTOC = try VTOC(data: vtocData, diskType: disk.diskType).mutableCopy()
+
+        guard let allocatedSectors = mutableVTOC.allocateSectors(sectorsNeeded) else {
+            throw ATRError.diskFull
+        }
+
+        // Write data to sectors
+        var dataOffset = 0
+        for (i, sector) in allocatedSectors.enumerated() {
+            let isLast = (i == allocatedSectors.count - 1)
+            let nextSector = isLast ? UInt16(0) : allocatedSectors[i + 1]
+
+            // Calculate bytes to write in this sector
+            let remainingBytes = data.count - dataOffset
+            let bytesInSector = min(dataPerSector, remainingBytes)
+
+            // Prepare sector data
+            var sectorData = [UInt8](repeating: 0, count: sectorSize)
+
+            // Copy file data
+            if bytesInSector > 0 && dataOffset < data.count {
+                let range = dataOffset..<min(dataOffset + bytesInSector, data.count)
+                sectorData[0..<bytesInSector] = ArraySlice(data[range])
+            }
+
+            // Create and encode link
+            let link = SectorLink(
+                fileID: UInt8(entryIndex),
+                nextSector: nextSector,
+                bytesInSector: isLast ? bytesInSector : dataPerSector,
+                sectorSize: sectorSize
+            )
+            let linkBytes = link.encode()
+            sectorData[sectorSize - 3] = linkBytes[0]
+            sectorData[sectorSize - 2] = linkBytes[1]
+            sectorData[sectorSize - 1] = linkBytes[2]
+
+            // Write sector
+            try disk.writeSector(Int(sector), data: sectorData)
+
+            dataOffset += bytesInSector
+        }
+
+        // Write directory entry
+        let entry = DirectoryEntry(
+            flags: 0x42,  // Normal file in use
+            sectorCount: UInt16(sectorsNeeded),
+            startSector: allocatedSectors[0],
+            filename: parsedName,
+            fileExtension: parsedExt,
+            entryIndex: entryIndex
+        )
+        try writeDirectoryEntry(entry, at: entryIndex)
+
+        // Write updated VTOC
+        try disk.writeSector(DOSLayout.vtocSector, data: mutableVTOC.encode())
+
+        // Refresh cache
+        directoryCache = nil
+
+        return sectorsNeeded
+    }
+
+    /// Finds a free directory entry slot.
+    ///
+    /// - Returns: The index of a free slot (0-63), or nil if full.
+    private func findFreeDirectoryEntry() throws -> Int? {
+        var entryIndex = 0
+
+        for sector in DOSLayout.firstDirectorySector...DOSLayout.lastDirectorySector {
+            let sectorData = try disk.readSector(sector)
+
+            for i in 0..<DOSLayout.entriesPerSector {
+                let offset = i * DirectoryEntry.entrySize
+                let flags = sectorData[offset]
+
+                // Entry is free if never used (0x00) or deleted (0x80)
+                if flags == 0x00 || flags == 0x80 {
+                    return entryIndex
+                }
+
+                entryIndex += 1
+            }
+        }
+
+        return nil  // Directory is full
+    }
+
+    /// Writes a directory entry at the specified index.
+    ///
+    /// - Parameters:
+    ///   - entry: The directory entry to write.
+    ///   - index: The entry index (0-63).
+    private func writeDirectoryEntry(_ entry: DirectoryEntry, at index: Int) throws {
+        guard index >= 0 && index < DOSLayout.maxFiles else {
+            throw ATRError.sectorOutOfRange(sector: index, maxSector: DOSLayout.maxFiles - 1)
+        }
+
+        // Calculate sector and offset
+        let sectorIndex = index / DOSLayout.entriesPerSector
+        let entryOffset = (index % DOSLayout.entriesPerSector) * DirectoryEntry.entrySize
+        let sector = DOSLayout.firstDirectorySector + sectorIndex
+
+        // Read, modify, write
+        var sectorData = try disk.readSector(sector)
+        let entryBytes = entry.encode()
+        for (i, byte) in entryBytes.enumerated() {
+            sectorData[entryOffset + i] = byte
+        }
+        try disk.writeSector(sector, data: sectorData)
+    }
+
+    /// Deletes a file from the disk.
+    ///
+    /// Frees all sectors used by the file and marks the directory entry as deleted.
+    ///
+    /// - Parameter name: The filename to delete.
+    /// - Throws: ATRError if file not found, locked, or delete fails.
+    public func deleteFile(_ name: String) throws {
+        guard !disk.isReadOnly else {
+            throw ATRError.readOnly
+        }
+
+        let entry = try findFile(name)
+
+        guard !entry.isLocked else {
+            throw ATRError.fileLocked(name)
+        }
+
+        guard !entry.isOpenForWrite else {
+            throw ATRError.fileChainCorrupted(filename: name, reason: "File is open for write")
+        }
+
+        // Free sectors
+        let vtocData = try disk.readSector(DOSLayout.vtocSector)
+        var mutableVTOC = try VTOC(data: vtocData, diskType: disk.diskType).mutableCopy()
+        try mutableVTOC.freeSectorChain(disk: disk, startSector: Int(entry.startSector))
+        try disk.writeSector(DOSLayout.vtocSector, data: mutableVTOC.encode())
+
+        // Mark directory entry as deleted
+        var deletedEntry = DirectoryEntry(
+            flags: 0x80,  // Deleted
+            sectorCount: entry.sectorCount,
+            startSector: entry.startSector,
+            filename: entry.trimmedFilename,
+            fileExtension: entry.trimmedExtension,
+            entryIndex: entry.entryIndex
+        )
+        try writeDirectoryEntry(deletedEntry, at: entry.entryIndex)
+
+        // Refresh cache
+        directoryCache = nil
+        try refreshVTOC()
+    }
+
+    /// Renames a file.
+    ///
+    /// - Parameters:
+    ///   - oldName: The current filename.
+    ///   - newName: The new filename.
+    /// - Throws: ATRError if file not found, locked, or new name exists.
+    public func renameFile(_ oldName: String, to newName: String) throws {
+        guard !disk.isReadOnly else {
+            throw ATRError.readOnly
+        }
+
+        let entry = try findFile(oldName)
+
+        guard !entry.isLocked else {
+            throw ATRError.fileLocked(oldName)
+        }
+
+        // Check new name doesn't exist
+        if let _ = try? findFile(newName) {
+            throw ATRError.fileExists(newName)
+        }
+
+        // Parse and validate new filename
+        guard let (newParsedName, newParsedExt) = DirectoryEntry.parseFilename(newName) else {
+            throw ATRError.invalidFilename(filename: newName, reason: "Cannot parse filename")
+        }
+
+        if let error = DirectoryEntry.validateFilename(newParsedName, extension: newParsedExt) {
+            throw ATRError.invalidFilename(filename: newName, reason: error)
+        }
+
+        // Update directory entry
+        let renamedEntry = DirectoryEntry(
+            flags: entry.flags,
+            sectorCount: entry.sectorCount,
+            startSector: entry.startSector,
+            filename: newParsedName,
+            fileExtension: newParsedExt,
+            entryIndex: entry.entryIndex
+        )
+        try writeDirectoryEntry(renamedEntry, at: entry.entryIndex)
+
+        // Refresh cache
+        directoryCache = nil
+    }
+
+    /// Locks a file (makes it read-only).
+    ///
+    /// - Parameter name: The filename to lock.
+    /// - Throws: ATRError if file not found.
+    public func lockFile(_ name: String) throws {
+        guard !disk.isReadOnly else {
+            throw ATRError.readOnly
+        }
+
+        let entry = try findFile(name)
+
+        // Set locked bit (0x02)
+        let lockedEntry = DirectoryEntry(
+            flags: entry.flags | 0x02,
+            sectorCount: entry.sectorCount,
+            startSector: entry.startSector,
+            filename: entry.trimmedFilename,
+            fileExtension: entry.trimmedExtension,
+            entryIndex: entry.entryIndex
+        )
+        try writeDirectoryEntry(lockedEntry, at: entry.entryIndex)
+
+        // Refresh cache
+        directoryCache = nil
+    }
+
+    /// Unlocks a file (removes read-only).
+    ///
+    /// - Parameter name: The filename to unlock.
+    /// - Throws: ATRError if file not found.
+    public func unlockFile(_ name: String) throws {
+        guard !disk.isReadOnly else {
+            throw ATRError.readOnly
+        }
+
+        let entry = try findFile(name)
+
+        // Clear locked bit (0x02)
+        let unlockedEntry = DirectoryEntry(
+            flags: entry.flags & ~0x02,
+            sectorCount: entry.sectorCount,
+            startSector: entry.startSector,
+            filename: entry.trimmedFilename,
+            fileExtension: entry.trimmedExtension,
+            entryIndex: entry.entryIndex
+        )
+        try writeDirectoryEntry(unlockedEntry, at: entry.entryIndex)
+
+        // Refresh cache
+        directoryCache = nil
+    }
+
+    /// Imports a file from the host filesystem to the disk.
+    ///
+    /// - Parameters:
+    ///   - sourceURL: The source file on the host.
+    ///   - name: The destination filename on the Atari disk.
+    ///   - convertLineEndings: If true, convert Unix newlines to ATASCII EOL.
+    /// - Returns: The number of sectors used.
+    /// - Throws: ATRError or file system errors.
+    @discardableResult
+    public func importFile(
+        from sourceURL: URL,
+        as name: String,
+        convertLineEndings: Bool = false
+    ) throws -> Int {
+        var data = try Data(contentsOf: sourceURL)
+
+        if convertLineEndings {
+            // Convert Unix newline ($0A) to ATASCII EOL ($9B)
+            data = Data(data.map { $0 == 0x0A ? 0x9B : $0 })
+        }
+
+        return try writeFile(name, data: data)
+    }
+
+    // =========================================================================
     // MARK: - Formatting (for creating new disks)
     // =========================================================================
 

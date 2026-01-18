@@ -536,10 +536,43 @@ public actor REPLEngine {
 
     /// Copies a file (placeholder - cross-drive copy not yet implemented).
     private func executeDOSCopy(source: String, dest: String) async -> String {
-        // Parse destination for drive prefix (e.g., "D2:FILE.COM")
-        // For now, only same-drive copy is conceptually supported,
-        // but actual file writing requires Phase 12 write support
-        return "Error: File copy not yet implemented (requires write support)"
+        do {
+            // Parse source and destination for drive prefixes (e.g., "D2:FILE.COM")
+            let (sourceDrive, sourceName) = parseDriveSpec(source)
+            let (destDrive, destName) = parseDriveSpec(dest)
+
+            let srcDriveNum = sourceDrive ?? await diskManager.currentDrive
+            let dstDriveNum = destDrive ?? await diskManager.currentDrive
+            let dstFileName = destName.isEmpty ? sourceName : destName
+
+            let sectors = try await diskManager.copyFile(
+                from: srcDriveNum,
+                name: sourceName,
+                to: dstDriveNum,
+                as: dstFileName
+            )
+
+            if srcDriveNum == dstDriveNum {
+                return "Copied \(sourceName) to \(dstFileName) (\(sectors) sectors)"
+            } else {
+                return "Copied D\(srcDriveNum):\(sourceName) to D\(dstDriveNum):\(dstFileName) (\(sectors) sectors)"
+            }
+        } catch {
+            return formatDOSError(error)
+        }
+    }
+
+    /// Parses a drive specification like "D2:FILE.COM" into (driveNumber, filename).
+    /// Returns (nil, original) if no drive prefix found.
+    private func parseDriveSpec(_ spec: String) -> (Int?, String) {
+        let upper = spec.uppercased()
+        if upper.hasPrefix("D") && upper.count >= 3 && upper[upper.index(upper.startIndex, offsetBy: 2)] == ":" {
+            if let driveNum = Int(String(upper[upper.index(upper.startIndex, offsetBy: 1)])) {
+                let filename = String(spec.dropFirst(3))
+                return (driveNum, filename)
+            }
+        }
+        return (nil, spec)
     }
 
     /// Renames a file.
@@ -596,8 +629,9 @@ public actor REPLEngine {
     /// Imports a file from the host filesystem.
     private func executeDOSImport(path: String, filename: String) async -> String {
         do {
-            let bytes = try await diskManager.importFile(from: path, name: filename)
-            return "Imported \(path) as \(filename) (\(bytes) bytes)"
+            let sectors = try await diskManager.importFile(from: path, name: filename)
+            let expandedPath = NSString(string: path).expandingTildeInPath
+            return "Imported \(expandedPath) as \(filename) (\(sectors) sectors)"
         } catch {
             return formatDOSError(error)
         }
@@ -606,9 +640,9 @@ public actor REPLEngine {
     /// Creates a new disk image.
     private func executeDOSNewDisk(path: String, type: String?) async -> String {
         do {
-            let diskType = type.flatMap { ATRDiskType(from: $0) } ?? .singleDensity
+            let diskType = type.flatMap { DiskType.fromString($0) } ?? .singleDensity
             let url = try await diskManager.createDisk(at: path, type: diskType)
-            return "Created new disk image: \(url.path) (\(diskType.description))"
+            return "Created new disk image: \(url.path) (\(diskType.displayName))"
         } catch {
             return formatDOSError(error)
         }
@@ -631,8 +665,6 @@ public actor REPLEngine {
     private func formatDOSError(_ error: Error) -> String {
         if let diskError = error as? DiskManagerError {
             return "Error: \(diskError.errorDescription ?? String(describing: diskError))"
-        } else if let fsError = error as? FileSystemError {
-            return "Error: \(fsError.errorDescription ?? String(describing: fsError))"
         } else if let atrError = error as? ATRError {
             return "Error: \(atrError.errorDescription ?? String(describing: atrError))"
         } else {
