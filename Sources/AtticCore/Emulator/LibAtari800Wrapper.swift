@@ -372,13 +372,15 @@ public final class LibAtari800Wrapper: @unchecked Sendable {
 
         // Extract CPU state from the state buffer using pointer arithmetic
         // Swift can't directly access the large state[] array, so we use withUnsafePointer
+        // IMPORTANT: Read offset values BEFORE entering withUnsafePointer to avoid
+        // nested access violations (Swift exclusivity rules)
+        let cpuOffset = Int(cachedState.tags.cpu)
+        let pcOffset = Int(cachedState.tags.pc)
+
         return withUnsafePointer(to: &cachedState) { statePtr in
             // Get pointer to the start of the state data (after tags_storage and flags_storage)
             let basePtr = UnsafeRawPointer(statePtr)
             let stateDataPtr = basePtr.advanced(by: 256)  // 128 + 128 bytes for unions
-
-            let cpuOffset = Int(cachedState.tags.cpu)
-            let pcOffset = Int(cachedState.tags.pc)
 
             // Read CPU registers from state buffer
             // cpu_state_t layout: A, P, S, X, Y, IRQ (6 bytes)
@@ -415,12 +417,14 @@ public final class LibAtari800Wrapper: @unchecked Sendable {
         }
 
         // Modify CPU registers in state buffer using pointer arithmetic
+        // IMPORTANT: Read offset values BEFORE entering withUnsafeMutablePointer to avoid
+        // nested access violations (Swift exclusivity rules)
+        let cpuOffset = Int(cachedState.tags.cpu)
+        let pcOffset = Int(cachedState.tags.pc)
+
         withUnsafeMutablePointer(to: &cachedState) { statePtr in
             let basePtr = UnsafeMutableRawPointer(statePtr)
             let stateDataPtr = basePtr.advanced(by: 256)  // 128 + 128 bytes for unions
-
-            let cpuOffset = Int(cachedState.tags.cpu)
-            let pcOffset = Int(cachedState.tags.pc)
 
             // Write CPU registers
             let cpuPtr = stateDataPtr.advanced(by: cpuOffset).assumingMemoryBound(to: UInt8.self)

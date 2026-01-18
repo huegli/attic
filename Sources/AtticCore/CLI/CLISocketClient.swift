@@ -105,6 +105,10 @@ public actor CLISocketClient {
     /// Pending response (for synchronous request/response).
     private var pendingResponse: CheckedContinuation<CLIResponse, Error>?
 
+    /// Request ID for matching timeouts to the correct request.
+    /// This prevents a timeout for request A from affecting request B.
+    private var currentRequestId: UInt64 = 0
+
     /// Read buffer for partial data.
     private var readBuffer = Data()
 
@@ -293,6 +297,10 @@ public actor CLISocketClient {
         // Wait for response with timeout
         // IMPORTANT: Set up pendingResponse BEFORE sending to avoid race condition
         return try await withCheckedThrowingContinuation { continuation in
+            // Increment request ID to track this specific request
+            self.currentRequestId &+= 1
+            let requestId = self.currentRequestId
+
             // Set pending response synchronously (we're on the actor)
             self.pendingResponse = continuation
 
@@ -312,10 +320,10 @@ public actor CLISocketClient {
             Task {
                 try? await Task.sleep(nanoseconds: UInt64(CLIProtocolConstants.commandTimeout * 1_000_000_000))
 
-                // If still pending after timeout, fail
-                if await self.cancelPendingResponse(continuation) {
-                    continuation.resume(throwing: CLIProtocolError.timeout)
-                }
+                // If still pending after timeout AND same request, fail
+                // The request ID check prevents a timeout for request A from
+                // affecting request B if B started before A's timeout fired
+                await self.timeoutPendingResponse(requestId: requestId)
             }
         }
     }
@@ -339,6 +347,10 @@ public actor CLISocketClient {
         // Wait for response with timeout
         // IMPORTANT: Set up pendingResponse BEFORE sending to avoid race condition
         return try await withCheckedThrowingContinuation { continuation in
+            // Increment request ID to track this specific request
+            self.currentRequestId &+= 1
+            let requestId = self.currentRequestId
+
             // Set pending response synchronously (we're on the actor)
             self.pendingResponse = continuation
 
@@ -358,9 +370,8 @@ public actor CLISocketClient {
             Task {
                 try? await Task.sleep(nanoseconds: UInt64(CLIProtocolConstants.commandTimeout * 1_000_000_000))
 
-                if await self.cancelPendingResponse(continuation) {
-                    continuation.resume(throwing: CLIProtocolError.timeout)
-                }
+                // If still pending after timeout AND same request, fail
+                await self.timeoutPendingResponse(requestId: requestId)
             }
         }
     }
@@ -548,13 +559,25 @@ public actor CLISocketClient {
         pendingResponse = continuation
     }
 
-    /// Cancels the pending response if it matches.
-    private func cancelPendingResponse(_ continuation: CheckedContinuation<CLIResponse, Error>) -> Bool {
-        if pendingResponse != nil {
-            pendingResponse = nil
-            return true
+    /// Times out the pending response if it matches the given request ID.
+    ///
+    /// This method handles the timeout entirely within the actor's isolation,
+    /// ensuring that the check and resume happen atomically. This prevents
+    /// race conditions where a timeout for request A could affect request B.
+    ///
+    /// - Parameter requestId: The request ID to match.
+    private func timeoutPendingResponse(requestId: UInt64) {
+        // Only timeout if:
+        // 1. There's a pending response waiting
+        // 2. The request ID matches (same request that set up this timeout)
+        guard let continuation = pendingResponse,
+              currentRequestId == requestId else {
+            return
         }
-        return false
+
+        // Clear and resume with timeout error - all within actor isolation
+        pendingResponse = nil
+        continuation.resume(throwing: CLIProtocolError.timeout)
     }
 }
 
