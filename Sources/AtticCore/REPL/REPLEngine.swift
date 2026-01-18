@@ -47,6 +47,9 @@ public actor REPLEngine {
     /// Command parser instance.
     private let parser: CommandParser
 
+    /// BASIC line handler for tokenization and memory injection.
+    private let basicHandler: BASICLineHandler
+
     /// Current REPL mode.
     private(set) public var mode: REPLMode
 
@@ -72,6 +75,7 @@ public actor REPLEngine {
     public init(emulator: EmulatorEngine, initialMode: REPLMode = .default) {
         self.emulator = emulator
         self.parser = CommandParser()
+        self.basicHandler = BASICLineHandler(emulator: emulator)
         self.mode = initialMode
     }
 
@@ -278,53 +282,80 @@ public actor REPLEngine {
             return "All breakpoints cleared"
 
         // =====================================================================
-        // BASIC Commands (Stubs)
+        // BASIC Commands
         // =====================================================================
 
         case .basicLine(let number, let content):
-            return "Line \(number): \(content) [tokenization not yet implemented]"
+            // Tokenize and inject the line into emulator memory
+            let input = "\(number) \(content)"
+            let result = await basicHandler.enterLine(input)
+            return result.message
 
         case .basicDelete(let start, let end):
-            if let end = end {
-                return "Deleted lines \(start)-\(end) [not yet implemented]"
+            // Delete line(s) by entering just the line number
+            if let endLine = end {
+                // Delete range of lines
+                var deleted = 0
+                for lineNum in start...endLine {
+                    let result = await basicHandler.enterLine("\(lineNum)")
+                    if result.success { deleted += 1 }
+                }
+                return "Deleted \(deleted) lines (\(start)-\(endLine))"
+            } else {
+                let result = await basicHandler.enterLine("\(start)")
+                return result.message
             }
-            return "Deleted line \(start) [not yet implemented]"
 
         case .basicRenumber(let start, let step):
+            // Renumbering requires reading all lines and rewriting them
+            // This is complex and deferred for now
             return "Renumber start=\(start ?? 10) step=\(step ?? 10) [not yet implemented]"
 
         case .basicRun:
-            return "RUN [not yet implemented]"
+            let result = await basicHandler.runProgram()
+            return result.message
 
         case .basicStop:
-            return "STOP [not yet implemented]"
+            await emulator.pause()
+            return "STOP"
 
         case .basicContinue:
-            return "CONT [not yet implemented]"
+            let result = await basicHandler.continueProgram()
+            return result.message
 
         case .basicNew:
-            return "NEW [not yet implemented]"
+            let result = await basicHandler.newProgram()
+            return result.message
 
-        case .basicList(_, _):
-            return "LIST [not yet implemented]"
+        case .basicList(let start, let end):
+            // LIST requires detokenization (Phase 15)
+            // For now, show program info
+            let info = await basicHandler.getProgramInfo()
+            var output = "Program: \(info.lines) lines, \(info.bytes) bytes, \(info.variables) variables"
+            if start != nil || end != nil {
+                output += "\n(Detailed listing requires detokenizer - Phase 15)"
+            }
+            return output
 
         case .basicVars(let name):
+            // Variable inspection requires reading VNT/VVT (Phase 15)
             if let name = name {
-                return "VAR \(name) [not yet implemented]"
+                return "VAR \(name) [requires detokenizer - Phase 15]"
             }
-            return "VARS [not yet implemented]"
+            let info = await basicHandler.getProgramInfo()
+            return "\(info.variables) variables defined [detailed list requires Phase 15]"
 
         case .basicSaveATR(let filename):
-            return "SAVE \"\(filename)\" [not yet implemented]"
+            return "SAVE \"\(filename)\" [requires ATR filesystem - Phase 12]"
 
         case .basicLoadATR(let filename):
-            return "LOAD \"\(filename)\" [not yet implemented]"
+            return "LOAD \"\(filename)\" [requires ATR filesystem - Phase 12]"
 
         case .basicImport(let path):
-            return "Import from \(path) [not yet implemented]"
+            return "Import from \(path) [requires file I/O - Phase 15]"
 
         case .basicExport(let path):
-            return "Export to \(path) [not yet implemented]"
+            return "Export to \(path) [requires detokenizer - Phase 15]"
 
         // =====================================================================
         // DOS Commands (Stubs)

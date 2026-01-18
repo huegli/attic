@@ -289,6 +289,9 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
     /// Reference to the emulator engine.
     private let emulator: EmulatorEngine
 
+    /// BASIC line handler for tokenization and memory injection.
+    private let basicHandler: BASICLineHandler
+
     /// Reference to the CLI socket server for sending events.
     private weak var cliServer: CLISocketServer?
 
@@ -297,6 +300,7 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
 
     init(emulator: EmulatorEngine) {
         self.emulator = emulator
+        self.basicHandler = BASICLineHandler(emulator: emulator)
     }
 
     /// Sets the CLI server reference for sending async events.
@@ -465,6 +469,36 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
         case .injectKeys(let text):
             // TODO: Implement keyboard injection
             return .ok("injected keys \(text.count)")
+
+        // BASIC line entry and commands
+        case .basicLine(let line):
+            let result = await basicHandler.enterLine(line)
+            if result.success {
+                return .ok(result.message)
+            } else {
+                return .error(result.message)
+            }
+
+        case .basicNew:
+            let result = await basicHandler.newProgram()
+            if result.success {
+                return .ok(result.message)
+            } else {
+                return .error(result.message)
+            }
+
+        case .basicRun:
+            let result = await basicHandler.runProgram()
+            if result.success {
+                return .ok(result.message)
+            } else {
+                return .error(result.message)
+            }
+
+        case .basicList:
+            // LIST requires detokenizer (Phase 15), show program info instead
+            let info = await basicHandler.getProgramInfo()
+            return .ok("program \(info.lines) lines, \(info.bytes) bytes, \(info.variables) variables")
         }
     }
 
