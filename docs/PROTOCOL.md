@@ -862,6 +862,51 @@ Register names: A, X, Y, S (stack pointer), P (status), PC
 - `CMD:registers Q=$FF\n` → `ERR:Invalid register 'Q'`
 - `CMD:registers A=$GG\n` → `ERR:Invalid value 'GG'`
 
+### Disassembly
+
+#### disassemble
+Disassemble memory at an address. Alias: `d`.
+```
+CMD:disassemble $0600 8
+OK:$0600  A9 00     LDA #$00
+$0602  8D 00 D4  STA DMACTL
+$0605  A9 01     LDA #$01
+$0607  8D 01 D4  STA $D401
+$060A  60        RTS
+$060B  EA        NOP
+$060C  EA        NOP
+$060D  EA        NOP
+```
+
+Default (no arguments) disassembles 16 lines starting from current PC:
+```
+CMD:d
+OK:$E477  A9 00     LDA #$00
+...
+```
+
+With just address, disassembles 16 lines from that address:
+```
+CMD:d $0600
+OK:$0600  A9 00     LDA #$00
+...
+```
+
+**Features**:
+- Address can be hex ($xxxx, 0xXXXX) or decimal
+- Output includes symbolic labels for known addresses (hardware registers, OS vectors)
+- Branch instructions show relative offset: `BNE $0607 (+5)`
+- Illegal opcodes are marked
+- Multi-line response uses record separator (`\x1E`)
+
+**Test Cases**:
+- `CMD:d\n` - disassemble from PC, default 16 lines
+- `CMD:d $0600\n` - disassemble from $0600, 16 lines
+- `CMD:d $0600 8\n` - disassemble 8 lines from $0600
+- `CMD:d 1536 8\n` - decimal address
+- `CMD:d xyz\n` → `ERR:Invalid address 'xyz'`
+- `CMD:d $0600 0\n` → `ERR:Invalid line count '0'`
+
 ### Breakpoints
 
 #### breakpoint set
@@ -1195,6 +1240,7 @@ class SocketHandler {
 | step | ✓ | Invalid count, Negative count |
 | reset | ✓ | Invalid type |
 | status | ✓ | - |
+| disassemble | ✓ | Invalid address, Invalid line count |
 | read | ✓ | Invalid address, Missing count |
 | write | ✓ | Invalid address, Invalid byte, Missing data |
 | registers (get) | ✓ | - |
