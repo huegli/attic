@@ -404,7 +404,8 @@ final class ATRFileSystemTests: XCTestCase {
 
         // Manually modify VTOC on disk
         var vtocData = try disk.readSector(360)
-        vtocData[3] = 100  // Change free sector count
+        vtocData[3] = 100  // Change free sector count (low byte)
+        vtocData[4] = 0    // Clear high byte for a total of 100
         try disk.writeSector(360, data: vtocData)
 
         // Refresh should pick up changes

@@ -460,6 +460,18 @@ public actor CLISocketClient {
                 }
             }
             return cmd
+
+        // Phase 11 Monitor commands
+        case .assemble(let address):
+            return "assemble $\(String(format: "%04X", address))"
+        case .assembleLine(let address, let instruction):
+            return "assemble $\(String(format: "%04X", address)) \(instruction)"
+        case .stepOver:
+            return "stepover"
+        case .runUntil(let address):
+            return "until $\(String(format: "%04X", address))"
+        case .memoryFill(let start, let end, let value):
+            return "fill $\(String(format: "%04X", start)) $\(String(format: "%04X", end)) $\(String(format: "%02X", value))"
         }
     }
 

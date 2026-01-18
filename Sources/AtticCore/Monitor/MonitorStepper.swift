@@ -232,14 +232,13 @@ public actor MonitorStepper {
         let nextPC = pc &+ UInt16(length)
 
         // Check if this is a flow-control instruction that might not go to nextPC
-        if let info = OpcodeTable.lookup(actualOpcode) {
-            // For branches, jumps, and returns, we can't easily place a temp BRK
-            // Instead, we'll run one frame and check if PC changed meaningfully
-            if OpcodeTable.isBranch(info.mnemonic) ||
-               OpcodeTable.isJump(info.mnemonic) ||
-               OpcodeTable.isReturn(info.mnemonic) {
-                return await stepFlowControl(info: info, pc: pc, regs: regs)
-            }
+        let info = OpcodeTable.lookup(actualOpcode)
+        // For branches, jumps, and returns, we can't easily place a temp BRK
+        // Instead, we'll run one frame and check if PC changed meaningfully
+        if OpcodeTable.isBranch(info.mnemonic) ||
+           OpcodeTable.isJump(info.mnemonic) ||
+           OpcodeTable.isReturn(info.mnemonic) {
+            return await stepFlowControl(info: info, pc: pc, regs: regs)
         }
 
         // Normal instruction: place temp BRK at next instruction
@@ -314,8 +313,9 @@ public actor MonitorStepper {
         let finalRegs = await emulator.getRegisters()
 
         // Check if we hit a permanent breakpoint
-        if await breakpoints.hasBreakpoint(at: finalRegs.pc) &&
-           !await breakpoints.isTemporaryBreakpoint(at: finalRegs.pc) {
+        let hasPermanentBreakpoint = await breakpoints.hasBreakpoint(at: finalRegs.pc)
+        let isTemporary = await breakpoints.isTemporaryBreakpoint(at: finalRegs.pc)
+        if hasPermanentBreakpoint && !isTemporary {
             await breakpoints.recordHit(at: finalRegs.pc)
             return .breakpoint(registers: finalRegs, address: finalRegs.pc, instructionsExecuted: 1)
         }
@@ -440,7 +440,8 @@ public actor MonitorStepper {
         }
 
         // Check if it's JSR
-        guard let info = OpcodeTable.lookup(actualOpcode), info.mnemonic == "JSR" else {
+        let info = OpcodeTable.lookup(actualOpcode)
+        guard info.mnemonic == "JSR" else {
             // Not JSR, do normal step
             stepping = false
             return await step()

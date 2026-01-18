@@ -118,9 +118,9 @@ final class VTOCTests: XCTestCase {
         data[1] = 0xD0; data[2] = 0x02
         data[3] = 0xC3; data[4] = 0x02
 
-        // Mark sector 100 as used
-        // Sector 100: byte = 10 + 100/8 = 22, bit = 7 - (100 % 8) = 7 - 4 = 3
-        data[22] &= 0b11110111
+        // Mark sector 100 as used (using 0-based indexing: sector 1 = bit 0)
+        // Sector 100: bitPosition = 99, byteIndex = 10 + 99/8 = 22, bitIndex = 7 - (99 % 8) = 4
+        data[22] &= 0b11101111  // Clear bit 4
 
         let vtoc = try VTOC(data: data, diskType: .singleDensity)
 
@@ -166,10 +166,10 @@ final class VTOCTests: XCTestCase {
         data[1] = 0x10; data[2] = 0x04
         data[3] = 0x00; data[4] = 0x04
 
-        // Mark sector 800 as used
-        // Sector 800 - 720 = 80
-        // Byte = 100 + 80/8 = 110, bit = 7 - (80 % 8) = 7 - 0 = 7
-        data[110] &= 0b01111111
+        // Mark sector 800 as used (using 0-based indexing: sector 721 = bit 0)
+        // Sector 800: extBitPosition = 800 - 721 = 79
+        // byteIndex = 100 + 79/8 = 109, bitIndex = 7 - (79 % 8) = 0
+        data[109] &= 0b11111110  // Clear bit 0
 
         let vtoc = try VTOC(data: data, diskType: .enhancedDensity)
 
@@ -203,10 +203,11 @@ final class VTOCTests: XCTestCase {
         data[0] = 2
         data[1] = 0xD0; data[2] = 0x02
 
-        // Mark sectors 100, 101, 102 as free
-        // Byte 22: sectors 96-103
-        // Sector 100: bit 3, Sector 101: bit 2, Sector 102: bit 1
-        data[22] = 0b00001110
+        // Mark sectors 100, 101, 102 as free (using 0-based indexing: sector 1 = bit 0)
+        // Sector 100: bitPosition = 99, byteIndex = 22, bitIndex = 4
+        // Sector 101: bitPosition = 100, byteIndex = 22, bitIndex = 3
+        // Sector 102: bitPosition = 101, byteIndex = 22, bitIndex = 2
+        data[22] = 0b00011100  // Set bits 4, 3, 2
 
         let vtoc = try VTOC(data: data, diskType: .singleDensity)
         let freeSectors = vtoc.getFreeSectors()

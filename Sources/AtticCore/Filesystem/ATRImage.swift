@@ -320,7 +320,6 @@ public final class ATRImage: @unchecked Sendable {
     public init(data: Data, validationMode: ATRValidationMode = .lenient) throws {
         self.url = nil
         self.isReadOnly = false
-        self.data = data
 
         // Parse header
         self.header = try ATRHeader(data: data)
@@ -338,6 +337,21 @@ public final class ATRImage: @unchecked Sendable {
             self.diskType = detected
         } else {
             self.diskType = .singleDensity
+        }
+
+        // Validate data size
+        let expectedSize = ATRHeader.headerSize + header.diskSize
+        if data.count < expectedSize {
+            if validationMode == .strict {
+                throw ATRError.sizeMismatch(expected: expectedSize, actual: data.count)
+            }
+            // Pad with zeros for lenient mode
+            var paddedData = data
+            let padding = Data(count: expectedSize - data.count)
+            paddedData.append(padding)
+            self.data = paddedData
+        } else {
+            self.data = data
         }
     }
 

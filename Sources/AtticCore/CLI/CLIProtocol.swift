@@ -121,9 +121,6 @@ public enum CLICommand: Sendable {
     case breakpointClearAll
     case breakpointList
 
-    // Disassembly
-    case disassemble(address: UInt16?, lines: Int)
-
     // Assembly
     case assemble(address: UInt16)
     case assembleLine(address: UInt16, instruction: String)
@@ -337,10 +334,6 @@ public struct CLICommandParser: Sendable {
         case "inject":
             return try parseInject(argsString)
 
-        // Disassembly
-        case "disassemble", "d":
-            return try parseDisassemble(argsString)
-
         default:
             throw CLIProtocolError.invalidCommand(command)
         }
@@ -478,25 +471,6 @@ public struct CLICommandParser: Sendable {
         default:
             throw CLIProtocolError.invalidCommand("breakpoint \(subcommand)")
         }
-    }
-
-    private func parseDisassemble(_ args: String) throws -> CLICommand {
-        let parts = args.split(separator: " ", omittingEmptySubsequences: true)
-
-        var address: UInt16? = nil
-        var lines: Int = 16
-
-        if parts.count >= 1 {
-            // First argument is address
-            address = parseAddress(String(parts[0]))
-        }
-
-        if parts.count >= 2 {
-            // Second argument is line count
-            lines = Int(parts[1]) ?? 16
-        }
-
-        return .disassemble(address: address, lines: lines)
     }
 
     private func parseAssemble(_ args: String) throws -> CLICommand {

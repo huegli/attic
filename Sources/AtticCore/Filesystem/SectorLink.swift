@@ -114,6 +114,10 @@ public struct SectorLink: Sendable, Equatable {
     /// - Parameters:
     ///   - sectorData: The complete sector data (128 or 256 bytes).
     ///   - sectorSize: The sector size (128 or 256).
+    ///   - isKnownLastSector: If true, interprets the data as a last sector
+    ///     where the forward pointer field contains the byte count. If nil,
+    ///     uses heuristics to detect last sectors (byte count <= max data bytes
+    ///     with high bits = 0).
     ///
     /// - Important: The sectorData must be at least sectorSize bytes.
     ///   If smaller, the behavior is undefined.
@@ -123,7 +127,10 @@ public struct SectorLink: Sendable, Equatable {
     ///     let rawSector = disk.readSector(45)
     ///     let link = SectorLink(sectorData: rawSector, sectorSize: 128)
     ///
-    public init(sectorData: [UInt8], sectorSize: Int) {
+    ///     // When you know it's the last sector from directory entry:
+    ///     let lastLink = SectorLink(sectorData: rawSector, sectorSize: 128, isKnownLastSector: true)
+    ///
+    public init(sectorData: [UInt8], sectorSize: Int, isKnownLastSector: Bool? = nil) {
         self.sectorSize = sectorSize
 
         // The link bytes are at the end of the sector
@@ -151,24 +158,31 @@ public struct SectorLink: Sendable, Equatable {
             // Extract file ID from bits 7-2
             self.fileID = byte125 >> 2
 
-            // Extract next sector from bits 1-0 of byte 125 (high) + byte 126 (low)
-            let nextHigh = UInt16(byte125 & 0x03) << 8
-            let nextLow = UInt16(byte126)
-            let nextValue = nextHigh | nextLow
+            // Extract forward pointer bits
+            let nextHigh = byte125 & 0x03
+            let nextValue = UInt16(nextHigh) << 8 | UInt16(byte126)
+            let maxDataBytes = sectorSize - 3  // 125 for 128-byte sectors
 
-            if nextValue == 0 {
-                // This is the last sector
+            // Determine if this is a last sector
+            let isLast: Bool
+            if let known = isKnownLastSector {
+                // Caller knows whether this is the last sector
+                isLast = known
+            } else {
+                // Heuristic: if forward pointer is 0, it's the last sector
+                // Also treat as last if high bits are 0 and byte126 <= max data bytes
+                // (this handles the common case where byte count < max data bytes)
+                isLast = nextValue == 0 || (nextHigh == 0 && byte126 <= maxDataBytes)
+            }
+
+            if isLast {
                 self.isLastSector = true
                 self.nextSector = 0
-                // Byte 126 contains the count of valid data bytes
-                // For the last sector, byte126 tells us how many bytes are used
-                // If byte126 is 0 in the last sector, it means 0 valid bytes (empty last sector)
                 self.bytesInSector = Int(byte126)
             } else {
-                // This is an intermediate sector
                 self.isLastSector = false
                 self.nextSector = nextValue
-                self.bytesInSector = sectorSize - 3  // All 125 bytes are data
+                self.bytesInSector = maxDataBytes
             }
         } else {
             // 256-byte sector format:
@@ -183,22 +197,27 @@ public struct SectorLink: Sendable, Equatable {
             // File ID is the full first byte
             self.fileID = byte253
 
-            // Extract next sector from byte 254 (low) + bits 1-0 of byte 255 (high)
-            let nextLow = UInt16(byte254)
-            let nextHigh = UInt16(byte255 & 0x03) << 8
-            let nextValue = nextHigh | nextLow
+            // Extract forward pointer bits
+            let nextHigh = byte255 & 0x03
+            let nextValue = UInt16(nextHigh) << 8 | UInt16(byte254)
+            let maxDataBytes = sectorSize - 3  // 253 for 256-byte sectors
 
-            if nextValue == 0 {
-                // This is the last sector
+            // Determine if this is a last sector
+            let isLast: Bool
+            if let known = isKnownLastSector {
+                isLast = known
+            } else {
+                isLast = nextValue == 0 || (nextHigh == 0 && byte254 <= maxDataBytes)
+            }
+
+            if isLast {
                 self.isLastSector = true
                 self.nextSector = 0
-                // Byte 254 contains the count of valid data bytes
                 self.bytesInSector = Int(byte254)
             } else {
-                // This is an intermediate sector
                 self.isLastSector = false
                 self.nextSector = nextValue
-                self.bytesInSector = sectorSize - 3  // All 253 bytes are data
+                self.bytesInSector = maxDataBytes
             }
         }
     }

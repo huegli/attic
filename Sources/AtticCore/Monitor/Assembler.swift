@@ -218,10 +218,12 @@ public struct ExpressionParser: Sendable {
             let char = expr[index]
             if char == "+" {
                 index = expr.index(after: index)
-                left = left + try parseMulDiv(expr, &index)
+                let right = try parseMulDiv(expr, &index)
+                left = left + right
             } else if char == "-" {
                 index = expr.index(after: index)
-                left = left - try parseMulDiv(expr, &index)
+                let right = try parseMulDiv(expr, &index)
+                left = left - right
             } else {
                 break
             }
@@ -241,7 +243,8 @@ public struct ExpressionParser: Sendable {
             let char = expr[index]
             if char == "*" && isOperator(expr, index) {
                 index = expr.index(after: index)
-                left = left * try parseUnary(expr, &index)
+                let right = try parseUnary(expr, &index)
+                left = left * right
             } else if char == "/" {
                 index = expr.index(after: index)
                 let right = try parseUnary(expr, &index)
@@ -292,7 +295,8 @@ public struct ExpressionParser: Sendable {
         // Unary minus
         if char == "-" {
             index = expr.index(after: index)
-            return -try parseUnary(expr, &index)
+            let value = try parseUnary(expr, &index)
+            return -value
         }
 
         // Unary plus (no-op)
@@ -495,8 +499,8 @@ public enum ParsedOperand: Sendable, Equatable {
         case .absoluteX: return .absoluteX
         case .absoluteY: return .absoluteY
         case .indirect: return .indirect
-        case .indexedIndirect: return .indexedIndirect
-        case .indirectIndexed: return .indirectIndexed
+        case .indexedIndirect: return .indexedIndirectX
+        case .indirectIndexed: return .indirectIndexedY
         case .relative: return .relative
         }
     }
@@ -950,21 +954,23 @@ public final class Assembler: @unchecked Sendable {
             }
         }
 
-        // Look up the opcode
-        guard let opcode = availableModes[mode] else {
-            // Try alternate modes if the exact mode isn't available
+        // Look up the opcode - try alternate modes if the exact mode isn't available
+        var finalOpcode = availableModes[mode]
+
+        if finalOpcode == nil {
             // e.g., for branches, relative mode is used
             if OpcodeTable.isBranch(mnemonic) && availableModes[.relative] != nil {
                 mode = .relative
-            } else {
-                throw AssemblerError.invalidAddressingMode(mnemonic, operand ?? "(none)")
+                finalOpcode = availableModes[mode]
             }
         }
 
-        let finalOpcode = availableModes[mode]!
+        guard let opcode = finalOpcode else {
+            throw AssemblerError.invalidAddressingMode(mnemonic, operand ?? "(none)")
+        }
 
         // Build the instruction bytes
-        var bytes: [UInt8] = [finalOpcode]
+        var bytes: [UInt8] = [opcode]
 
         switch mode {
         case .implied, .accumulator:
@@ -972,7 +978,7 @@ public final class Assembler: @unchecked Sendable {
             break
 
         case .immediate, .zeroPage, .zeroPageX, .zeroPageY,
-             .indexedIndirect, .indirectIndexed:
+             .indexedIndirectX, .indirectIndexedY:
             // One operand byte
             if value < -128 || value > 255 {
                 throw AssemblerError.valueOutOfRange("operand", value, -128, 255)
@@ -994,6 +1000,10 @@ public final class Assembler: @unchecked Sendable {
                 throw AssemblerError.branchOutOfRange(operand ?? "target", offset)
             }
             bytes.append(UInt8(bitPattern: Int8(offset)))
+
+        case .unknown:
+            // Unknown addressing mode - should not happen during assembly
+            throw AssemblerError.invalidAddressingMode(operand ?? "", "unknown")
         }
 
         return bytes

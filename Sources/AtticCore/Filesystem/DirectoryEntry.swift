@@ -225,12 +225,14 @@ public struct DirectoryEntry: Sendable, Equatable {
     /// Never-used entries have flags = 0x00, indicating a virgin slot
     /// on a freshly formatted disk.
     public var isNeverUsed: Bool {
-        flags == 0x00 || (flags & 0x01) != 0
+        flags == 0x00
     }
 
     /// Returns true if the file is locked (read-only).
+    ///
+    /// The locked flag is bit 0 (0x01) in Atari DOS.
     public var isLocked: Bool {
-        (flags & 0x02) != 0
+        (flags & 0x01) != 0
     }
 
     /// Returns true if the file is currently open for writing.
@@ -539,11 +541,15 @@ extension DirectoryEntry {
                 // * matches zero or more characters
                 // Try matching the rest of the pattern against the rest of the string
                 let restOfPattern = String(pattern[pattern.index(after: p)...])
-                for i in s...string.endIndex {
+                // Iterate through all possible starting positions for the rest of the match
+                var i = s
+                while i <= string.endIndex {
                     let restOfString = String(string[i...])
                     if wildcardMatch(restOfString, pattern: restOfPattern) {
                         return true
                     }
+                    if i == string.endIndex { break }
+                    i = string.index(after: i)
                 }
                 return false
             } else if patternChar == "?" {

@@ -646,3 +646,105 @@ public enum OpcodeTable {
         OpcodeInfo(mnemonic: "???", mode: .unknown, cycles: 1, isIllegal: true)
     }
 }
+
+// =============================================================================
+// MARK: - Monitor Mode Helper Extensions
+// =============================================================================
+
+extension OpcodeTable {
+    /// Returns the instruction length in bytes for an opcode.
+    ///
+    /// - Parameter opcode: The opcode byte.
+    /// - Returns: Length in bytes (1-3).
+    public static func instructionLength(_ opcode: UInt8) -> Int {
+        lookup(opcode).byteCount
+    }
+
+    /// Returns all opcodes for a given mnemonic.
+    ///
+    /// - Parameter mnemonic: The instruction mnemonic (case-insensitive).
+    /// - Returns: Dictionary mapping AddressingMode to opcode byte.
+    public static func opcodesFor(mnemonic: String) -> [AddressingMode: UInt8] {
+        let upper = mnemonic.uppercased()
+        var result: [AddressingMode: UInt8] = [:]
+
+        for opcode in 0..<256 {
+            let info = lookup(UInt8(opcode))
+            if info.mnemonic == upper && !info.isIllegal {
+                result[info.mode] = UInt8(opcode)
+            }
+        }
+
+        return result
+    }
+
+    /// Returns the opcode for a mnemonic and addressing mode combination.
+    ///
+    /// - Parameters:
+    ///   - mnemonic: The instruction mnemonic.
+    ///   - mode: The addressing mode.
+    /// - Returns: The opcode byte, or nil if invalid combination.
+    public static func opcode(for mnemonic: String, mode: AddressingMode) -> UInt8? {
+        let upper = mnemonic.uppercased()
+
+        for opcode in 0..<256 {
+            let info = lookup(UInt8(opcode))
+            if info.mnemonic == upper && info.mode == mode && !info.isIllegal {
+                return UInt8(opcode)
+            }
+        }
+
+        return nil
+    }
+
+    /// Returns all valid mnemonics.
+    public static var allMnemonics: Set<String> {
+        var mnemonics = Set<String>()
+        for opcode in 0..<256 {
+            let info = lookup(UInt8(opcode))
+            if !info.isIllegal && info.mnemonic != "???" {
+                mnemonics.insert(info.mnemonic)
+            }
+        }
+        return mnemonics
+    }
+
+    /// Set of branch instruction mnemonics.
+    public static let branchMnemonics: Set<String> = [
+        "BCC", "BCS", "BEQ", "BMI", "BNE", "BPL", "BVC", "BVS"
+    ]
+
+    /// Returns true if the mnemonic is a branch instruction.
+    public static func isBranch(_ mnemonic: String) -> Bool {
+        branchMnemonics.contains(mnemonic.uppercased())
+    }
+
+    /// Returns true if the mnemonic is a jump instruction (JMP, JSR).
+    public static func isJump(_ mnemonic: String) -> Bool {
+        let upper = mnemonic.uppercased()
+        return upper == "JMP" || upper == "JSR"
+    }
+
+    /// Returns true if the mnemonic is a return instruction (RTS, RTI).
+    public static func isReturn(_ mnemonic: String) -> Bool {
+        let upper = mnemonic.uppercased()
+        return upper == "RTS" || upper == "RTI"
+    }
+
+    /// Returns true if the mnemonic is a subroutine call (JSR).
+    public static func isSubroutineCall(_ mnemonic: String) -> Bool {
+        mnemonic.uppercased() == "JSR"
+    }
+
+    /// Calculates the branch target address from PC and signed offset.
+    ///
+    /// - Parameters:
+    ///   - pc: The program counter after fetching the branch instruction (PC + 2).
+    ///   - offset: The signed 8-bit offset (as Int8).
+    /// - Returns: The target address.
+    public static func branchTarget(from pc: UInt16, offset: Int8) -> UInt16 {
+        // Branch offset is relative to the PC after the branch instruction
+        let target = Int(pc) + Int(offset)
+        return UInt16(truncatingIfNeeded: target)
+    }
+}

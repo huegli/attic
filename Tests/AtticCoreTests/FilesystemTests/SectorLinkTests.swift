@@ -28,7 +28,8 @@ final class SectorLinkTests: XCTestCase {
         sectorData[126] = 0x2F  // 47 low byte
         sectorData[127] = 0x00  // Unused
 
-        let link = SectorLink(sectorData: sectorData, sectorSize: 128)
+        // Use isKnownLastSector: false because 47 is ambiguous (could be byte count)
+        let link = SectorLink(sectorData: sectorData, sectorSize: 128, isKnownLastSector: false)
 
         XCTAssertEqual(link.fileID, 5)
         XCTAssertEqual(link.nextSector, 47)
@@ -86,7 +87,8 @@ final class SectorLinkTests: XCTestCase {
         sectorData[254] = 150    // Next sector low byte
         sectorData[255] = 0      // Next sector high (bits 1-0)
 
-        let link = SectorLink(sectorData: sectorData, sectorSize: 256)
+        // Use isKnownLastSector: false because 150 is ambiguous (could be byte count)
+        let link = SectorLink(sectorData: sectorData, sectorSize: 256, isKnownLastSector: false)
 
         XCTAssertEqual(link.fileID, 7)
         XCTAssertEqual(link.nextSector, 150)

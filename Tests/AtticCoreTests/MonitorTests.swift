@@ -3,10 +3,12 @@
 // =============================================================================
 //
 // This file contains tests for Phase 11 components:
-// - OpcodeTable: 6502 opcode lookup and instruction information
 // - Assembler: MAC65-style 6502 assembler
 // - Expression parser: Arithmetic and label expression evaluation
 // - BreakpointManager: BRK injection and PC-polling breakpoints
+//
+// Note: OpcodeTable and AddressingMode tests are in DisassemblerTests.swift
+// since those types are shared between Disassembler and Monitor.
 //
 // These tests verify the core functionality without requiring ROM files
 // or a running emulator.
@@ -17,60 +19,55 @@ import XCTest
 @testable import AtticCore
 
 // =============================================================================
-// MARK: - Opcode Table Tests
+// MARK: - Opcode Table Helper Tests (Monitor-specific functionality)
 // =============================================================================
 
-/// Tests for the OpcodeTable.
-final class OpcodeTableTests: XCTestCase {
+/// Tests for monitor-specific OpcodeTable helper functions.
+final class MonitorOpcodeTableHelperTests: XCTestCase {
     /// Test looking up a valid opcode.
     func test_lookup_lda_immediate() {
         let info = OpcodeTable.lookup(0xA9)
 
-        XCTAssertNotNil(info)
-        XCTAssertEqual(info?.mnemonic, "LDA")
-        XCTAssertEqual(info?.mode, .immediate)
-        XCTAssertEqual(info?.bytes, 2)
-        XCTAssertEqual(info?.cycles, 2)
+        XCTAssertEqual(info.mnemonic, "LDA")
+        XCTAssertEqual(info.mode, .immediate)
+        XCTAssertEqual(info.byteCount, 2)
+        XCTAssertEqual(info.cycles, 2)
     }
 
     /// Test looking up an absolute instruction.
     func test_lookup_sta_absolute() {
         let info = OpcodeTable.lookup(0x8D)
 
-        XCTAssertNotNil(info)
-        XCTAssertEqual(info?.mnemonic, "STA")
-        XCTAssertEqual(info?.mode, .absolute)
-        XCTAssertEqual(info?.bytes, 3)
+        XCTAssertEqual(info.mnemonic, "STA")
+        XCTAssertEqual(info.mode, .absolute)
+        XCTAssertEqual(info.byteCount, 3)
     }
 
     /// Test looking up an implied instruction.
     func test_lookup_nop() {
         let info = OpcodeTable.lookup(0xEA)
 
-        XCTAssertNotNil(info)
-        XCTAssertEqual(info?.mnemonic, "NOP")
-        XCTAssertEqual(info?.mode, .implied)
-        XCTAssertEqual(info?.bytes, 1)
+        XCTAssertEqual(info.mnemonic, "NOP")
+        XCTAssertEqual(info.mode, .implied)
+        XCTAssertEqual(info.byteCount, 1)
     }
 
     /// Test looking up a branch instruction.
     func test_lookup_bne() {
         let info = OpcodeTable.lookup(0xD0)
 
-        XCTAssertNotNil(info)
-        XCTAssertEqual(info?.mnemonic, "BNE")
-        XCTAssertEqual(info?.mode, .relative)
-        XCTAssertEqual(info?.bytes, 2)
+        XCTAssertEqual(info.mnemonic, "BNE")
+        XCTAssertEqual(info.mode, .relative)
+        XCTAssertEqual(info.byteCount, 2)
     }
 
     /// Test looking up BRK instruction.
     func test_lookup_brk() {
         let info = OpcodeTable.lookup(0x00)
 
-        XCTAssertNotNil(info)
-        XCTAssertEqual(info?.mnemonic, "BRK")
-        XCTAssertEqual(info?.mode, .implied)
-        XCTAssertEqual(info?.bytes, 1)
+        XCTAssertEqual(info.mnemonic, "BRK")
+        XCTAssertEqual(info.mode, .implied)
+        XCTAssertEqual(info.byteCount, 1)
     }
 
     /// Test instructionLength for valid opcode.
@@ -151,22 +148,25 @@ final class OpcodeTableTests: XCTestCase {
         XCTAssertTrue(mnemonics.contains("BRK"))
     }
 
-    /// Test looking up an invalid/undocumented opcode returns nil.
-    func test_lookup_invalidOpcode() {
-        // 0x02 is an undocumented/invalid opcode on the standard 6502
+    /// Test looking up an illegal opcode returns OpcodeInfo with isIllegal = true.
+    func test_lookup_illegalOpcode() {
+        // 0x02 is a JAM opcode (halts CPU)
         let info = OpcodeTable.lookup(0x02)
-        XCTAssertNil(info)
+        XCTAssertTrue(info.isIllegal)
+        XCTAssertEqual(info.mnemonic, "JAM")
 
-        // 0xFF is also invalid
+        // 0xFF is ISC (illegal INC + SBC)
         let info2 = OpcodeTable.lookup(0xFF)
-        XCTAssertNil(info2)
+        XCTAssertTrue(info2.isIllegal)
+        XCTAssertEqual(info2.mnemonic, "ISC")
     }
 
-    /// Test instructionLength for invalid opcode returns 1.
-    func test_instructionLength_invalidOpcode() {
-        // Invalid opcodes should return length 1 (safe default)
+    /// Test instructionLength for illegal opcode.
+    func test_instructionLength_illegalOpcode() {
+        // JAM opcodes have length 1 (implied)
         XCTAssertEqual(OpcodeTable.instructionLength(0x02), 1)
-        XCTAssertEqual(OpcodeTable.instructionLength(0xFF), 1)
+        // ISC absolute,X has length 3
+        XCTAssertEqual(OpcodeTable.instructionLength(0xFF), 3)
     }
 
     /// Test isSubroutineCall helper.
@@ -204,14 +204,12 @@ final class OpcodeTableTests: XCTestCase {
     func test_lookup_stackOps() {
         // PHA
         let pha = OpcodeTable.lookup(0x48)
-        XCTAssertNotNil(pha)
-        XCTAssertEqual(pha?.mnemonic, "PHA")
-        XCTAssertEqual(pha?.mode, .implied)
+        XCTAssertEqual(pha.mnemonic, "PHA")
+        XCTAssertEqual(pha.mode, .implied)
 
         // PLA
         let pla = OpcodeTable.lookup(0x68)
-        XCTAssertNotNil(pla)
-        XCTAssertEqual(pla?.mnemonic, "PLA")
+        XCTAssertEqual(pla.mnemonic, "PLA")
     }
 
     /// Test branchTarget with page crossing.
@@ -223,111 +221,46 @@ final class OpcodeTableTests: XCTestCase {
 }
 
 // =============================================================================
-// MARK: - Addressing Mode Tests
+// MARK: - OpcodeInfo Usage Tests (Monitor-specific)
 // =============================================================================
+// Note: Core AddressingMode tests are in DisassemblerTests.swift.
+// These tests verify Monitor-specific usage patterns.
 
-/// Tests for AddressingMode enum.
-final class AddressingModeTests: XCTestCase {
-    /// Test byte counts for each mode.
-    func test_bytes() {
-        XCTAssertEqual(AddressingMode.implied.bytes, 1)
-        XCTAssertEqual(AddressingMode.accumulator.bytes, 1)
-        XCTAssertEqual(AddressingMode.immediate.bytes, 2)
-        XCTAssertEqual(AddressingMode.zeroPage.bytes, 2)
-        XCTAssertEqual(AddressingMode.absolute.bytes, 3)
-        XCTAssertEqual(AddressingMode.indirect.bytes, 3)
-        XCTAssertEqual(AddressingMode.relative.bytes, 2)
-    }
-
-    /// Test all byte counts for completeness.
-    func test_bytes_allModes() {
-        XCTAssertEqual(AddressingMode.zeroPageX.bytes, 2)
-        XCTAssertEqual(AddressingMode.zeroPageY.bytes, 2)
-        XCTAssertEqual(AddressingMode.absoluteX.bytes, 3)
-        XCTAssertEqual(AddressingMode.absoluteY.bytes, 3)
-        XCTAssertEqual(AddressingMode.indexedIndirect.bytes, 2)
-        XCTAssertEqual(AddressingMode.indirectIndexed.bytes, 2)
-    }
-
-    /// Test page-crossing modes.
-    func test_canCrossPage() {
-        XCTAssertTrue(AddressingMode.absoluteX.canCrossPage)
-        XCTAssertTrue(AddressingMode.absoluteY.canCrossPage)
-        XCTAssertTrue(AddressingMode.indirectIndexed.canCrossPage)
-        XCTAssertFalse(AddressingMode.absolute.canCrossPage)
-        XCTAssertFalse(AddressingMode.zeroPage.canCrossPage)
-    }
-
-    /// Test all modes that don't cross pages.
-    func test_canCrossPage_allFalse() {
-        XCTAssertFalse(AddressingMode.implied.canCrossPage)
-        XCTAssertFalse(AddressingMode.accumulator.canCrossPage)
-        XCTAssertFalse(AddressingMode.immediate.canCrossPage)
-        XCTAssertFalse(AddressingMode.zeroPageX.canCrossPage)
-        XCTAssertFalse(AddressingMode.zeroPageY.canCrossPage)
-        XCTAssertFalse(AddressingMode.indirect.canCrossPage)
-        XCTAssertFalse(AddressingMode.indexedIndirect.canCrossPage)
-        XCTAssertFalse(AddressingMode.relative.canCrossPage)
-    }
-
-    /// Test rawValue strings.
-    func test_rawValue() {
-        XCTAssertEqual(AddressingMode.implied.rawValue, "IMP")
-        XCTAssertEqual(AddressingMode.immediate.rawValue, "IMM")
-        XCTAssertEqual(AddressingMode.zeroPage.rawValue, "ZP")
-        XCTAssertEqual(AddressingMode.absolute.rawValue, "ABS")
-        XCTAssertEqual(AddressingMode.indirect.rawValue, "IND")
-        XCTAssertEqual(AddressingMode.relative.rawValue, "REL")
-    }
-
-    /// Test CaseIterable returns all modes.
-    func test_caseIterable() {
-        let allCases = AddressingMode.allCases
-        XCTAssertEqual(allCases.count, 13)  // 13 addressing modes
-    }
-}
-
-// =============================================================================
-// MARK: - OpcodeInfo Tests
-// =============================================================================
-
-/// Tests for OpcodeInfo structure.
-final class OpcodeInfoTests: XCTestCase {
-    /// Test OpcodeInfo pageCross property.
-    func test_pageCross() {
-        // LDA absolute X has page cross penalty
+/// Tests for OpcodeInfo usage in Monitor context.
+final class MonitorOpcodeInfoUsageTests: XCTestCase {
+    /// Test OpcodeInfo pageCrossCycles property.
+    func test_pageCrossCycles() {
+        // LDA absolute,X has page cross penalty
         let ldaAbsX = OpcodeTable.lookup(0xBD)
-        XCTAssertNotNil(ldaAbsX)
-        XCTAssertTrue(ldaAbsX?.pageCross ?? false)
+        XCTAssertEqual(ldaAbsX.pageCrossCycles, 1)
 
         // LDA absolute does not have page cross penalty
         let ldaAbs = OpcodeTable.lookup(0xAD)
-        XCTAssertNotNil(ldaAbs)
-        XCTAssertFalse(ldaAbs?.pageCross ?? true)
+        XCTAssertEqual(ldaAbs.pageCrossCycles, 0)
     }
 
     /// Test OpcodeInfo cycles property.
     func test_cycles() {
         let nop = OpcodeTable.lookup(0xEA)
-        XCTAssertEqual(nop?.cycles, 2)
+        XCTAssertEqual(nop.cycles, 2)
 
         let ldaImm = OpcodeTable.lookup(0xA9)
-        XCTAssertEqual(ldaImm?.cycles, 2)
+        XCTAssertEqual(ldaImm.cycles, 2)
 
         let ldaAbs = OpcodeTable.lookup(0xAD)
-        XCTAssertEqual(ldaAbs?.cycles, 4)
+        XCTAssertEqual(ldaAbs.cycles, 4)
     }
 
-    /// Test bytes derived from mode.
-    func test_bytes() {
+    /// Test byteCount derived from mode.
+    func test_byteCount() {
         let nop = OpcodeTable.lookup(0xEA)
-        XCTAssertEqual(nop?.bytes, 1)
+        XCTAssertEqual(nop.byteCount, 1)
 
         let ldaImm = OpcodeTable.lookup(0xA9)
-        XCTAssertEqual(ldaImm?.bytes, 2)
+        XCTAssertEqual(ldaImm.byteCount, 2)
 
         let jmpAbs = OpcodeTable.lookup(0x4C)
-        XCTAssertEqual(jmpAbs?.bytes, 3)
+        XCTAssertEqual(jmpAbs.byteCount, 3)
     }
 }
 
@@ -570,7 +503,7 @@ final class AssemblerPseudoOpTests: XCTestCase {
         let result = try assembler.assembleLine("DCI \"HI\"")
 
         // "HI" = 72, 73 but last byte has high bit set: 72, 73 | 0x80 = 72, 201
-        XCTAssertEqual(result.bytes, [72, 73 | 0x80])
+        XCTAssertEqual(result.bytes, [72, UInt8(73 | 0x80)])
     }
 
     /// Test DS with fill value (reserves zero-filled space).
@@ -604,7 +537,8 @@ final class AssemblerErrorTests: XCTestCase {
 
     /// Test invalid instruction error.
     func test_invalidInstruction() {
-        XCTAssertThrowsError(try assembler.assembleLine("XYZ")) { error in
+        // Need leading space so "XYZ" is treated as instruction, not label
+        XCTAssertThrowsError(try assembler.assembleLine(" XYZ")) { error in
             guard case AssemblerError.invalidInstruction(let instr) = error else {
                 XCTFail("Expected invalidInstruction error")
                 return
@@ -944,26 +878,34 @@ final class BreakpointManagerTests: XCTestCase {
     func test_classifyAddress_ram() async {
         let manager = BreakpointManager()
 
-        XCTAssertEqual(await manager.classifyAddress(0x0600), .ram)
-        XCTAssertEqual(await manager.classifyAddress(0x0000), .ram)
-        XCTAssertEqual(await manager.classifyAddress(0xBFFF), .ram)
+        let class1 = await manager.classifyAddress(0x0600)
+        let class2 = await manager.classifyAddress(0x0000)
+        let class3 = await manager.classifyAddress(0xBFFF)
+        XCTAssertEqual(class1, .ram)
+        XCTAssertEqual(class2, .ram)
+        XCTAssertEqual(class3, .ram)
     }
 
     /// Test classifying ROM address.
     func test_classifyAddress_rom() async {
         let manager = BreakpointManager()
 
-        XCTAssertEqual(await manager.classifyAddress(0xE000), .rom)
-        XCTAssertEqual(await manager.classifyAddress(0xFFFC), .rom)
-        XCTAssertEqual(await manager.classifyAddress(0xC000), .rom)
+        let class1 = await manager.classifyAddress(0xE000)
+        let class2 = await manager.classifyAddress(0xFFFC)
+        let class3 = await manager.classifyAddress(0xC000)
+        XCTAssertEqual(class1, .rom)
+        XCTAssertEqual(class2, .rom)
+        XCTAssertEqual(class3, .rom)
     }
 
     /// Test isROMAddress helper.
     func test_isROMAddress() async {
         let manager = BreakpointManager()
 
-        XCTAssertFalse(await manager.isROMAddress(0x0600))
-        XCTAssertTrue(await manager.isROMAddress(0xE000))
+        let isROM1 = await manager.isROMAddress(0x0600)
+        let isROM2 = await manager.isROMAddress(0xE000)
+        XCTAssertFalse(isROM1)
+        XCTAssertTrue(isROM2)
     }
 
     /// Test breakpoint tracking (without actual memory).
@@ -982,11 +924,13 @@ final class BreakpointManagerTests: XCTestCase {
     func test_hasBreakpoint() async {
         let manager = BreakpointManager()
 
-        XCTAssertFalse(await manager.hasBreakpoint(at: 0x0600))
+        let hasBP1 = await manager.hasBreakpoint(at: 0x0600)
+        XCTAssertFalse(hasBP1)
 
         await manager.setBreakpointTracking(at: 0x0600, originalByte: nil)
 
-        XCTAssertTrue(await manager.hasBreakpoint(at: 0x0600))
+        let hasBP2 = await manager.hasBreakpoint(at: 0x0600)
+        XCTAssertTrue(hasBP2)
     }
 
     /// Test getAllBreakpoints.
@@ -1021,8 +965,10 @@ final class BreakpointManagerTests: XCTestCase {
 
         await manager.setBreakpointTracking(at: 0xE477, originalByte: nil)
 
-        XCTAssertTrue(await manager.hasROMBreakpoints)
-        XCTAssertTrue(await manager.romBreakpoints.contains(0xE477))
+        let hasROMBPs = await manager.hasROMBreakpoints
+        XCTAssertTrue(hasROMBPs)
+        let romBps = await manager.romBreakpoints
+        XCTAssertTrue(romBps.contains(0xE477))
     }
 
     /// Test checkROMBreakpoint.
@@ -1104,18 +1050,22 @@ final class BreakpointManagerTests: XCTestCase {
         let mockMemory = MockMemoryAccess()
 
         // Before setting temporary breakpoint
-        XCTAssertFalse(await manager.isTemporaryBreakpoint(at: 0x0600))
+        let isTempBefore = await manager.isTemporaryBreakpoint(at: 0x0600)
+        XCTAssertFalse(isTempBefore)
 
         // Set temporary breakpoint
         await manager.setTemporaryBreakpoint(at: 0x0600, memory: mockMemory)
 
-        XCTAssertTrue(await manager.isTemporaryBreakpoint(at: 0x0600))
-        XCTAssertFalse(await manager.isTemporaryBreakpoint(at: 0x0601))
+        let isTempAfter = await manager.isTemporaryBreakpoint(at: 0x0600)
+        let isTempOther = await manager.isTemporaryBreakpoint(at: 0x0601)
+        XCTAssertTrue(isTempAfter)
+        XCTAssertFalse(isTempOther)
 
         // Clear it
         await manager.clearTemporaryBreakpoint(memory: mockMemory)
 
-        XCTAssertFalse(await manager.isTemporaryBreakpoint(at: 0x0600))
+        let isTempAfterClear = await manager.isTemporaryBreakpoint(at: 0x0600)
+        XCTAssertFalse(isTempAfterClear)
     }
 
     /// Test temporary breakpoint in ROM uses PC watching.
@@ -1126,13 +1076,16 @@ final class BreakpointManagerTests: XCTestCase {
         await manager.setTemporaryBreakpoint(at: 0xE477, memory: mockMemory)
 
         // ROM breakpoint should be in the ROM breakpoints set
-        XCTAssertTrue(await manager.isTemporaryBreakpoint(at: 0xE477))
-        XCTAssertTrue(await manager.romBreakpoints.contains(0xE477))
+        let isTemp = await manager.isTemporaryBreakpoint(at: 0xE477)
+        XCTAssertTrue(isTemp)
+        let romBps = await manager.romBreakpoints
+        XCTAssertTrue(romBps.contains(0xE477))
 
         // Clear it
         await manager.clearTemporaryBreakpoint(memory: mockMemory)
 
-        XCTAssertFalse(await manager.romBreakpoints.contains(0xE477))
+        let romBpsAfter = await manager.romBreakpoints
+        XCTAssertFalse(romBpsAfter.contains(0xE477))
     }
 
     /// Test clearing breakpoint tracking.
@@ -1142,7 +1095,8 @@ final class BreakpointManagerTests: XCTestCase {
         await manager.setBreakpointTracking(at: 0x0600, originalByte: 0xA9)
         await manager.setBreakpointTracking(at: 0x0700, originalByte: 0x8D)
 
-        XCTAssertEqual(await manager.getAllBreakpoints().count, 2)
+        let breakpoints = await manager.getAllBreakpoints()
+        XCTAssertEqual(breakpoints.count, 2)
     }
 
     /// Test BRK opcode constant.
@@ -1160,9 +1114,12 @@ final class BreakpointManagerTests: XCTestCase {
         let manager = BreakpointManager()
 
         // I/O addresses should be classified as ROM (can't breakpoint)
-        XCTAssertEqual(await manager.classifyAddress(0xD000), .rom)
-        XCTAssertEqual(await manager.classifyAddress(0xD400), .rom)
-        XCTAssertEqual(await manager.classifyAddress(0xD7FF), .rom)
+        let class1 = await manager.classifyAddress(0xD000)
+        let class2 = await manager.classifyAddress(0xD400)
+        let class3 = await manager.classifyAddress(0xD7FF)
+        XCTAssertEqual(class1, .rom)
+        XCTAssertEqual(class2, .rom)
+        XCTAssertEqual(class3, .rom)
     }
 
     /// Test Breakpoint equality.
@@ -1403,8 +1360,8 @@ final class ParsedOperandTests: XCTestCase {
     /// Test indirect operands.
     func test_indirect() {
         XCTAssertEqual(ParsedOperand.indirect(0x1234).mode, .indirect)
-        XCTAssertEqual(ParsedOperand.indexedIndirect(0x80).mode, .indexedIndirect)
-        XCTAssertEqual(ParsedOperand.indirectIndexed(0x90).mode, .indirectIndexed)
+        XCTAssertEqual(ParsedOperand.indexedIndirect(0x80).mode, .indexedIndirectX)
+        XCTAssertEqual(ParsedOperand.indirectIndexed(0x90).mode, .indirectIndexedY)
     }
 
     /// Test relative operand.

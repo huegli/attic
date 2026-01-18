@@ -352,14 +352,19 @@ public actor MonitorController {
     ///   - lines: Number of lines to disassemble.
     /// - Returns: Formatted disassembly string.
     public func disassemble(at address: UInt16?, lines: Int) async -> String {
-        let startAddr = address ?? (await emulator.getRegisters().pc)
+        let startAddr: UInt16
+        if let addr = address {
+            startAddr = addr
+        } else {
+            startAddr = await emulator.getRegisters().pc
+        }
         var output: [String] = []
         var currentAddr = startAddr
 
         for _ in 0..<lines {
             let opcode = await readMemory(at: currentAddr)
             let info = OpcodeTable.lookup(opcode)
-            let length = info?.bytes ?? 1
+            let length = info.byteCount
 
             // Read instruction bytes
             var bytes: [UInt8] = [opcode]
@@ -373,7 +378,7 @@ public actor MonitorController {
             let paddedBytes = bytesStr.padding(toLength: 11, withPad: " ", startingAt: 0)
 
             let disasm: String
-            if let info = info {
+            if !info.isIllegal && info.mnemonic != "???" {
                 disasm = formatInstruction(info: info, bytes: bytes, address: currentAddr)
             } else {
                 disasm = String(format: "??? $%02X", opcode)
@@ -425,16 +430,19 @@ public actor MonitorController {
             let addr = UInt16(bytes[1]) | (UInt16(bytes[2]) << 8)
             return String(format: "%@ ($%04X)", mnemonic, addr)
 
-        case .indexedIndirect:
+        case .indexedIndirectX:
             return String(format: "%@ ($%02X,X)", mnemonic, bytes[1])
 
-        case .indirectIndexed:
+        case .indirectIndexedY:
             return String(format: "%@ ($%02X),Y", mnemonic, bytes[1])
 
         case .relative:
             let offset = Int8(bitPattern: bytes[1])
             let target = OpcodeTable.branchTarget(from: address + 2, offset: offset)
             return String(format: "%@ $%04X", mnemonic, target)
+
+        case .unknown:
+            return String(format: "??? $%02X", bytes[0])
         }
     }
 

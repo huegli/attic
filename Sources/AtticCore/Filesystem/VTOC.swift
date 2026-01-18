@@ -250,19 +250,24 @@ public struct VTOC: Sendable {
         }
 
         if sector <= 720 {
-            // Main bitmap area
-            let byteIndex = VTOC.bitmapOffset + (sector / 8)
-            let bitIndex = 7 - (sector % 8)
+            // Main bitmap area (sectors 1-720)
+            // Use 0-based indexing: sector 1 maps to bit 0
+            let bitPosition = sector - 1
+            let byteIndex = VTOC.bitmapOffset + (bitPosition / 8)
+            let bitIndex = 7 - (bitPosition % 8)
 
             guard byteIndex < data.count else { return false }
             return (data[byteIndex] & (1 << bitIndex)) != 0
         } else if diskType.usesExtendedVTOC && sector <= 1040 {
-            // Extended bitmap area (DOS 2.5)
-            let extSector = sector - 720
-            let byteIndex = VTOC.extendedBitmapOffset + (extSector / 8)
-            let bitIndex = 7 - (extSector % 8)
+            // Extended bitmap area (DOS 2.5, sectors 721-1040)
+            // Use 0-based indexing: sector 721 maps to bit 0
+            let extBitPosition = sector - 721
+            let byteIndex = VTOC.extendedBitmapOffset + (extBitPosition / 8)
+            let bitIndex = 7 - (extBitPosition % 8)
 
-            guard byteIndex < data.count else { return false }
+            // Extended bitmap only covers 28 bytes (224 sectors: 721-944)
+            // Sectors beyond 944 are considered free (can't be tracked)
+            guard byteIndex < data.count else { return true }
             return (data[byteIndex] & (1 << bitIndex)) != 0
         } else {
             return false
@@ -393,12 +398,15 @@ public struct VTOC: Sendable {
         let bitIndex: Int
 
         if sector <= 720 {
-            byteIndex = bitmapOffset + (sector / 8)
-            bitIndex = 7 - (sector % 8)
+            // Main bitmap: use 0-based indexing (sector 1 = bit 0)
+            let bitPosition = sector - 1
+            byteIndex = bitmapOffset + (bitPosition / 8)
+            bitIndex = 7 - (bitPosition % 8)
         } else {
-            let extSector = sector - 720
-            byteIndex = extendedBitmapOffset + (extSector / 8)
-            bitIndex = 7 - (extSector % 8)
+            // Extended bitmap: use 0-based indexing (sector 721 = bit 0)
+            let extBitPosition = sector - 721
+            byteIndex = extendedBitmapOffset + (extBitPosition / 8)
+            bitIndex = 7 - (extBitPosition % 8)
         }
 
         guard byteIndex < data.count else { return }
@@ -420,24 +428,28 @@ public struct VTOC: Sendable {
         var count = 0
         let maxSector = min(diskType.sectorCount, 720)
 
-        // Count main bitmap area
+        // Count main bitmap area (sectors 1-720)
         for sector in 1...maxSector {
-            let byteIndex = bitmapOffset + (sector / 8)
-            let bitIndex = 7 - (sector % 8)
+            let bitPosition = sector - 1
+            let byteIndex = bitmapOffset + (bitPosition / 8)
+            let bitIndex = 7 - (bitPosition % 8)
 
             if byteIndex < data.count && (data[byteIndex] & (1 << bitIndex)) != 0 {
                 count += 1
             }
         }
 
-        // Count extended bitmap area (DOS 2.5)
+        // Count extended bitmap area (DOS 2.5, sectors 721-1040)
         if diskType.usesExtendedVTOC && diskType.sectorCount > 720 {
             for sector in 721...diskType.sectorCount {
-                let extSector = sector - 720
-                let byteIndex = extendedBitmapOffset + (extSector / 8)
-                let bitIndex = 7 - (extSector % 8)
+                let extBitPosition = sector - 721
+                let byteIndex = extendedBitmapOffset + (extBitPosition / 8)
+                let bitIndex = 7 - (extBitPosition % 8)
 
-                if byteIndex < data.count && (data[byteIndex] & (1 << bitIndex)) != 0 {
+                // Sectors beyond trackable range (945-1040) are considered free
+                if byteIndex >= data.count {
+                    count += 1
+                } else if (data[byteIndex] & (1 << bitIndex)) != 0 {
                     count += 1
                 }
             }

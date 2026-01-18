@@ -322,6 +322,8 @@ public final class ATRFileSystem: @unchecked Sendable {
         var sectorsVisited: Set<Int> = []
         var isCorrupted = false
         var corruptionReason: String?
+        var sectorIndex = 0
+        let expectedSectorCount = Int(entry.sectorCount)
 
         let maxIterations = disk.sectorCount  // Prevent infinite loops
 
@@ -345,7 +347,11 @@ public final class ATRFileSystem: @unchecked Sendable {
             do {
                 let sectorData = try disk.readSector(sector)
                 let sectorSize = disk.actualSectorSize(sector)
-                let link = SectorLink(sectorData: sectorData, sectorSize: sectorSize)
+
+                // Determine if this is the last sector based on directory entry's sector count
+                sectorIndex += 1
+                let isKnownLast = (sectorIndex == expectedSectorCount)
+                let link = SectorLink(sectorData: sectorData, sectorSize: sectorSize, isKnownLastSector: isKnownLast)
 
                 totalBytes += link.bytesInSector
                 sector = Int(link.nextSector)
@@ -394,6 +400,8 @@ public final class ATRFileSystem: @unchecked Sendable {
         var sector = Int(entry.startSector)
         var sectorsVisited: Set<Int> = []
         let maxIterations = disk.sectorCount
+        var sectorIndex = 0
+        let expectedSectorCount = Int(entry.sectorCount)
 
         while sector != 0 && sectorsVisited.count < maxIterations {
             // Check for loops
@@ -416,7 +424,11 @@ public final class ATRFileSystem: @unchecked Sendable {
             // Read sector
             let sectorData = try disk.readSector(sector)
             let sectorSize = disk.actualSectorSize(sector)
-            let link = SectorLink(sectorData: sectorData, sectorSize: sectorSize)
+
+            // Determine if this is the last sector based on directory entry's sector count
+            sectorIndex += 1
+            let isKnownLast = (sectorIndex == expectedSectorCount)
+            let link = SectorLink(sectorData: sectorData, sectorSize: sectorSize, isKnownLastSector: isKnownLast)
 
             // Validate file ID
             if validationMode == .strict && link.fileID != entry.entryIndex {
@@ -469,6 +481,7 @@ public final class ATRFileSystem: @unchecked Sendable {
         var sectors: [Int] = []
         var sector = Int(entry.startSector)
         var sectorsVisited: Set<Int> = []
+        let expectedSectorCount = Int(entry.sectorCount)
 
         while sector != 0 && sectorsVisited.count < disk.sectorCount {
             if sectorsVisited.contains(sector) {
@@ -483,7 +496,10 @@ public final class ATRFileSystem: @unchecked Sendable {
 
             let sectorData = try disk.readSector(sector)
             let sectorSize = disk.actualSectorSize(sector)
-            let link = SectorLink(sectorData: sectorData, sectorSize: sectorSize)
+
+            // Determine if this is the last sector based on directory entry's sector count
+            let isKnownLast = (sectors.count == expectedSectorCount)
+            let link = SectorLink(sectorData: sectorData, sectorSize: sectorSize, isKnownLastSector: isKnownLast)
 
             sector = Int(link.nextSector)
         }

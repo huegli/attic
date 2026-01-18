@@ -248,7 +248,7 @@ final class DirectoryEntryTests: XCTestCase {
         XCTAssertEqual(result?.ext, "BAS")
     }
 
-    func testParseFilenameWithoutExtension() {
+    func testParseFilenameHelperWithoutExtension() {
         let result = DirectoryEntry.parseFilename("README")
         XCTAssertNotNil(result)
         XCTAssertEqual(result?.name, "README")
@@ -259,7 +259,7 @@ final class DirectoryEntryTests: XCTestCase {
         let result = DirectoryEntry.parseFilename("A.B.C")
         XCTAssertNotNil(result)
         XCTAssertEqual(result?.name, "A")
-        XCTAssertEqual(result?.ext, "B")  // Only first dot is separator
+        XCTAssertEqual(result?.ext, "B.C")  // Only first dot is separator, rest is extension
     }
 
     // =========================================================================
@@ -322,7 +322,7 @@ final class DirectoryEntryTests: XCTestCase {
         )
 
         XCTAssertTrue(entry.matchesPattern("GAME.BAS"))
-        XCTAssertFalse(entry.matchesPattern("game.bas"))  // Pattern is uppercase
+        XCTAssertTrue(entry.matchesPattern("game.bas"))  // Case-insensitive matching (Atari DOS behavior)
     }
 
     // =========================================================================

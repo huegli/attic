@@ -469,6 +469,63 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
         // Disassembly
         case .disassemble(let address, let lines):
             return await handleDisassemble(address: address, lines: lines)
+
+        // Phase 11: Monitor mode commands (not fully implemented yet)
+        case .assemble(let address):
+            // Interactive assembly mode - not supported via CLI protocol
+            return .error("Interactive assembly not supported via protocol. Use assembleLine for single instructions.")
+
+        case .assembleLine(let address, let instruction):
+            // Single-line assembly
+            let assembler = Assembler()
+            do {
+                let result = try assembler.assembleLine(instruction, at: address)
+                // Write bytes to memory
+                for (offset, byte) in result.bytes.enumerated() {
+                    await emulator.writeMemory(at: address &+ UInt16(offset), value: byte)
+                }
+                let bytesHex = result.bytes.map { String(format: "%02X", $0) }.joined(separator: " ")
+                return .ok("$\(String(format: "%04X", address)): \(bytesHex)")
+            } catch {
+                return .error("Assembly error: \(error)")
+            }
+
+        case .stepOver:
+            // Step over (treat JSR as single step)
+            let monitor = MonitorStepper(
+                emulator: emulator,
+                breakpoints: BreakpointManager()
+            )
+            let result = await monitor.stepOver()
+            if !result.success, let msg = result.errorMessage {
+                return .error(msg)
+            } else if result.breakpointHit {
+                return .ok("breakpoint at $\(String(format: "%04X", result.stoppedAt)) \(formatRegisters(result.registers))")
+            } else {
+                return .ok("stepped to $\(String(format: "%04X", result.stoppedAt)) \(formatRegisters(result.registers))")
+            }
+
+        case .runUntil(let address):
+            // Run until address (set temp breakpoint and resume)
+            let breakpointMgr = BreakpointManager()
+            let memoryAdapter = EmulatorMemoryAdapter(emulator: emulator)
+            await breakpointMgr.setTemporaryBreakpoint(at: address, memory: memoryAdapter)
+            await emulator.resume()
+            // Note: Actual stopping happens through normal execution
+            return .ok("running until $\(String(format: "%04X", address))")
+
+        case .memoryFill(let start, let end, let value):
+            // Fill memory range with value
+            guard end >= start else {
+                return .error("End address must be >= start address")
+            }
+            var addr = start
+            while addr <= end {
+                await emulator.writeMemory(at: addr, value: value)
+                if addr == 0xFFFF { break }  // Prevent overflow
+                addr &+= 1
+            }
+            return .ok("filled $\(String(format: "%04X", start))-$\(String(format: "%04X", end)) with $\(String(format: "%02X", value))")
         }
     }
 
