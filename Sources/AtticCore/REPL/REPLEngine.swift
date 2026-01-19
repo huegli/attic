@@ -160,7 +160,9 @@ public actor REPLEngine {
 
         case .saveState(let path):
             do {
-                try await emulator.saveState(to: URL(fileURLWithPath: path))
+                // Gather metadata from current session state
+                let metadata = await collectStateMetadata()
+                try await emulator.saveState(to: URL(fileURLWithPath: path), metadata: metadata)
                 return "State saved to \(path)"
             } catch {
                 return "Error saving state: \(error.localizedDescription)"
@@ -168,8 +170,30 @@ public actor REPLEngine {
 
         case .loadState(let path):
             do {
-                try await emulator.loadState(from: URL(fileURLWithPath: path))
-                return "State loaded from \(path)"
+                // Clear breakpoints before loading (RAM contents will change)
+                await emulator.clearAllBreakpoints()
+
+                // Load state and get metadata
+                let metadata = try await emulator.loadState(from: URL(fileURLWithPath: path))
+
+                // Restore REPL mode from metadata
+                let restoredMode = metadata.replMode.toREPLMode()
+                mode = restoredMode
+
+                // Build informative response
+                var response = "State loaded from \(path)"
+                response += "\n  Timestamp: \(metadata.timestamp)"
+                response += "\n  Mode: \(restoredMode.description)"
+
+                if !metadata.mountedDisks.isEmpty {
+                    response += "\n  Disks at save time:"
+                    for disk in metadata.mountedDisks {
+                        response += "\n    D\(disk.drive): \(disk.path)"
+                    }
+                    response += "\n  (Note: Disks not auto-remounted)"
+                }
+
+                return response
             } catch {
                 return "Error loading state: \(error.localizedDescription)"
             }
@@ -780,6 +804,38 @@ public actor REPLEngine {
         \(mode.helpText)
         """
     }
+
+    // =========================================================================
+    // MARK: - State Metadata Collection
+    // =========================================================================
+
+    /// Collects metadata about the current session for state saving.
+    ///
+    /// This gathers information about mounted disks and REPL mode to include
+    /// in the state file. Disk paths are stored for reference only - they are
+    /// not automatically remounted on load.
+    private func collectStateMetadata() async -> StateMetadata {
+        // Collect mounted disk information
+        let driveStatuses = await diskManager.listDrives()
+        let mountedDisks = driveStatuses.compactMap { status -> MountedDiskReference? in
+            guard status.mounted, let path = status.path else { return nil }
+            return MountedDiskReference(
+                drive: status.drive,
+                path: path,
+                diskType: status.diskType?.shortName ?? "Unknown",
+                readOnly: status.isReadOnly
+            )
+        }
+
+        return StateMetadata.create(
+            replMode: mode,
+            mountedDisks: mountedDisks
+        )
+    }
+
+    // =========================================================================
+    // MARK: - Status Formatting
+    // =========================================================================
 
     /// Formats emulator status.
     private func formatStatus() async -> String {

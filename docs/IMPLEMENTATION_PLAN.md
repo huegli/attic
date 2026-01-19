@@ -1036,37 +1036,75 @@ AESP enables separating the emulator into a standalone server process, allowing 
 
 ---
 
-## Phase 16: State Persistence
+## Phase 16: State Persistence ✅
+
+**Status:** Complete
 
 **Goal:** Save and restore emulator state.
 
-### Tasks
+**Implementation Notes:**
+- Created v2 state file format with JSON metadata section
+- StateMetadata captures: timestamp, REPL mode, mounted disk paths (reference only)
+- REPL mode is restored when loading state
+- Breakpoints are cleared on load (RAM contents change invalidates BRK injections)
+- Disk paths stored for reference but NOT auto-remounted (design decision)
 
-1. **State serialization**
-   - libatari800 state capture
-   - Metadata (disks, breakpoints)
-   - File format
+**Key Files Created:**
+- `Sources/AtticCore/State/StateMetadata.swift` - Metadata types and file handler
+- `Tests/AtticCoreTests/StatePersistenceTests.swift` - Unit tests
 
-2. **State loading**
-   - Validate format
-   - Restore emulator
-   - Restore mounts
+**File Format v2:**
+```
+┌────────────────────────────────────┐
+│ Header (16 bytes)                  │
+│   Magic: "ATTC" (4 bytes)          │
+│   Version: 0x02 (1 byte)           │
+│   Flags: (1 byte)                  │
+│   Reserved: (10 bytes)             │
+├────────────────────────────────────┤
+│ Metadata Length (4 bytes, LE)      │
+├────────────────────────────────────┤
+│ Metadata (JSON, UTF-8)             │
+├────────────────────────────────────┤
+│ State Tags (32 bytes)              │
+├────────────────────────────────────┤
+│ State Flags (8 bytes)              │
+├────────────────────────────────────┤
+│ libatari800 State Data (~210KB)    │
+└────────────────────────────────────┘
+```
 
-3. **Integration**
-   - Menu commands
-   - REPL commands
+### Tasks ✅
 
-### Testing
+1. **State serialization** ✅
+   - libatari800 state capture via wrapper
+   - StateMetadata with timestamp, REPL mode, disk paths
+   - v2 file format with JSON metadata
 
-- Save mid-game, restore
-- State file portable
-- Error handling
+2. **State loading** ✅
+   - Format validation (magic, version, truncation checks)
+   - Emulator state restoration
+   - REPL mode restoration
+   - Breakpoint clearing (safety measure)
 
-### Deliverables
+3. **Integration** ✅
+   - REPL commands (`.state save`, `.state load`)
+   - CLI protocol commands
+   - AtticServer support
 
-- Save states work reliably
+### Testing ✅
 
-### Estimated Time: 1-2 days
+- ✅ Unit tests for metadata encoding/decoding
+- ✅ Unit tests for file read/write round-trip
+- ✅ Error handling tests (bad magic, wrong version, truncated)
+- ⏳ Manual: Save mid-game, restore (requires runtime testing)
+
+### Deliverables ✅
+
+- ✅ Save states work with full metadata
+- ✅ REPL mode restored on load
+- ✅ Clear error messages for invalid files
+- ⏳ GUI menu commands (deferred to Phase 17)
 
 ---
 
@@ -1278,9 +1316,9 @@ This is the final phase, implementing a complete web frontend that connects to A
 | 11 | Monitor Mode | ✅ Complete |
 | 12 | ATR File System | ✅ Complete |
 | 13 | DOS Mode | ✅ Complete |
-| 14 | BASIC Tokenizer | Pending |
-| 15 | BASIC Detokenizer & Mode | Pending |
-| 16 | State Persistence | Pending |
+| 14 | BASIC Tokenizer | ✅ Complete |
+| 15 | BASIC Detokenizer & Mode | ✅ Complete |
+| 16 | State Persistence | ✅ Complete |
 | 17 | Polish & Integration | Pending |
 | 18 | WebSocket Bridge | Pending |
 | 19 | Web Browser Client | Pending |
@@ -1342,6 +1380,6 @@ Phase 11 (Monitor)           Phase 13 (DOS)
 | M1 | 1-5 | Playable emulator with GUI | ✅ Complete (keyboard input, joystick deferred) |
 | M2 | 6-8 | Emulator/GUI separation | ✅ Complete |
 | M3 | 9-11 | Debugging via Emacs | ✅ Complete |
-| M4 | 12-15 | Full REPL functionality | In Progress (Phases 12, 13 complete) |
-| M5 | 16-17 | Production native release | Pending |
+| M4 | 12-15 | Full REPL functionality | ✅ Complete |
+| M5 | 16-17 | Production native release | In Progress (Phase 16 complete) |
 | M6 | 18-19 | Web browser support | Pending |
