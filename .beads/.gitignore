@@ -1,0 +1,26 @@
+# Beads - gitignore
+# The SQLite database is a local cache, rebuilt from issues.jsonl on demand
+
+# SQLite database (local cache)
+beads.db
+beads.db-journal
+beads.db-wal
+beads.db-shm
+
+# Legacy database names
+default.db
+default.db-journal
+default.db-wal
+default.db-shm
+*.db
+
+# Daemon socket file
+bd.sock
+
+# Temporary files
+*.tmp
+*.new
+*.bak
+
+# Cost tracking state (local)
+cost_state.json

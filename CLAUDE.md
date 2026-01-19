@@ -87,10 +87,55 @@ See `docs/IMPLEMENTATION_PLAN.md` for detailed phase-by-phase progress. Summary:
 - Highlight in particular best practices to use for MacOS App Development using Swift
 - IMPORTANT: Keep the comments updated as you make changes to the code!!!
 
+## Issue Tracking with Beads
+
+This project uses [Beads](https://github.com/steveyegge/beads) (`bd`) for issue tracking. Beads stores issues directly in the repository (`.beads/issues.jsonl`), making it perfect for AI-assisted development workflows.
+
+### Quick Reference
+
+```bash
+# See what's ready to work on
+bd ready
+
+# Create an issue
+bd create "Implement feature X" -p 1
+
+# Update status
+bd update <id> --status in_progress
+
+# Close when done
+bd close <id> --reason "Completed and tested"
+
+# Sync before ending session
+bd sync
+```
+
+### For AI Agents
+
+**Starting a session:**
+- Run `bd ready` to find actionable work
+- Review issue details with `bd show <id>`
+
+**During development:**
+- Update status: `bd update <id> --status in_progress`
+- Add notes: `bd update <id> --notes "Found issue in X"`
+- Create new issues for discovered work
+
+**Ending a session ("landing the plane"):**
+1. Close completed issues
+2. Create issues for remaining work
+3. Run `bd sync` to push changes
+4. Verify with `git status`
+
+**WARNING**: Never use `bd edit` (opens interactive editor). Use `bd update` with flags instead.
+
+See `BEADS-QUICKSTART.md` for complete setup and usage instructions.
+
 ## External Dependencies
 
 - libatari800: https://github.com/atari800/atari800
 - ROMs: User must provide ATARIXL.ROM and ATARIBAS.ROM
+- Beads: https://github.com/steveyegge/beads (for issue tracking)
 
 ## Common Commands
 
