@@ -729,8 +729,8 @@ public final class ATRFileSystem: @unchecked Sendable {
         // Write updated VTOC
         try disk.writeSector(DOSLayout.vtocSector, data: mutableVTOC.encode())
 
-        // Refresh cache
-        directoryCache = nil
+        // Refresh caches (including VTOC since we modified it)
+        try refreshVTOC()
 
         return sectorsNeeded
     }
@@ -884,9 +884,9 @@ public final class ATRFileSystem: @unchecked Sendable {
 
         let entry = try findFile(name)
 
-        // Set locked bit (0x02)
+        // Set locked bit (0x01)
         let lockedEntry = DirectoryEntry(
-            flags: entry.flags | 0x02,
+            flags: entry.flags | 0x01,
             sectorCount: entry.sectorCount,
             startSector: entry.startSector,
             filename: entry.trimmedFilename,
@@ -910,9 +910,9 @@ public final class ATRFileSystem: @unchecked Sendable {
 
         let entry = try findFile(name)
 
-        // Clear locked bit (0x02)
+        // Clear locked bit (0x01)
         let unlockedEntry = DirectoryEntry(
-            flags: entry.flags & ~0x02,
+            flags: entry.flags & ~0x01,
             sectorCount: entry.sectorCount,
             startSector: entry.startSector,
             filename: entry.trimmedFilename,

@@ -413,7 +413,7 @@ public actor REPLEngine {
     private func executeDOSMount(drive: Int, path: String) async -> String {
         do {
             let info = try await diskManager.mount(drive: drive, path: path)
-            let typeStr = info.diskType?.shortDescription ?? "Unknown"
+            let typeStr = info.diskType.displayName
             return "Mounted D\(drive): \(info.filename) (\(typeStr), \(info.fileCount) files, \(info.freeSectors) free)"
         } catch {
             return formatDOSError(error)
@@ -460,8 +460,8 @@ public actor REPLEngine {
             var totalSectors = 0
 
             for entry in entries {
-                let name = entry.filename.trimmingCharacters(in: .whitespaces)
-                let ext = entry.ext.trimmingCharacters(in: .whitespaces)
+                let name = entry.trimmedFilename
+                let ext = entry.trimmedExtension
                 let lockedStr = entry.isLocked ? "*" : " "
                 output += String(format: "%@ %-8s %-3s %4d\n", lockedStr, name, ext, entry.sectorCount)
                 totalSectors += Int(entry.sectorCount)
@@ -486,8 +486,8 @@ public actor REPLEngine {
         do {
             let info = try await diskManager.getFileInfo(name: filename)
             return """
-              Filename: \(info.name)
-              Size: \(info.sectorCount) sectors (\(info.size) bytes)
+              Filename: \(info.fullName)
+              Size: \(info.sectorCount) sectors (\(info.fileSize) bytes)
               Start sector: \(info.startSector)
               Flags: \(info.isLocked ? "Locked" : "Normal")
             """
@@ -541,8 +541,9 @@ public actor REPLEngine {
             let (sourceDrive, sourceName) = parseDriveSpec(source)
             let (destDrive, destName) = parseDriveSpec(dest)
 
-            let srcDriveNum = sourceDrive ?? await diskManager.currentDrive
-            let dstDriveNum = destDrive ?? await diskManager.currentDrive
+            let currentDrive = await diskManager.currentDrive
+            let srcDriveNum = sourceDrive ?? currentDrive
+            let dstDriveNum = destDrive ?? currentDrive
             let dstFileName = destName.isEmpty ? sourceName : destName
 
             let sectors = try await diskManager.copyFile(

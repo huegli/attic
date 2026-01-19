@@ -19,20 +19,21 @@
 //
 // Flag Byte Bits:
 // ---------------
-//   Bit 7: Entry in use (1 = active file, 0 with other bits = deleted)
-//   Bit 6: File is open for write
+//   Bit 7: Deleted marker (entry was once in use)
+//   Bit 6: Entry in use
 //   Bit 5: DOS 2.5 extended file (uses sectors 721+)
-//   Bit 4-2: Reserved
-//   Bit 1: File is locked (read-only)
-//   Bit 0: Entry never used (virgin slot)
+//   Bit 4-3: Reserved
+//   Bit 2: Open for write (file being written)
+//   Bit 1: DOS internal flag (set for valid files)
+//   Bit 0: Locked (read-only)
 //
 // Common Flag Values:
 // -------------------
-//   $00 - Entry never used
-//   $42 - Normal file in use
-//   $43 - Normal file in use, locked
-//   $46 - File open for write
-//   $62 - DOS 2.5 extended file in use
+//   $00 - Entry never used (virgin slot)
+//   $42 - Normal file in use ($40 + $02)
+//   $43 - Normal file in use, locked ($42 + $01)
+//   $46 - File open for write ($42 + $04)
+//   $62 - DOS 2.5 extended file in use ($40 + $20 + $02)
 //   $80 - Deleted file
 //
 // Filename Format:
@@ -82,8 +83,9 @@ public struct DirectoryEntryFlags: OptionSet, Sendable {
     ///
     /// This flag is set when a file is opened for write and cleared
     /// when the file is closed. If set on a closed disk, indicates
-    /// the file may be incomplete or corrupted.
-    public static let openForWrite = DirectoryEntryFlags(rawValue: 0x40)
+    /// the file may be incomplete or corrupted. This is bit 2 (0x04).
+    /// Note: Bit 6 (0x40) indicates "in use", not "open for write".
+    public static let openForWrite = DirectoryEntryFlags(rawValue: 0x04)
 
     /// DOS 2.5 extended file flag.
     ///
@@ -94,8 +96,8 @@ public struct DirectoryEntryFlags: OptionSet, Sendable {
     /// File is locked (read-only).
     ///
     /// Locked files cannot be deleted or overwritten without
-    /// first unlocking them.
-    public static let locked = DirectoryEntryFlags(rawValue: 0x02)
+    /// first unlocking them. This is bit 0 (0x01) in Atari DOS.
+    public static let locked = DirectoryEntryFlags(rawValue: 0x01)
 
     /// Entry has never been used.
     ///
@@ -231,6 +233,7 @@ public struct DirectoryEntry: Sendable, Equatable {
     /// Returns true if the file is locked (read-only).
     ///
     /// The locked flag is bit 0 (0x01) in Atari DOS.
+    /// Common flag values: $42 = normal, $43 = locked ($42 + $01).
     public var isLocked: Bool {
         (flags & 0x01) != 0
     }
@@ -238,9 +241,10 @@ public struct DirectoryEntry: Sendable, Equatable {
     /// Returns true if the file is currently open for writing.
     ///
     /// If this flag is set on a disk that's not in use, the file may
-    /// be incomplete or corrupted.
+    /// be incomplete or corrupted. The open-for-write flag is bit 2 (0x04).
+    /// Common flag values: $42 = normal closed file, $46 = open for write.
     public var isOpenForWrite: Bool {
-        (flags & 0x40) != 0
+        (flags & 0x04) != 0
     }
 
     /// Returns true if this is a DOS 2.5 extended file.

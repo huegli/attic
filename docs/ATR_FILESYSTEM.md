@@ -158,19 +158,20 @@ Each directory sector holds 8 file entries (16 bytes each).
 
 | Bit | Meaning when set |
 |-----|------------------|
-| 7 | Entry in use (deleted if clear) |
-| 6 | File is open for write |
+| 7 | Entry deleted marker |
+| 6 | Entry in use |
 | 5 | DOS 2.5 extended |
-| 4-2 | Reserved |
-| 1 | Locked (read-only) |
-| 0 | Entry never used |
+| 4-3 | Reserved |
+| 2 | Open for write |
+| 1 | DOS internal flag |
+| 0 | Locked (read-only) |
 
 Common flag values:
-- $00: Never used
-- $42: Normal file in use
-- $43: Normal file in use, locked
+- $00: Never used (virgin slot)
+- $42: Normal file in use ($40 in-use + $02 DOS flag)
+- $43: Normal file in use, locked ($42 + $01)
+- $46: File open for write ($42 + $04)
 - $80: Deleted file
-- $03: Open for write
 
 ### File Data Sectors
 
@@ -397,10 +398,10 @@ struct DirectoryEntry {
     var filename: String  // 8 chars
     var ext: String       // 3 chars
     
-    var isInUse: Bool { (flags & 0x80) != 0 && (flags & 0x80) != 0x80 }
+    var isInUse: Bool { (flags & 0x40) != 0 || ((flags & 0x80) != 0 && flags != 0x80) }
     var isDeleted: Bool { flags == 0x80 }
-    var isLocked: Bool { (flags & 0x02) != 0 }
-    var neverUsed: Bool { (flags & 0x01) != 0 || flags == 0 }
+    var isLocked: Bool { (flags & 0x01) != 0 }  // Bit 0 = locked
+    var isNeverUsed: Bool { flags == 0x00 }
     
     var fullName: String {
         let name = filename.trimmingCharacters(in: .whitespaces)

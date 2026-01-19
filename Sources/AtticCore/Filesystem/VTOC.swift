@@ -740,15 +740,30 @@ public struct MutableVTOC: Sendable {
             let sectorData = try disk.readSector(sector)
             let sectorSize = disk.actualSectorSize(sector)
 
-            // Parse the sector link
-            let link = SectorLink(sectorData: sectorData, sectorSize: sectorSize, isKnownLastSector: nil)
-
             // Mark sector as free
             markSectorFree(sector)
             freed += 1
 
-            // Move to next sector
-            sector = Int(link.nextSector)
+            // Manually extract next sector pointer to avoid SectorLink heuristic issues.
+            // The heuristic can incorrectly detect low sector numbers as byte counts.
+            let linkOffset = sectorSize - 3
+            guard sectorData.count >= sectorSize else { break }
+
+            let nextSector: Int
+            if sectorSize == 128 {
+                // 128-byte format: next sector = (byte125 & 0x03) << 8 | byte126
+                let byte125 = sectorData[linkOffset]
+                let byte126 = sectorData[linkOffset + 1]
+                nextSector = Int((UInt16(byte125 & 0x03) << 8) | UInt16(byte126))
+            } else {
+                // 256-byte format: next sector = (byte255 & 0x03) << 8 | byte254
+                let byte254 = sectorData[linkOffset + 1]
+                let byte255 = sectorData[linkOffset + 2]
+                nextSector = Int((UInt16(byte255 & 0x03) << 8) | UInt16(byte254))
+            }
+
+            // Move to next sector (0 means end of chain)
+            sector = nextSector
         }
 
         return freed

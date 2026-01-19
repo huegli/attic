@@ -108,7 +108,7 @@ final class DOSModeIntegrationTests: XCTestCase {
         XCTAssertNotNil(output)
         XCTAssertTrue(output?.contains("Mounted D1:") ?? false)
         XCTAssertTrue(output?.contains("test.atr") ?? false)
-        XCTAssertTrue(output?.contains("SS/SD") ?? false)
+        XCTAssertTrue(output?.contains("Single Density") ?? false)
     }
 
     /// Test mount command with nonexistent file.
@@ -190,7 +190,7 @@ final class DOSModeIntegrationTests: XCTestCase {
     func test_dir_emptyDisk() async throws {
         let diskPath = tempDir.appendingPathComponent("empty.atr").path
         let disk = try ATRImage.create(at: URL(fileURLWithPath: diskPath), type: .singleDensity)
-        let fs = AtariFileSystem(disk: disk)
+        let fs = try ATRFileSystem(disk: disk)
         try fs.format()
         try disk.save()
 
@@ -214,7 +214,7 @@ final class DOSModeIntegrationTests: XCTestCase {
     func test_info_fileNotFound() async throws {
         let diskPath = tempDir.appendingPathComponent("info_test.atr").path
         let disk = try ATRImage.create(at: URL(fileURLWithPath: diskPath), type: .singleDensity)
-        let fs = AtariFileSystem(disk: disk)
+        let fs = try ATRFileSystem(disk: disk)
         try fs.format()
         try disk.save()
 
@@ -234,7 +234,7 @@ final class DOSModeIntegrationTests: XCTestCase {
     func test_type_fileNotFound() async throws {
         let diskPath = tempDir.appendingPathComponent("type_test.atr").path
         let disk = try ATRImage.create(at: URL(fileURLWithPath: diskPath), type: .singleDensity)
-        let fs = AtariFileSystem(disk: disk)
+        let fs = try ATRFileSystem(disk: disk)
         try fs.format()
         try disk.save()
 
@@ -249,7 +249,7 @@ final class DOSModeIntegrationTests: XCTestCase {
     func test_dump_fileNotFound() async throws {
         let diskPath = tempDir.appendingPathComponent("dump_test.atr").path
         let disk = try ATRImage.create(at: URL(fileURLWithPath: diskPath), type: .singleDensity)
-        let fs = AtariFileSystem(disk: disk)
+        let fs = try ATRFileSystem(disk: disk)
         try fs.format()
         try disk.save()
 
@@ -268,7 +268,7 @@ final class DOSModeIntegrationTests: XCTestCase {
     func test_delete_fileNotFound() async throws {
         let diskPath = tempDir.appendingPathComponent("delete_test.atr").path
         let disk = try ATRImage.create(at: URL(fileURLWithPath: diskPath), type: .singleDensity)
-        let fs = AtariFileSystem(disk: disk)
+        let fs = try ATRFileSystem(disk: disk)
         try fs.format()
         try disk.save()
 
@@ -283,7 +283,7 @@ final class DOSModeIntegrationTests: XCTestCase {
     func test_rename_fileNotFound() async throws {
         let diskPath = tempDir.appendingPathComponent("rename_test.atr").path
         let disk = try ATRImage.create(at: URL(fileURLWithPath: diskPath), type: .singleDensity)
-        let fs = AtariFileSystem(disk: disk)
+        let fs = try ATRFileSystem(disk: disk)
         try fs.format()
         try disk.save()
 
@@ -298,7 +298,7 @@ final class DOSModeIntegrationTests: XCTestCase {
     func test_lock_fileNotFound() async throws {
         let diskPath = tempDir.appendingPathComponent("lock_test.atr").path
         let disk = try ATRImage.create(at: URL(fileURLWithPath: diskPath), type: .singleDensity)
-        let fs = AtariFileSystem(disk: disk)
+        let fs = try ATRFileSystem(disk: disk)
         try fs.format()
         try disk.save()
 
@@ -313,7 +313,7 @@ final class DOSModeIntegrationTests: XCTestCase {
     func test_unlock_fileNotFound() async throws {
         let diskPath = tempDir.appendingPathComponent("unlock_test.atr").path
         let disk = try ATRImage.create(at: URL(fileURLWithPath: diskPath), type: .singleDensity)
-        let fs = AtariFileSystem(disk: disk)
+        let fs = try ATRFileSystem(disk: disk)
         try fs.format()
         try disk.save()
 
@@ -344,7 +344,7 @@ final class DOSModeIntegrationTests: XCTestCase {
     func test_export_fileNotFound() async throws {
         let diskPath = tempDir.appendingPathComponent("export_test.atr").path
         let disk = try ATRImage.create(at: URL(fileURLWithPath: diskPath), type: .singleDensity)
-        let fs = AtariFileSystem(disk: disk)
+        let fs = try ATRFileSystem(disk: disk)
         try fs.format()
         try disk.save()
 
@@ -359,7 +359,7 @@ final class DOSModeIntegrationTests: XCTestCase {
     func test_import_notImplemented() async throws {
         let diskPath = tempDir.appendingPathComponent("import_test.atr").path
         let disk = try ATRImage.create(at: URL(fileURLWithPath: diskPath), type: .singleDensity)
-        let fs = AtariFileSystem(disk: disk)
+        let fs = try ATRFileSystem(disk: disk)
         try fs.format()
         try disk.save()
 

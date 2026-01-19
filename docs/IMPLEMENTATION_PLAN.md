@@ -926,13 +926,13 @@ AESP enables separating the emulator into a standalone server process, allowing 
 | `info` | ✅ | Show file details |
 | `type` | ✅ | Display text file |
 | `dump` | ✅ | Hex dump file |
-| `copy` | ⏳ | Requires write support |
+| `copy` | ✅ | Copy files between disks |
 | `rename` | ✅ | Rename file |
 | `delete` | ✅ | Delete file |
 | `lock` | ✅ | Set read-only |
 | `unlock` | ✅ | Clear read-only |
 | `export` | ✅ | Extract to macOS |
-| `import` | ⏳ | Requires write support |
+| `import` | ✅ | Import from host filesystem |
 | `newdisk` | ✅ | Create new ATR |
 | `format` | ✅ | Format disk |
 
@@ -944,8 +944,8 @@ AESP enables separating the emulator into a standalone server process, allowing 
 - ✅ Drive switching
 - ✅ New disk creation and formatting
 - ✅ Export to host filesystem
-- ⏳ Copy files between disks (requires write support)
-- ⏳ Import from host (requires write support)
+- ✅ Copy files between disks
+- ✅ Import from host
 
 ### Deliverables ✅
 
