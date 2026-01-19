@@ -155,6 +155,12 @@ public enum CLICommand: Sendable {
     /// If address is nil, disassemble from the current PC.
     /// If lines is nil, default to 16 lines.
     case disassemble(address: UInt16?, lines: Int?)
+
+    // BASIC line entry (tokenization and injection)
+    case basicLine(line: String)
+    case basicNew
+    case basicRun
+    case basicList
 }
 
 // =============================================================================
@@ -333,6 +339,10 @@ public struct CLICommandParser: Sendable {
         // Injection
         case "inject":
             return try parseInject(argsString)
+
+        // BASIC commands
+        case "basic":
+            return try parseBasic(argsString)
 
         default:
             throw CLIProtocolError.invalidCommand(command)
@@ -628,6 +638,25 @@ public struct CLICommandParser: Sendable {
         }
 
         return .disassemble(address: address, lines: lines)
+    }
+
+    private func parseBasic(_ args: String) throws -> CLICommand {
+        // Handle immediate commands (RUN, NEW, LIST)
+        let trimmed = args.trimmingCharacters(in: .whitespaces)
+        let upper = trimmed.uppercased()
+
+        if upper == "NEW" {
+            return .basicNew
+        } else if upper == "RUN" || upper.hasPrefix("RUN ") {
+            return .basicRun
+        } else if upper == "LIST" || upper.hasPrefix("LIST ") {
+            return .basicList
+        } else if trimmed.isEmpty {
+            throw CLIProtocolError.missingArgument("basic requires a line or command")
+        } else {
+            // BASIC line entry (e.g., "10 PRINT HELLO")
+            return .basicLine(line: trimmed)
+        }
     }
 
     // MARK: - Helper Functions

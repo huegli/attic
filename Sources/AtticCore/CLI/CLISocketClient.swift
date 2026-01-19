@@ -472,6 +472,16 @@ public actor CLISocketClient {
             return "until $\(String(format: "%04X", address))"
         case .memoryFill(let start, let end, let value):
             return "fill $\(String(format: "%04X", start)) $\(String(format: "%04X", end)) $\(String(format: "%02X", value))"
+
+        // Phase 14 BASIC commands
+        case .basicLine(let line):
+            return "basic \(line)"
+        case .basicNew:
+            return "basic NEW"
+        case .basicRun:
+            return "basic RUN"
+        case .basicList:
+            return "basic LIST"
         }
     }
 
