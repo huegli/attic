@@ -360,6 +360,20 @@ extension AESPMessage {
         return AESPMessage(type: .info)
     }
 
+    /// Creates a STATUS response message.
+    ///
+    /// - Parameter isRunning: Whether the emulator is running.
+    public static func statusResponse(isRunning: Bool) -> AESPMessage {
+        return AESPMessage(type: .status, payload: [isRunning ? 0x01 : 0x00])
+    }
+
+    /// Creates an INFO response message.
+    ///
+    /// - Parameter json: The JSON payload with version and capabilities.
+    public static func infoResponse(json: String) -> AESPMessage {
+        return AESPMessage(type: .info, payload: Data(json.utf8))
+    }
+
     /// Creates an ACK message.
     ///
     /// - Parameter acknowledgedType: The message type being acknowledged.
@@ -404,6 +418,106 @@ extension AESPMessage {
         payload.append(code)
         payload.append(contentsOf: message.utf8)
         return AESPMessage(type: .error, payload: payload)
+    }
+
+    /// Creates a REGISTERS_READ request message.
+    public static func registersRead() -> AESPMessage {
+        return AESPMessage(type: .registersRead)
+    }
+
+    /// Creates a REGISTERS_READ response message.
+    ///
+    /// - Parameters:
+    ///   - a: Accumulator register.
+    ///   - x: X index register.
+    ///   - y: Y index register.
+    ///   - s: Stack pointer.
+    ///   - p: Processor status.
+    ///   - pc: Program counter.
+    public static func registersResponse(
+        a: UInt8, x: UInt8, y: UInt8, s: UInt8, p: UInt8, pc: UInt16
+    ) -> AESPMessage {
+        var payload = Data(capacity: 8)
+        payload.append(a)
+        payload.append(x)
+        payload.append(y)
+        payload.append(s)
+        payload.append(p)
+        payload.append(UInt8((pc >> 8) & 0xFF))
+        payload.append(UInt8(pc & 0xFF))
+        payload.append(0x00) // Reserved
+        return AESPMessage(type: .registersRead, payload: payload)
+    }
+
+    /// Creates a REGISTERS_WRITE request message.
+    ///
+    /// - Parameters:
+    ///   - a: Accumulator register.
+    ///   - x: X index register.
+    ///   - y: Y index register.
+    ///   - s: Stack pointer.
+    ///   - p: Processor status.
+    ///   - pc: Program counter.
+    public static func registersWrite(
+        a: UInt8, x: UInt8, y: UInt8, s: UInt8, p: UInt8, pc: UInt16
+    ) -> AESPMessage {
+        var payload = Data(capacity: 8)
+        payload.append(a)
+        payload.append(x)
+        payload.append(y)
+        payload.append(s)
+        payload.append(p)
+        payload.append(UInt8((pc >> 8) & 0xFF))
+        payload.append(UInt8(pc & 0xFF))
+        payload.append(0x00) // Reserved
+        return AESPMessage(type: .registersWrite, payload: payload)
+    }
+
+    /// Creates a BREAKPOINT_SET message.
+    ///
+    /// - Parameter address: The address to set a breakpoint at.
+    public static func breakpointSet(address: UInt16) -> AESPMessage {
+        var payload = Data(capacity: 2)
+        payload.append(UInt8((address >> 8) & 0xFF))
+        payload.append(UInt8(address & 0xFF))
+        return AESPMessage(type: .breakpointSet, payload: payload)
+    }
+
+    /// Creates a BREAKPOINT_CLEAR message.
+    ///
+    /// - Parameter address: The address to clear a breakpoint at.
+    public static func breakpointClear(address: UInt16) -> AESPMessage {
+        var payload = Data(capacity: 2)
+        payload.append(UInt8((address >> 8) & 0xFF))
+        payload.append(UInt8(address & 0xFF))
+        return AESPMessage(type: .breakpointClear, payload: payload)
+    }
+
+    /// Creates a BREAKPOINT_LIST request message.
+    public static func breakpointList() -> AESPMessage {
+        return AESPMessage(type: .breakpointList)
+    }
+
+    /// Creates a BREAKPOINT_LIST response message.
+    ///
+    /// - Parameter addresses: The list of breakpoint addresses.
+    public static func breakpointListResponse(addresses: [UInt16]) -> AESPMessage {
+        var payload = Data(capacity: addresses.count * 2)
+        for address in addresses {
+            payload.append(UInt8((address >> 8) & 0xFF))
+            payload.append(UInt8(address & 0xFF))
+        }
+        return AESPMessage(type: .breakpointList, payload: payload)
+    }
+
+    /// Creates a BREAKPOINT_HIT notification message.
+    ///
+    /// - Parameter address: The address where the breakpoint was hit.
+    public static func breakpointHit(address: UInt16) -> AESPMessage {
+        var payload = Data(capacity: 2)
+        payload.append(UInt8((address >> 8) & 0xFF))
+        payload.append(UInt8(address & 0xFF))
+        return AESPMessage(type: .breakpointHit, payload: payload)
     }
 
     // =========================================================================
@@ -460,6 +574,15 @@ extension AESPMessage {
         return AESPMessage(type: .consoleKeys, payload: [flags])
     }
 
+    /// Creates a PADDLE message.
+    ///
+    /// - Parameters:
+    ///   - number: The paddle number (0-3).
+    ///   - position: The paddle position (0-228).
+    public static func paddle(number: UInt8, position: UInt8) -> AESPMessage {
+        return AESPMessage(type: .paddle, payload: [number, position])
+    }
+
     // =========================================================================
     // MARK: - Video Messages
     // =========================================================================
@@ -476,6 +599,36 @@ extension AESPMessage {
     /// - Parameter pixels: BGRA pixel data (384 * 240 * 4 = 368,640 bytes).
     public static func frameRaw(pixels: [UInt8]) -> AESPMessage {
         return AESPMessage(type: .frameRaw, payload: pixels)
+    }
+
+    /// Creates a FRAME_DELTA message with delta-encoded video data.
+    ///
+    /// - Parameter payload: Delta-encoded pixel data.
+    public static func frameDelta(payload: Data) -> AESPMessage {
+        return AESPMessage(type: .frameDelta, payload: payload)
+    }
+
+    /// Creates a FRAME_CONFIG message.
+    ///
+    /// - Parameters:
+    ///   - width: Frame width in pixels.
+    ///   - height: Frame height in pixels.
+    ///   - bytesPerPixel: Bytes per pixel.
+    ///   - fps: Target frame rate.
+    public static func frameConfig(
+        width: UInt16,
+        height: UInt16,
+        bytesPerPixel: UInt8,
+        fps: UInt8
+    ) -> AESPMessage {
+        var payload = Data(capacity: 6)
+        payload.append(UInt8((width >> 8) & 0xFF))
+        payload.append(UInt8(width & 0xFF))
+        payload.append(UInt8((height >> 8) & 0xFF))
+        payload.append(UInt8(height & 0xFF))
+        payload.append(bytesPerPixel)
+        payload.append(fps)
+        return AESPMessage(type: .frameConfig, payload: payload)
     }
 
     /// Creates a VIDEO_SUBSCRIBE message.
@@ -499,6 +652,27 @@ extension AESPMessage {
     /// - Parameter samples: 16-bit signed PCM samples.
     public static func audioPCM(samples: Data) -> AESPMessage {
         return AESPMessage(type: .audioPCM, payload: samples)
+    }
+
+    /// Creates an AUDIO_CONFIG message.
+    ///
+    /// - Parameters:
+    ///   - sampleRate: Audio sample rate (e.g., 44100).
+    ///   - bitsPerSample: Bits per sample (e.g., 16).
+    ///   - channels: Number of channels (e.g., 1 for mono).
+    public static func audioConfig(
+        sampleRate: UInt32,
+        bitsPerSample: UInt8,
+        channels: UInt8
+    ) -> AESPMessage {
+        var payload = Data(capacity: 6)
+        payload.append(UInt8((sampleRate >> 24) & 0xFF))
+        payload.append(UInt8((sampleRate >> 16) & 0xFF))
+        payload.append(UInt8((sampleRate >> 8) & 0xFF))
+        payload.append(UInt8(sampleRate & 0xFF))
+        payload.append(bitsPerSample)
+        payload.append(channels)
+        return AESPMessage(type: .audioConfig, payload: payload)
     }
 
     /// Creates an AUDIO_SYNC message.
@@ -632,6 +806,126 @@ extension AESPMessage {
         let b6 = UInt64(payload[6]) << 8
         let b7 = UInt64(payload[7])
         return b0 | b1 | b2 | b3 | b4 | b5 | b6 | b7
+    }
+
+    /// Parses the payload as a status response.
+    ///
+    /// - Returns: Whether the emulator is running, or nil if invalid.
+    public func parseStatusPayload() -> Bool? {
+        guard type == .status, payload.count >= 1 else { return nil }
+        return payload[0] != 0
+    }
+
+    /// Parses the payload as an info response.
+    ///
+    /// - Returns: The JSON string, or nil if invalid.
+    public func parseInfoPayload() -> String? {
+        guard type == .info, !payload.isEmpty else { return nil }
+        return String(decoding: payload, as: UTF8.self)
+    }
+
+    /// CPU register values.
+    public struct CPURegisters {
+        public let a: UInt8
+        public let x: UInt8
+        public let y: UInt8
+        public let s: UInt8
+        public let p: UInt8
+        public let pc: UInt16
+    }
+
+    /// Parses the payload as a registers response.
+    ///
+    /// - Returns: The CPU register values, or nil if invalid.
+    public func parseRegistersPayload() -> CPURegisters? {
+        guard type == .registersRead || type == .registersWrite,
+              payload.count >= 7 else { return nil }
+        let pc = UInt16(payload[5]) << 8 | UInt16(payload[6])
+        return CPURegisters(
+            a: payload[0],
+            x: payload[1],
+            y: payload[2],
+            s: payload[3],
+            p: payload[4],
+            pc: pc
+        )
+    }
+
+    /// Parses the payload as a breakpoint list response.
+    ///
+    /// - Returns: Array of breakpoint addresses, or nil if invalid.
+    public func parseBreakpointListPayload() -> [UInt16]? {
+        guard type == .breakpointList else { return nil }
+        guard payload.count % 2 == 0 else { return nil }
+
+        var addresses: [UInt16] = []
+        for i in stride(from: 0, to: payload.count, by: 2) {
+            let address = UInt16(payload[i]) << 8 | UInt16(payload[i + 1])
+            addresses.append(address)
+        }
+        return addresses
+    }
+
+    /// Parses the payload as a breakpoint hit notification.
+    ///
+    /// - Returns: The address where breakpoint was hit, or nil if invalid.
+    public func parseBreakpointHitPayload() -> UInt16? {
+        guard type == .breakpointHit, payload.count >= 2 else { return nil }
+        return UInt16(payload[0]) << 8 | UInt16(payload[1])
+    }
+
+    /// Parses the payload as a paddle event.
+    ///
+    /// - Returns: Tuple of (paddle number, position), or nil if invalid.
+    public func parsePaddlePayload() -> (number: UInt8, position: UInt8)? {
+        guard type == .paddle, payload.count >= 2 else { return nil }
+        return (number: payload[0], position: payload[1])
+    }
+
+    /// Frame configuration values.
+    public struct FrameConfig {
+        public let width: UInt16
+        public let height: UInt16
+        public let bytesPerPixel: UInt8
+        public let fps: UInt8
+    }
+
+    /// Parses the payload as a frame config response.
+    ///
+    /// - Returns: The frame configuration, or nil if invalid.
+    public func parseFrameConfigPayload() -> FrameConfig? {
+        guard type == .frameConfig, payload.count >= 6 else { return nil }
+        let width = UInt16(payload[0]) << 8 | UInt16(payload[1])
+        let height = UInt16(payload[2]) << 8 | UInt16(payload[3])
+        return FrameConfig(
+            width: width,
+            height: height,
+            bytesPerPixel: payload[4],
+            fps: payload[5]
+        )
+    }
+
+    /// Audio configuration values.
+    public struct AudioConfig {
+        public let sampleRate: UInt32
+        public let bitsPerSample: UInt8
+        public let channels: UInt8
+    }
+
+    /// Parses the payload as an audio config response.
+    ///
+    /// - Returns: The audio configuration, or nil if invalid.
+    public func parseAudioConfigPayload() -> AudioConfig? {
+        guard type == .audioConfig, payload.count >= 6 else { return nil }
+        let sampleRate = UInt32(payload[0]) << 24 |
+                         UInt32(payload[1]) << 16 |
+                         UInt32(payload[2]) << 8 |
+                         UInt32(payload[3])
+        return AudioConfig(
+            sampleRate: sampleRate,
+            bitsPerSample: payload[4],
+            channels: payload[5]
+        )
     }
 }
 
