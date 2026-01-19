@@ -245,8 +245,9 @@ final class StatePersistenceTests: XCTestCase {
     // =========================================================================
 
     func testInvalidMagicBytes() {
-        // Create file with wrong magic
-        let badData = Data([0x00, 0x00, 0x00, 0x00, 0x02])
+        // Create file with wrong magic but sufficient length (20+ bytes)
+        var badData = Data([0x00, 0x00, 0x00, 0x00, 0x02])  // Wrong magic
+        badData.append(contentsOf: Array(repeating: UInt8(0), count: 20))  // Padding to pass length check
 
         let tempDir = FileManager.default.temporaryDirectory
         let testURL = tempDir.appendingPathComponent("bad_magic_\(UUID().uuidString).attic")
