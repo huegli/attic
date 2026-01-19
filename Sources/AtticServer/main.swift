@@ -435,7 +435,13 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
         // State management
         case .stateSave(let path):
             do {
-                try await emulator.saveState(to: URL(fileURLWithPath: path))
+                // Create minimal metadata for server-initiated saves
+                // (no REPL mode or disk info available at server level)
+                let metadata = StateMetadata.create(
+                    replMode: .basic(variant: .atari),  // Default mode
+                    mountedDisks: []
+                )
+                try await emulator.saveState(to: URL(fileURLWithPath: path), metadata: metadata)
                 return .ok("state saved \(path)")
             } catch {
                 return .error(error.localizedDescription)
@@ -446,8 +452,12 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
                 return .error("File not found '\(path)'")
             }
             do {
-                try await emulator.loadState(from: URL(fileURLWithPath: path))
-                return .ok("state loaded \(path)")
+                // Clear breakpoints before loading (RAM contents will change)
+                await emulator.clearAllBreakpoints()
+
+                // Load state (metadata is returned but server doesn't use it)
+                let metadata = try await emulator.loadState(from: URL(fileURLWithPath: path))
+                return .ok("state loaded \(path) (from \(metadata.timestamp))")
             } catch {
                 return .error(error.localizedDescription)
             }

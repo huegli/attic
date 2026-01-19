@@ -566,109 +566,95 @@ public actor EmulatorEngine {
     // MARK: - State Persistence
     // =========================================================================
 
-    /// Saves the current emulator state.
+    /// Saves the current emulator state (in-memory only).
+    ///
+    /// This captures the raw emulator state without metadata. Use
+    /// `saveState(to:metadata:)` to save to a file with full metadata.
     ///
     /// - Returns: The emulator state snapshot.
     public func saveState() -> EmulatorState {
         wrapper.saveState()
     }
 
-    /// Restores a previously saved state.
+    /// Restores a previously saved state (in-memory only).
+    ///
+    /// This restores raw emulator state. Use `loadState(from:)` to load
+    /// from a file and get metadata back.
     ///
     /// - Parameter state: The state to restore.
     public func restoreState(_ state: EmulatorState) {
         wrapper.restoreState(state)
     }
 
-    /// Saves the current state to a file.
+    /// Saves the current state to a file with metadata (v2 format).
     ///
-    /// - Parameter url: The file URL to save to.
+    /// This is the primary method for saving emulator state. It writes
+    /// a v2 format file that includes:
+    /// - Session metadata (timestamp, REPL mode, mounted disks)
+    /// - Full libatari800 state (~210KB)
+    ///
+    /// - Parameters:
+    ///   - url: The file URL to save to.
+    ///   - metadata: The session metadata to include.
     /// - Throws: AtticError if saving fails.
-    public func saveState(to url: URL) throws {
+    public func saveState(to url: URL, metadata: StateMetadata) throws {
         let state = wrapper.saveState()
 
-        // Create file format: magic + version + tags + flags + data
-        var fileData = Data()
-
-        // Magic bytes "ATTC"
-        fileData.append(contentsOf: [0x41, 0x54, 0x54, 0x43])
-
-        // Version (UInt8)
-        fileData.append(1)
-
-        // Serialize state
-        // Tags (32 bytes)
-        var tags = state.tags
-        withUnsafeBytes(of: &tags) { fileData.append(contentsOf: $0) }
-
-        // Flags (8 bytes)
-        var flags = state.flags
-        withUnsafeBytes(of: &flags) { fileData.append(contentsOf: $0) }
-
-        // State data
-        fileData.append(contentsOf: state.data)
+        // Determine file flags
+        var flags = StateFileFlags()
+        if self.state == .paused {
+            flags.insert(.wasPaused)
+        }
 
         do {
-            try fileData.write(to: url)
+            try StateFileHandler.write(to: url, metadata: metadata, state: state, flags: flags)
+        } catch let error as StateFileError {
+            throw AtticError.stateSaveFailed(error.localizedDescription)
         } catch {
             throw AtticError.stateSaveFailed(error.localizedDescription)
         }
     }
 
-    /// Loads a state from a file.
+    /// Loads a state from a file and returns metadata (v2 format).
+    ///
+    /// This is the primary method for loading emulator state. It reads
+    /// a v2 format file and returns the metadata for the caller to process
+    /// (e.g., restore REPL mode, display disk info).
+    ///
+    /// Note: Breakpoints are cleared automatically when loading state,
+    /// as the RAM contents change and BRK injections become invalid.
     ///
     /// - Parameter url: The file URL to load from.
+    /// - Returns: The metadata from the state file.
     /// - Throws: AtticError if loading fails.
-    public func loadState(from url: URL) throws {
-        let fileData: Data
+    @discardableResult
+    public func loadState(from url: URL) throws -> StateMetadata {
         do {
-            fileData = try Data(contentsOf: url)
+            let (metadata, state) = try StateFileHandler.read(from: url)
+            wrapper.restoreState(state)
+            return metadata
+        } catch let error as StateFileError {
+            throw AtticError.stateLoadFailed(error.localizedDescription)
         } catch {
             throw AtticError.stateLoadFailed(error.localizedDescription)
         }
+    }
 
-        // Validate magic bytes
-        guard fileData.count > 5,
-              fileData[0] == 0x41,  // A
-              fileData[1] == 0x54,  // T
-              fileData[2] == 0x54,  // T
-              fileData[3] == 0x43   // C
-        else {
-            throw AtticError.stateLoadFailed("Invalid state file format")
+    /// Reads only the metadata from a state file without loading.
+    ///
+    /// This is useful for displaying state file info without the overhead
+    /// of loading the full ~210KB state data.
+    ///
+    /// - Parameter url: The file URL to read.
+    /// - Returns: The metadata from the state file.
+    /// - Throws: AtticError if reading fails.
+    public static func readStateMetadata(from url: URL) throws -> StateMetadata {
+        do {
+            return try StateFileHandler.readMetadata(from: url)
+        } catch let error as StateFileError {
+            throw AtticError.stateLoadFailed(error.localizedDescription)
+        } catch {
+            throw AtticError.stateLoadFailed(error.localizedDescription)
         }
-
-        // Check version
-        let version = fileData[4]
-        guard version == 1 else {
-            throw AtticError.stateLoadFailed("Unsupported state file version: \(version)")
-        }
-
-        // Parse state
-        var state = EmulatorState()
-
-        // Read tags (32 bytes starting at offset 5)
-        let tagsData = fileData.subdata(in: 5..<37)
-        tagsData.withUnsafeBytes { ptr in
-            state.tags.size = ptr.load(fromByteOffset: 0, as: UInt32.self)
-            state.tags.cpu = ptr.load(fromByteOffset: 4, as: UInt32.self)
-            state.tags.pc = ptr.load(fromByteOffset: 8, as: UInt32.self)
-            state.tags.baseRam = ptr.load(fromByteOffset: 12, as: UInt32.self)
-            state.tags.antic = ptr.load(fromByteOffset: 16, as: UInt32.self)
-            state.tags.gtia = ptr.load(fromByteOffset: 20, as: UInt32.self)
-            state.tags.pia = ptr.load(fromByteOffset: 24, as: UInt32.self)
-            state.tags.pokey = ptr.load(fromByteOffset: 28, as: UInt32.self)
-        }
-
-        // Read flags (8 bytes starting at offset 37)
-        let flagsData = fileData.subdata(in: 37..<45)
-        flagsData.withUnsafeBytes { ptr in
-            state.flags.selfTestEnabled = ptr.load(fromByteOffset: 0, as: UInt8.self) != 0
-            state.flags.frameCount = ptr.load(fromByteOffset: 4, as: UInt32.self)
-        }
-
-        // Read state data (rest of file)
-        state.data = Array(fileData.suffix(from: 45))
-
-        wrapper.restoreState(state)
     }
 }
