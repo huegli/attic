@@ -1,0 +1,27 @@
+# Beads Configuration for Attic Project
+# See https://github.com/steveyegge/beads/blob/main/docs/CONFIG.md
+
+# Sync settings - git-portable is the recommended default
+sync:
+  mode: git-portable    # Export JSONL on push, import on pull
+  export_on: push
+  import_on: pull
+
+# Conflict resolution strategy
+conflict:
+  strategy: newest      # Keep version with newer updated_at timestamp
+
+# Auto-flush debounce (seconds before writing changes to JSONL)
+flush-debounce: 5s
+
+# Auto-start daemon for background sync
+auto-start-daemon: true
+
+# Require descriptions when creating issues (helps maintain context)
+create:
+  require-description: false  # Set to true to enforce descriptions
+
+# Template validation (none, warn, error)
+validation:
+  on-create: none
+  on-sync: none
