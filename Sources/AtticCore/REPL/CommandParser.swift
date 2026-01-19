@@ -588,9 +588,23 @@ public struct CommandParser {
     }
 
     // =========================================================================
-    // MARK: - BASIC Command Parsing (Stub)
+    // MARK: - BASIC Command Parsing
     // =========================================================================
 
+    /// Parses BASIC mode commands for program editing and execution.
+    ///
+    /// BASIC mode supports the following commands:
+    /// - Line entry: `10 PRINT "HELLO"` - enter/replace a program line
+    /// - `run` - execute the program
+    /// - `stop` - break program execution
+    /// - `cont` - continue after break
+    /// - `new` - clear program and variables
+    /// - `list [start] [-end]` - list program lines
+    /// - `vars [name]` - show variables
+    /// - `del start [-end]` - delete lines
+    /// - `renum [start] [step]` - renumber lines
+    /// - `import <path>` - import .BAS file from host
+    /// - `export <path>` - export to .BAS file on host
     private func parseBasicCommand(_ input: String) throws -> Command {
         // Check if it's a line number (BASIC program entry)
         if let firstChar = input.first, firstChar.isNumber {
@@ -612,28 +626,213 @@ public struct CommandParser {
         }
 
         // Parse BASIC commands
-        let parts = input.split(separator: " ", maxSplits: 1)
+        let parts = input.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
         let command = String(parts[0]).lowercased()
+        let argsString = parts.count > 1 ? String(parts[1]) : ""
 
         switch command {
         case "run":
             return .basicRun
+
         case "stop":
             return .basicStop
+
         case "cont":
             return .basicContinue
+
         case "new":
             return .basicNew
+
         case "list":
-            return .basicList(start: nil, end: nil)
-        case "vars":
-            return .basicVars(name: nil)
+            return try parseListCommand(argsString)
+
+        case "vars", "var":
+            // vars [name]
+            let name = argsString.trimmingCharacters(in: .whitespaces)
+            return .basicVars(name: name.isEmpty ? nil : name.uppercased())
+
+        case "del", "delete":
+            return try parseDeleteCommand(argsString)
+
+        case "renum", "renumber":
+            return try parseRenumberCommand(argsString)
+
+        case "import":
+            guard !argsString.isEmpty else {
+                throw AtticError.invalidCommand(
+                    "import",
+                    suggestion: "Usage: import <path>  (e.g., import ~/program.bas)"
+                )
+            }
+            return .basicImport(path: argsString)
+
+        case "export":
+            guard !argsString.isEmpty else {
+                throw AtticError.invalidCommand(
+                    "export",
+                    suggestion: "Usage: export <path>  (e.g., export ~/program.bas)"
+                )
+            }
+            return .basicExport(path: argsString)
+
         default:
             throw AtticError.invalidCommand(
                 command,
-                suggestion: "Unknown BASIC command. Type .help for available commands."
+                suggestion: "Unknown BASIC command. Commands: run, stop, cont, new, list, vars, del, import, export"
             )
         }
+    }
+
+    // =========================================================================
+    // MARK: - BASIC Command Helpers
+    // =========================================================================
+
+    /// Parses the LIST command with optional line range.
+    ///
+    /// Formats:
+    /// - `list` - list all lines
+    /// - `list 10` - list line 10 only
+    /// - `list 10-` - list from line 10 to end
+    /// - `list -50` - list from start to line 50
+    /// - `list 10-50` - list lines 10 through 50
+    private func parseListCommand(_ args: String) throws -> Command {
+        let trimmed = args.trimmingCharacters(in: .whitespaces)
+
+        // No arguments - list all
+        if trimmed.isEmpty {
+            return .basicList(start: nil, end: nil)
+        }
+
+        // Check for range (contains '-')
+        if trimmed.contains("-") {
+            let rangeParts = trimmed.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
+
+            var start: Int? = nil
+            var end: Int? = nil
+
+            // Parse start if present
+            if !rangeParts[0].isEmpty {
+                guard let s = Int(rangeParts[0].trimmingCharacters(in: .whitespaces)) else {
+                    throw AtticError.invalidCommand(
+                        "list \(args)",
+                        suggestion: "Invalid start line number"
+                    )
+                }
+                start = s
+            }
+
+            // Parse end if present
+            if rangeParts.count > 1 && !rangeParts[1].isEmpty {
+                guard let e = Int(rangeParts[1].trimmingCharacters(in: .whitespaces)) else {
+                    throw AtticError.invalidCommand(
+                        "list \(args)",
+                        suggestion: "Invalid end line number"
+                    )
+                }
+                end = e
+            }
+
+            return .basicList(start: start, end: end)
+        }
+
+        // Single line number
+        guard let lineNum = Int(trimmed) else {
+            throw AtticError.invalidCommand(
+                "list \(args)",
+                suggestion: "Invalid line number. Use: list [start[-end]]"
+            )
+        }
+
+        // Single line number means list that line only
+        return .basicList(start: lineNum, end: lineNum)
+    }
+
+    /// Parses the DEL command for deleting lines.
+    ///
+    /// Formats:
+    /// - `del 10` - delete line 10
+    /// - `del 10-50` - delete lines 10 through 50
+    private func parseDeleteCommand(_ args: String) throws -> Command {
+        let trimmed = args.trimmingCharacters(in: .whitespaces)
+
+        guard !trimmed.isEmpty else {
+            throw AtticError.invalidCommand(
+                "del",
+                suggestion: "Usage: del <line> or del <start>-<end>"
+            )
+        }
+
+        // Check for range
+        if trimmed.contains("-") {
+            let rangeParts = trimmed.split(separator: "-", maxSplits: 1)
+            guard rangeParts.count == 2 else {
+                throw AtticError.invalidCommand(
+                    "del \(args)",
+                    suggestion: "Usage: del <start>-<end>"
+                )
+            }
+
+            guard let start = Int(rangeParts[0].trimmingCharacters(in: .whitespaces)),
+                  let end = Int(rangeParts[1].trimmingCharacters(in: .whitespaces)) else {
+                throw AtticError.invalidCommand(
+                    "del \(args)",
+                    suggestion: "Invalid line numbers"
+                )
+            }
+
+            return .basicDelete(start: start, end: end)
+        }
+
+        // Single line
+        guard let lineNum = Int(trimmed) else {
+            throw AtticError.invalidCommand(
+                "del \(args)",
+                suggestion: "Invalid line number"
+            )
+        }
+
+        return .basicDelete(start: lineNum, end: nil)
+    }
+
+    /// Parses the RENUM command for renumbering lines.
+    ///
+    /// Formats:
+    /// - `renum` - renumber starting at 10, step 10
+    /// - `renum 100` - renumber starting at 100, step 10
+    /// - `renum 100 20` - renumber starting at 100, step 20
+    private func parseRenumberCommand(_ args: String) throws -> Command {
+        let trimmed = args.trimmingCharacters(in: .whitespaces)
+
+        if trimmed.isEmpty {
+            return .basicRenumber(start: nil, step: nil)
+        }
+
+        let parts = trimmed.split(separator: " ", omittingEmptySubsequences: true)
+
+        var start: Int? = nil
+        var step: Int? = nil
+
+        if !parts.isEmpty {
+            guard let s = Int(parts[0]) else {
+                throw AtticError.invalidCommand(
+                    "renum \(args)",
+                    suggestion: "Invalid start number"
+                )
+            }
+            start = s
+        }
+
+        if parts.count > 1 {
+            guard let st = Int(parts[1]) else {
+                throw AtticError.invalidCommand(
+                    "renum \(args)",
+                    suggestion: "Invalid step value"
+                )
+            }
+            step = st
+        }
+
+        return .basicRenumber(start: start, step: step)
     }
 
     // =========================================================================

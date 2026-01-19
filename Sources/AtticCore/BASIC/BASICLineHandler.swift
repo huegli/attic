@@ -552,6 +552,66 @@ public actor BASICLineHandler {
             variables: state.variableCount
         )
     }
+
+    /// Lists the current BASIC program as human-readable text.
+    ///
+    /// This method reads the tokenized program from emulator memory,
+    /// detokenizes it, and returns a formatted listing.
+    ///
+    /// - Parameter range: Optional line number range (start, end).
+    ///                    nil means list all lines.
+    ///                    Partial values filter accordingly.
+    /// - Returns: The formatted program listing, or empty string if no program.
+    public func listProgram(range: (start: Int?, end: Int?)?) async -> String {
+        let state = await readMemoryState()
+
+        // Read the program bytes
+        let programSize = Int(state.starp - state.stmtab)
+        guard programSize > 0 else { return "" }
+
+        let programBytes = await emulator.readMemoryBlock(
+            at: state.stmtab,
+            count: programSize
+        )
+
+        // Read variable names for detokenization
+        let variableNames = await readVariableNames(state: state)
+
+        // Detokenize the program
+        let detokenizer = BASICDetokenizer()
+        let listing = detokenizer.formatListing(
+            programBytes,
+            variables: variableNames,
+            range: range
+        )
+
+        return listing
+    }
+
+    /// Lists all defined variables with their names and types.
+    ///
+    /// - Returns: Array of variable names defined in the current program.
+    public func listVariables() async -> [BASICVariableName] {
+        let state = await readMemoryState()
+        return await readVariableNames(state: state)
+    }
+
+    /// Reads variable names from the Variable Name Table (VNT).
+    ///
+    /// The VNT stores variable names in a packed format where:
+    /// - Each name consists of alphanumeric characters
+    /// - The last character of each name has bit 7 set ($80)
+    /// - Type suffixes follow: $ for string, ( for array, $( for string array
+    ///
+    /// - Parameter state: The current BASIC memory state.
+    /// - Returns: Array of parsed variable names in order.
+    private func readVariableNames(state: BASICMemoryState) async -> [BASICVariableName] {
+        let vntSize = Int(state.vntd - state.vntp)
+        guard vntSize > 0 else { return [] }
+
+        let vntBytes = await emulator.readMemoryBlock(at: state.vntp, count: vntSize)
+        return BASICVariableTable.parseVNT(from: vntBytes)
+    }
 }
 
 // =============================================================================

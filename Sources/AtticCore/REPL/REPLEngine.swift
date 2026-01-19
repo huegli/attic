@@ -350,22 +350,39 @@ public actor REPLEngine {
             return result.message
 
         case .basicList(let start, let end):
-            // LIST requires detokenization (Phase 15)
-            // For now, show program info
-            let info = await basicHandler.getProgramInfo()
-            var output = "Program: \(info.lines) lines, \(info.bytes) bytes, \(info.variables) variables"
-            if start != nil || end != nil {
-                output += "\n(Detailed listing requires detokenizer - Phase 15)"
+            // Use the detokenizer to list the program
+            let range: (start: Int?, end: Int?)? = (start != nil || end != nil)
+                ? (start: start, end: end)
+                : nil
+            let listing = await basicHandler.listProgram(range: range)
+
+            if listing.isEmpty {
+                return "No program in memory"
             }
-            return output
+            return listing
 
         case .basicVars(let name):
-            // Variable inspection requires reading VNT/VVT (Phase 15)
-            if let name = name {
-                return "VAR \(name) [requires detokenizer - Phase 15]"
+            // List variables from the Variable Name Table
+            let variables = await basicHandler.listVariables()
+
+            if variables.isEmpty {
+                return "No variables defined"
             }
-            let info = await basicHandler.getProgramInfo()
-            return "\(info.variables) variables defined [detailed list requires Phase 15]"
+
+            // If a specific name was requested, filter for it
+            if let searchName = name {
+                let matching = variables.filter {
+                    $0.name.uppercased() == searchName.uppercased() ||
+                    $0.fullName.uppercased() == searchName.uppercased()
+                }
+                if matching.isEmpty {
+                    return "Variable '\(searchName)' not found"
+                }
+                return formatVariableList(matching)
+            }
+
+            // Format all variables by type
+            return formatVariableList(variables)
 
         case .basicSaveATR(let filename):
             return "SAVE \"\(filename)\" [requires ATR filesystem - Phase 12]"
@@ -374,10 +391,10 @@ public actor REPLEngine {
             return "LOAD \"\(filename)\" [requires ATR filesystem - Phase 12]"
 
         case .basicImport(let path):
-            return "Import from \(path) [requires file I/O - Phase 15]"
+            return await executeBasicImport(path: path)
 
         case .basicExport(let path):
-            return "Export to \(path) [requires detokenizer - Phase 15]"
+            return await executeBasicExport(path: path)
 
         // =====================================================================
         // DOS Commands
@@ -851,6 +868,151 @@ public actor REPLEngine {
         }
 
         return output.trimmingCharacters(in: .newlines)
+    }
+
+    // =========================================================================
+    // MARK: - BASIC Import/Export
+    // =========================================================================
+
+    /// Imports a .BAS text file into the BASIC program.
+    ///
+    /// Reads the file line by line and enters each numbered line into the program.
+    /// Lines without numbers are ignored. The program is cleared first with NEW.
+    ///
+    /// - Parameter path: Path to the .BAS file on the host filesystem.
+    /// - Returns: Status message describing the result.
+    private func executeBasicImport(path: String) async -> String {
+        // Expand tilde in path
+        let expandedPath = NSString(string: path).expandingTildeInPath
+        let url = URL(fileURLWithPath: expandedPath)
+
+        // Read the file
+        let contents: String
+        do {
+            contents = try String(contentsOf: url, encoding: .utf8)
+        } catch {
+            return "Error reading file: \(error.localizedDescription)"
+        }
+
+        // Clear the current program
+        _ = await basicHandler.newProgram()
+
+        // Parse and enter each line
+        let lines = contents.components(separatedBy: .newlines)
+        var enteredCount = 0
+        var errorCount = 0
+        var errors: [String] = []
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            // Skip empty lines
+            guard !trimmed.isEmpty else { continue }
+
+            // Check if line starts with a number (BASIC line number)
+            guard let firstChar = trimmed.first, firstChar.isNumber else {
+                continue  // Skip lines without line numbers
+            }
+
+            // Enter the line
+            let result = await basicHandler.enterLine(trimmed)
+            if result.success {
+                enteredCount += 1
+            } else {
+                errorCount += 1
+                if errors.count < 5 {  // Limit error messages
+                    errors.append(result.message)
+                }
+            }
+        }
+
+        // Build result message
+        var message = "Imported \(enteredCount) lines from \(url.lastPathComponent)"
+        if errorCount > 0 {
+            message += " (\(errorCount) errors)"
+            if !errors.isEmpty {
+                message += "\n" + errors.joined(separator: "\n")
+            }
+        }
+
+        return message
+    }
+
+    /// Exports the current BASIC program to a .BAS text file.
+    ///
+    /// Uses the detokenizer to convert the tokenized program to text,
+    /// then writes it to the specified file.
+    ///
+    /// - Parameter path: Path for the output file on the host filesystem.
+    /// - Returns: Status message describing the result.
+    private func executeBasicExport(path: String) async -> String {
+        // Get the program listing
+        let listing = await basicHandler.listProgram(range: nil)
+
+        if listing.isEmpty {
+            return "No program to export"
+        }
+
+        // Expand tilde in path
+        let expandedPath = NSString(string: path).expandingTildeInPath
+        let url = URL(fileURLWithPath: expandedPath)
+
+        // Write the file
+        do {
+            try listing.write(to: url, atomically: true, encoding: .utf8)
+            let info = await basicHandler.getProgramInfo()
+            return "Exported \(info.lines) lines to \(url.path)"
+        } catch {
+            return "Error writing file: \(error.localizedDescription)"
+        }
+    }
+
+    /// Formats a list of variables for display.
+    ///
+    /// Groups variables by type and displays them in a formatted list.
+    ///
+    /// - Parameter variables: The variables to format.
+    /// - Returns: Formatted string showing variable names by type.
+    private func formatVariableList(_ variables: [BASICVariableName]) -> String {
+        // Group variables by type
+        var numeric: [String] = []
+        var strings: [String] = []
+        var numericArrays: [String] = []
+        var stringArrays: [String] = []
+
+        for variable in variables {
+            switch variable.type {
+            case .numeric:
+                numeric.append(variable.name)
+            case .string:
+                strings.append(variable.fullName)
+            case .numericArray:
+                numericArrays.append(variable.fullName)
+            case .stringArray:
+                stringArrays.append(variable.fullName)
+            }
+        }
+
+        var output: [String] = []
+
+        if !numeric.isEmpty {
+            output.append("Numeric: \(numeric.joined(separator: ", "))")
+        }
+        if !strings.isEmpty {
+            output.append("String: \(strings.joined(separator: ", "))")
+        }
+        if !numericArrays.isEmpty {
+            output.append("Numeric Arrays: \(numericArrays.joined(separator: ", "))")
+        }
+        if !stringArrays.isEmpty {
+            output.append("String Arrays: \(stringArrays.joined(separator: ", "))")
+        }
+
+        if output.isEmpty {
+            return "No variables defined"
+        }
+
+        return "\(variables.count) variables:\n" + output.joined(separator: "\n")
     }
 
     // =========================================================================
