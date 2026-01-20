@@ -47,25 +47,41 @@ This separation enables:
 
 ## Component Diagram
 
+All AtticCore files are at the module top level (no subdirectories). Files are grouped logically below:
+
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         AtticCore                                   │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────┐  │
-│  │   Emulator/     │  │    Monitor/     │  │      BASIC/         │  │
-│  │ EmulatorEngine  │  │   Monitor       │  │  BasicTokenizer     │  │
-│  │ LibAtari800Wrap │  │   Disassembler  │  │  BasicDetokenizer   │  │
-│  │ MemoryBus       │  │   Assembler     │  │  TokenTables        │  │
-│  │ StateManager    │  │   BreakpointMgr │  │  BasicMemoryLayout  │  │
-│  └─────────────────┘  └─────────────────┘  └─────────────────────┘  │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────┐  │
-│  │      DOS/       │  │      REPL/      │  │      Audio/         │  │
-│  │   ATRImage      │  │   REPLEngine    │  │   AudioEngine       │  │
-│  │   AtariFileSys  │  │   CommandParser │  │                     │  │
-│  │   DOSCommands   │  │   MonitorMode   │  ├─────────────────────┤  │
-│  │                 │  │   BasicMode     │  │      Input/         │  │
-│  │                 │  │   DOSMode       │  │ KeyboardInputHandler│  │
-│  └─────────────────┘  └─────────────────┘  └─────────────────────┘  │
-└─────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              AtticCore                                       │
+│                                                                              │
+│  ┌─ Emulator ──────────────┐  ┌─ Monitor/Debugger ─────────────────────────┐ │
+│  │ EmulatorEngine.swift    │  │ MonitorController.swift  Assembler.swift   │ │
+│  │ LibAtari800Wrapper.swift│  │ MonitorStepper.swift  BreakpointManager.swift│ │
+│  │ MemoryBus.swift         │  │ Disassembler.swift       OpcodeInfo.swift  │ │
+│  │ StateMetadata.swift     │  │ DisassembledInstruction.swift              │ │
+│  │                         │  │ AddressingMode.swift  AddressLabels.swift  │ │
+│  │                         │  │ CPURegisters.swift                         │ │
+│  └─────────────────────────┘  └────────────────────────────────────────────┘ │
+│                                                                              │
+│  ┌─ BASIC ─────────────────────────────┐  ┌─ DOS/ATR ──────────────────────┐ │
+│  │ BASICTokenizer.swift                │  │ ATRImage.swift   ATRError.swift│ │
+│  │ BASICDetokenizer.swift              │  │ ATRFileSystem.swift            │ │
+│  │ BASICToken.swift                    │  │ DiskManager.swift  DiskType.swift│ │
+│  │ BASICMemoryLayout.swift             │  │ DirectoryEntry.swift           │ │
+│  │ BASICLineHandler.swift              │  │ SectorLink.swift   VTOC.swift  │ │
+│  │ BASICVariable.swift  BCDFloat.swift │  └────────────────────────────────┘ │
+│  └─────────────────────────────────────┘                                     │
+│                                                                              │
+│  ┌─ REPL ──────────────────────────────┐  ┌─ CLI Socket ───────────────────┐ │
+│  │ REPLEngine.swift                    │  │ CLIProtocol.swift              │ │
+│  │ REPLMode.swift                      │  │ CLISocketClient.swift          │ │
+│  │ CommandParser.swift                 │  │ CLISocketServer.swift          │ │
+│  └─────────────────────────────────────┘  └────────────────────────────────┘ │
+│                                                                              │
+│  ┌─ Audio/Input ───────────────────────┐  ┌─ Module ───────────────────────┐ │
+│  │ AudioEngine.swift                   │  │ AtticCore.swift                │ │
+│  │ KeyboardInputHandler.swift          │  │ (public API exports)           │ │
+│  └─────────────────────────────────────┘  └────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────────────┘
            │                           │
            ▼                           ▼
     ┌─────────────────┐         ┌─────────────────┐
