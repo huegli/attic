@@ -892,3 +892,88 @@ ConsoleButton(
     onRelease: { Task { await emulator.setConsoleKeys(start: false, ...) } }
 )
 ```
+
+### Phase 14: BASIC Tokenizer
+
+This phase implements BASIC program entry via the REPL. Key architectural decisions:
+
+#### Tokenization Location: Server-Side
+
+Tokenization happens in **AtticServer**, not in the CLI client. The CLI sends raw BASIC text via the existing socket protocol, and the server tokenizes and injects into emulator memory.
+
+**Rationale**: Keeps the emulator logic centralized. CLI remains a thin client.
+
+#### State Management: Emulator-Primary
+
+The emulator memory is the **single source of truth** for BASIC programs. Swift does not maintain a shadow copy of the program or variable tables.
+
+- When entering a line: Parse, tokenize, inject into emulator memory
+- When listing: Read from emulator memory, detokenize
+- No caching of program state in Swift
+
+**Implications**:
+- Each line entry reads current BASIC pointers from zero page
+- Variable table lookups scan emulator memory
+- Programs loaded via Atari DOS are immediately visible
+
+#### Injection Timing: Line-by-Line (Immediate)
+
+Each BASIC line is tokenized and injected **immediately** when entered, exactly like real Atari BASIC.
+
+**Process for entering `10 PRINT "HELLO"`**:
+1. Parse the line number and content
+2. Read current BASIC pointers from zero page (VNTP, VVTP, STMTAB, etc.)
+3. Scan existing variable table in emulator memory
+4. Add any new variables to VNT/VVT
+5. Tokenize the statement
+6. Insert/replace the line in the statement table
+7. Update all BASIC pointers in zero page
+8. Return success response
+
+#### Variable Creation: On First Reference
+
+Variables are created in the Variable Name Table when first encountered during tokenization, matching Atari BASIC behavior.
+
+**Example**:
+```
+10 LET X=5     <- Variable X created in VNT, entry added to VVT
+20 PRINT X     <- Variable X looked up, index used in tokenized form
+30 LET Y=X+1   <- Variable Y created, X looked up
+```
+
+#### Tokenizer Architecture: Stateless Struct
+
+The tokenizer is a **stateless struct** that operates on input and emulator state:
+
+```swift
+struct BASICTokenizer {
+    /// Tokenizes a BASIC line and returns the tokenized bytes.
+    /// Does NOT modify emulator memory - caller handles injection.
+    func tokenizeLine(
+        _ line: String,
+        existingVariables: [BASICVariable]
+    ) throws -> TokenizedLine
+}
+```
+
+The `REPLEngine` or `BASICLineHandler` coordinates:
+1. Reading current state from emulator
+2. Calling tokenizer
+3. Writing results back to emulator
+
+#### Error Reporting: Immediate
+
+Errors are reported immediately when a line is entered, matching Atari BASIC behavior.
+
+**Response format**:
+```
+OK:Line 10 stored (23 bytes)
+```
+or
+```
+ERR:Syntax error at column 15: Unknown keyword 'PRIMT'. Did you mean 'PRINT'?
+```
+
+#### Turbo BASIC: Deferred
+
+Turbo BASIC XL support is **deferred to a future phase**. Phase 14 implements standard Atari BASIC only. The `REPLMode.basic(variant:)` enum already supports `.turbo` for future use.

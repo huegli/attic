@@ -230,6 +230,42 @@ $0F <length> <characters...>
 
 Where variable-index is the position in the Variable Name Table (0-127), plus $80 for the first variable.
 
+## Tokenization Examples
+
+### Simple Program
+
+```
+10 PRINT "HELLO"
+```
+
+**Expected bytes:**
+- Line number: `$0A $00` (10 in little-endian)
+- Offset: `$0E` (14 bytes total)
+- PRINT token: `$20`
+- Space (implicit)
+- String marker: `$0F`
+- String length: `$05`
+- "HELLO": `$48 $45 $4C $4C $4F`
+- EOL: `$16`
+
+### Variable Reference
+
+```
+10 LET X=5
+20 PRINT X
+```
+
+**Line 10 tokens:**
+- LET token: `$06`
+- Variable X: `$80` (first variable, index 0 + $80)
+- Equals: `$52`
+- Small int marker: `$0D`
+- Value 5: `$05`
+
+**Line 20 tokens:**
+- PRINT token: `$20`
+- Variable X: `$80` (same variable reference)
+
 ## BCD Floating Point Format
 
 Atari BASIC uses 6-byte BCD floating point:
