@@ -21,11 +21,11 @@
 //
 // Examples:
 //   0       → 00 00 00 00 00 00
-//   1       → 40 01 00 00 00 00
-//   10      → 41 01 00 00 00 00
-//   100     → 42 01 00 00 00 00
-//   3.14159 → 40 03 14 15 90 00
-//   -1      → C0 01 00 00 00 00
+//   1       → 40 10 00 00 00 00  (exp=0, mantissa=1.0)
+//   10      → 41 10 00 00 00 00  (exp=1, mantissa=1.0)
+//   100     → 42 10 00 00 00 00  (exp=2, mantissa=1.0)
+//   3.14159 → 40 31 41 59 00 00  (exp=0, mantissa=3.14159)
+//   -1      → C0 10 00 00 00 00  (exp=0, mantissa=1.0, negative)
 //
 // Reference: Atari BASIC Reference Manual, De Re Atari Chapter 8
 //
@@ -89,8 +89,8 @@ public struct BCDFloat: Sendable, Equatable {
     /// The conversion process:
     /// 1. Handle special case of zero
     /// 2. Determine sign and work with absolute value
-    /// 3. Calculate exponent (power of 100)
-    /// 4. Normalize mantissa
+    /// 3. Calculate exponent (power of 10)
+    /// 4. Normalize mantissa to [1, 10)
     /// 5. Extract BCD digits
     /// 6. Pack into 6-byte format
     ///
@@ -109,73 +109,60 @@ public struct BCDFloat: Sendable, Equatable {
         }
 
         let isNegative = value < 0
-        var absValue = abs(value)
+        var mantissa = abs(value)
 
         // Calculate the decimal exponent
-        // We need exponent such that 0.1 <= mantissa < 1.0 (normalized form)
-        var decimalExponent = 0
+        // We normalize mantissa to the range [1, 10) so the first digit is always 1-9
+        var exponent = 0
 
-        if absValue >= 1.0 {
-            while absValue >= 1.0 {
-                absValue /= 10.0
-                decimalExponent += 1
+        if mantissa >= 10.0 {
+            // Value is >= 10, divide until < 10
+            while mantissa >= 10.0 {
+                mantissa /= 10.0
+                exponent += 1
             }
-        } else {
-            while absValue < 0.1 {
-                absValue *= 10.0
-                decimalExponent -= 1
+        } else if mantissa < 1.0 {
+            // Value is < 1, multiply until >= 1
+            while mantissa < 1.0 {
+                mantissa *= 10.0
+                exponent -= 1
             }
         }
 
-        // Now absValue is in range [0.1, 1.0)
-        // Atari BASIC uses excess-64 exponent for pairs of digits
-        // The exponent represents powers of 100
-        // If decimalExponent is odd, we need to adjust
+        // Now mantissa is in range [1.0, 10.0) and value = mantissa * 10^exponent
+        // The exponent byte uses excess-64 notation
 
-        // Convert to Atari's exponent system
-        // Atari exponent is (decimalExponent + 1) / 2 for the 100-based system
-        // But we need to handle odd exponents by shifting the mantissa
+        // Clamp exponent to valid range (-64 to 63)
+        exponent = max(-64, min(63, exponent))
 
-        var atariExponent: Int
-        var mantissa = absValue
-
-        if decimalExponent % 2 != 0 {
-            // Odd exponent: shift mantissa and adjust
-            if decimalExponent > 0 {
-                atariExponent = (decimalExponent + 1) / 2
-                mantissa = absValue * 10.0  // Shift left one digit
-            } else {
-                atariExponent = decimalExponent / 2
-                mantissa = absValue / 10.0  // Shift right one digit
-            }
-        } else {
-            atariExponent = decimalExponent / 2
-        }
-
-        // Clamp exponent to valid range
-        atariExponent = max(-64, min(63, atariExponent))
-
-        // Extract 10 BCD digits
+        // Extract 10 BCD digits from mantissa
+        // The mantissa is in [1, 10), so the first digit is the integer part
         var digits: [UInt8] = []
         var m = mantissa
-        for _ in 0..<10 {
-            m *= 10.0
-            let digit = Int(m)
+        for i in 0..<10 {
+            let digit: Int
+            if i == 0 {
+                // First digit: integer part of mantissa (1-9)
+                digit = Int(m)
+            } else {
+                // Subsequent digits: fractional parts
+                m = (m - Double(Int(m))) * 10.0
+                digit = Int(m)
+            }
             digits.append(UInt8(min(9, max(0, digit))))
-            m -= Double(digit)
         }
 
         // Build the 6-byte result
         var result: [UInt8] = []
 
-        // Byte 0: Exponent with sign
-        var expByte = UInt8((atariExponent + 64) & 0x7F)
+        // Byte 0: Exponent with sign (excess-64 notation)
+        var expByte = UInt8((exponent + 64) & 0x7F)
         if isNegative {
             expByte |= 0x80
         }
         result.append(expByte)
 
-        // Bytes 1-5: Packed BCD mantissa
+        // Bytes 1-5: Packed BCD mantissa (2 digits per byte, high nibble first)
         for i in stride(from: 0, to: 10, by: 2) {
             let high = digits[i]
             let low = i + 1 < digits.count ? digits[i + 1] : 0
@@ -210,9 +197,8 @@ public struct BCDFloat: Sendable, Equatable {
     /// The conversion process:
     /// 1. Handle zero case
     /// 2. Extract sign and exponent
-    /// 3. Unpack BCD digits
-    /// 4. Build mantissa
-    /// 5. Apply exponent and sign
+    /// 3. Unpack BCD digits to build mantissa in [1, 10)
+    /// 4. Apply exponent (power of 10) and sign
     ///
     /// - Returns: The Double value represented by this BCD float.
     public func decode() -> Double {
@@ -221,13 +207,14 @@ public struct BCDFloat: Sendable, Equatable {
             return 0.0
         }
 
-        // Extract exponent (excess-64)
+        // Extract exponent (excess-64 notation)
         let exp = Int(bytes[0] & 0x7F) - 64
         let negative = isNegative
 
-        // Unpack BCD digits
+        // Unpack BCD digits to build mantissa
+        // First digit is in the units place (1-9), subsequent digits are fractional
         var mantissa = 0.0
-        var place = 0.1
+        var place = 1.0  // Start at units place
 
         for byteIndex in 1...5 {
             let byte = bytes[byteIndex]
@@ -240,8 +227,9 @@ public struct BCDFloat: Sendable, Equatable {
             place /= 10.0
         }
 
-        // Apply exponent (powers of 100)
-        var result = mantissa * pow(100.0, Double(exp))
+        // Apply exponent (powers of 10)
+        // Value = mantissa * 10^exp where mantissa is in [1, 10)
+        var result = mantissa * pow(10.0, Double(exp))
 
         // Apply sign
         if negative {
@@ -266,9 +254,13 @@ public struct BCDFloat: Sendable, Equatable {
 
         // Check if it's a non-negative integer in range
         guard value >= 0 && value <= 255 else { return nil }
-        guard value == value.rounded() else { return nil }
 
-        return UInt8(value)
+        // Use a small tolerance for floating-point comparison
+        // to handle precision issues from BCD conversion
+        let rounded = value.rounded()
+        guard abs(value - rounded) < 0.0001 else { return nil }
+
+        return UInt8(rounded)
     }
 
     // =========================================================================
