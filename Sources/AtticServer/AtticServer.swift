@@ -1,5 +1,5 @@
 // =============================================================================
-// main.swift - Attic Emulator Server
+// AtticServer.swift - Attic Emulator Server
 // =============================================================================
 //
 // This is the standalone emulator server process that runs the Atari 800 XL
