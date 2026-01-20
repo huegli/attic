@@ -1,0 +1,1087 @@
+// =============================================================================
+// REPLEngine.swift - REPL State Machine and Command Executor
+// =============================================================================
+//
+// This file implements the REPL (Read-Eval-Print Loop) engine that manages
+// user interaction with the emulator. The REPLEngine:
+//
+// - Maintains the current mode (monitor, basic, dos)
+// - Parses commands using CommandParser
+// - Executes commands against the EmulatorEngine
+// - Formats output for display
+// - Manages the prompt for comint compatibility
+//
+// The REPL is designed to work with Emacs comint-mode, which requires:
+// - Prompts matching a specific regex pattern
+// - Clean line-based output
+// - No ANSI escape codes (unless requested)
+//
+// Usage:
+//
+//     let engine = EmulatorEngine()
+//     let repl = REPLEngine(emulator: engine)
+//
+//     // Process a command
+//     let output = await repl.execute("g $0600")
+//     print(output)
+//
+//     // Get the current prompt
+//     print(repl.prompt)
+//
+// =============================================================================
+
+import Foundation
+
+/// The REPL engine manages command processing and state.
+///
+/// This is the main interface for the CLI to interact with the emulator.
+/// It handles command parsing, execution, and output formatting.
+public actor REPLEngine {
+    // =========================================================================
+    // MARK: - Properties
+    // =========================================================================
+
+    /// The emulator engine to control.
+    private let emulator: EmulatorEngine
+
+    /// Command parser instance.
+    private let parser: CommandParser
+
+    /// BASIC line handler for tokenization and memory injection.
+    private let basicHandler: BASICLineHandler
+
+    /// Current REPL mode.
+    private(set) public var mode: REPLMode
+
+    /// Disk manager for DOS mode file operations.
+    /// Provides direct ATR file access independent of emulator disk I/O.
+    private let diskManager: DiskManager
+
+    /// Whether the REPL should continue running.
+    private var isRunning: Bool = true
+
+    /// Callback for output that should be sent to the user.
+    /// Set this to receive output asynchronously.
+    public var onOutput: ((String) async -> Void)?
+
+    // =========================================================================
+    // MARK: - Initialization
+    // =========================================================================
+
+    /// Creates a new REPL engine.
+    ///
+    /// - Parameters:
+    ///   - emulator: The emulator engine to control.
+    ///   - initialMode: The starting mode (default: BASIC with Atari variant).
+    public init(emulator: EmulatorEngine, initialMode: REPLMode = .default) {
+        self.emulator = emulator
+        self.parser = CommandParser()
+        self.basicHandler = BASICLineHandler(emulator: emulator)
+        self.mode = initialMode
+        self.diskManager = DiskManager()
+    }
+
+    // =========================================================================
+    // MARK: - Prompt
+    // =========================================================================
+
+    /// Returns the current prompt string.
+    ///
+    /// The prompt format depends on the current mode:
+    /// - Monitor: [monitor] $XXXX>
+    /// - BASIC: [basic] >
+    /// - DOS: [dos] D1:>
+    public var prompt: String {
+        get async {
+            switch mode {
+            case .monitor:
+                let regs = await emulator.getRegisters()
+                return mode.prompt(pc: regs.pc)
+            case .basic:
+                return mode.prompt()
+            case .dos:
+                let currentDrive = await diskManager.currentDrive
+                return mode.prompt(drive: currentDrive)
+            }
+        }
+    }
+
+    // =========================================================================
+    // MARK: - Command Execution
+    // =========================================================================
+
+    /// Executes a command and returns the output.
+    ///
+    /// - Parameter input: The command string to execute.
+    /// - Returns: The output to display, or nil for no output.
+    public func execute(_ input: String) async -> String? {
+        // Parse the command
+        let command: Command
+        do {
+            command = try parser.parse(input, mode: mode)
+        } catch let error as AtticError {
+            return formatError(error)
+        } catch {
+            return "Error: \(error.localizedDescription)"
+        }
+
+        // Execute the command
+        return await executeCommand(command)
+    }
+
+    /// Executes a parsed command.
+    private func executeCommand(_ command: Command) async -> String? {
+        switch command {
+        // =====================================================================
+        // Global Commands
+        // =====================================================================
+
+        case .switchMode(let newMode):
+            mode = newMode
+            return "Switched to \(newMode.name) mode"
+
+        case .help(let topic):
+            return formatHelp(topic: topic)
+
+        case .status:
+            return await formatStatus()
+
+        case .reset:
+            await emulator.reset(cold: true)
+            return "Cold reset performed"
+
+        case .warmStart:
+            await emulator.reset(cold: false)
+            return "Warm reset performed"
+
+        case .screenshot(let path):
+            // TODO: Implement screenshot capture via GUI
+            return "Screenshot saved to \(path ?? "~/Desktop/Attic-<timestamp>.png")"
+
+        case .saveState(let path):
+            do {
+                // Gather metadata from current session state
+                let metadata = await collectStateMetadata()
+                try await emulator.saveState(to: URL(fileURLWithPath: path), metadata: metadata)
+                return "State saved to \(path)"
+            } catch {
+                return "Error saving state: \(error.localizedDescription)"
+            }
+
+        case .loadState(let path):
+            do {
+                // Clear breakpoints before loading (RAM contents will change)
+                await emulator.clearAllBreakpoints()
+
+                // Load state and get metadata
+                let metadata = try await emulator.loadState(from: URL(fileURLWithPath: path))
+
+                // Restore REPL mode from metadata
+                let restoredMode = metadata.replMode.toREPLMode()
+                mode = restoredMode
+
+                // Build informative response
+                var response = "State loaded from \(path)"
+                response += "\n  Timestamp: \(metadata.timestamp)"
+                response += "\n  Mode: \(restoredMode.description)"
+
+                if !metadata.mountedDisks.isEmpty {
+                    response += "\n  Disks at save time:"
+                    for disk in metadata.mountedDisks {
+                        response += "\n    D\(disk.drive): \(disk.path)"
+                    }
+                    response += "\n  (Note: Disks not auto-remounted)"
+                }
+
+                return response
+            } catch {
+                return "Error loading state: \(error.localizedDescription)"
+            }
+
+        case .quit:
+            isRunning = false
+            return "Goodbye"
+
+        case .shutdown:
+            isRunning = false
+            // TODO: Send shutdown signal to GUI
+            return "Shutting down"
+
+        // =====================================================================
+        // Monitor Commands
+        // =====================================================================
+
+        case .go(let address):
+            if let addr = address {
+                var regs = await emulator.getRegisters()
+                regs.pc = addr
+                await emulator.setRegisters(regs)
+            }
+            await emulator.resume()
+            return "Running"
+
+        case .step(let count):
+            // Use MonitorController for proper instruction-level stepping
+            // (Note: MonitorController should be injected via initializer in future)
+            // For now, use frame-based stepping as fallback
+            for _ in 0..<count {
+                let result = await emulator.executeFrame()
+                if result == .breakpoint {
+                    let regs = await emulator.getRegisters()
+                    return formatRegisters(regs) + "\n* Breakpoint hit at $\(String(format: "%04X", regs.pc))"
+                }
+            }
+            let regs = await emulator.getRegisters()
+            return formatRegisters(regs)
+
+        case .stepOver:
+            // Step over subroutine - for now uses frame stepping
+            // Full implementation via MonitorController.stepOver()
+            let result = await emulator.executeFrame()
+            let regs = await emulator.getRegisters()
+            if result == .breakpoint {
+                return formatRegisters(regs) + "\n* Breakpoint hit at $\(String(format: "%04X", regs.pc))"
+            }
+            return formatRegisters(regs)
+
+        case .pause:
+            await emulator.pause()
+            return "Paused"
+
+        case .runUntil(let address):
+            // Set temporary breakpoint and run
+            await emulator.setBreakpoint(at: address)
+            await emulator.resume()
+            return "Running until $\(String(format: "%04X", address))"
+
+        case .registers(let modifications):
+            if let mods = modifications {
+                var regs = await emulator.getRegisters()
+                for (regName, value) in mods {
+                    switch regName.uppercased() {
+                    case "A": regs.a = UInt8(value & 0xFF)
+                    case "X": regs.x = UInt8(value & 0xFF)
+                    case "Y": regs.y = UInt8(value & 0xFF)
+                    case "S": regs.s = UInt8(value & 0xFF)
+                    case "P": regs.p = UInt8(value & 0xFF)
+                    case "PC": regs.pc = value
+                    default: break
+                    }
+                }
+                await emulator.setRegisters(regs)
+            }
+            let regs = await emulator.getRegisters()
+            return formatRegisters(regs)
+
+        case .memoryDump(let address, let length):
+            let bytes = await emulator.readMemoryBlock(at: address, count: length)
+            return formatMemoryDump(address: address, bytes: bytes)
+
+        case .memoryWrite(let address, let bytes):
+            await emulator.writeMemoryBlock(at: address, bytes: bytes)
+            return "Wrote \(bytes.count) bytes at $\(String(format: "%04X", address))"
+
+        case .memoryFill(let start, let end, let value):
+            let count = Int(end) - Int(start) + 1
+            let bytes = [UInt8](repeating: value, count: count)
+            await emulator.writeMemoryBlock(at: start, bytes: bytes)
+            return "Filled \(count) bytes ($\(String(format: "%04X", start))-$\(String(format: "%04X", end))) with $\(String(format: "%02X", value))"
+
+        case .disassemble(let address, let lines):
+            // Use MonitorController for disassembly
+            let monitor = MonitorController(emulator: emulator)
+            return await monitor.disassemble(at: address, lines: lines)
+
+        case .assemble(let address):
+            // Enter interactive assembly mode
+            // Note: Full interactive mode requires stateful handling in the CLI
+            // For now, return instructions on how to use it
+            return """
+            Assembly mode at $\(String(format: "%04X", address))
+            Enter instructions one per line. Empty line exits.
+            (Full interactive mode requires CLI integration)
+            """
+
+        case .breakpointSet(let address):
+            if await emulator.setBreakpoint(at: address) {
+                return "Breakpoint set at $\(String(format: "%04X", address))"
+            } else {
+                return "Breakpoint already exists at $\(String(format: "%04X", address))"
+            }
+
+        case .breakpointList:
+            let bps = await emulator.getBreakpoints()
+            if bps.isEmpty {
+                return "No breakpoints set"
+            }
+            return "Breakpoints:\n" + bps.map { "  $\(String(format: "%04X", $0))" }.joined(separator: "\n")
+
+        case .breakpointClear(let address):
+            if await emulator.clearBreakpoint(at: address) {
+                return "Breakpoint cleared at $\(String(format: "%04X", address))"
+            } else {
+                return "No breakpoint at $\(String(format: "%04X", address))"
+            }
+
+        case .breakpointClearAll:
+            await emulator.clearAllBreakpoints()
+            return "All breakpoints cleared"
+
+        // =====================================================================
+        // BASIC Commands
+        // =====================================================================
+
+        case .basicLine(let number, let content):
+            // Tokenize and inject the line into emulator memory
+            let input = "\(number) \(content)"
+            let result = await basicHandler.enterLine(input)
+            return result.message
+
+        case .basicDelete(let start, let end):
+            // Delete line(s) by entering just the line number
+            if let endLine = end {
+                // Delete range of lines
+                var deleted = 0
+                for lineNum in start...endLine {
+                    let result = await basicHandler.enterLine("\(lineNum)")
+                    if result.success { deleted += 1 }
+                }
+                return "Deleted \(deleted) lines (\(start)-\(endLine))"
+            } else {
+                let result = await basicHandler.enterLine("\(start)")
+                return result.message
+            }
+
+        case .basicRenumber(let start, let step):
+            // Renumbering requires reading all lines and rewriting them
+            // This is complex and deferred for now
+            return "Renumber start=\(start ?? 10) step=\(step ?? 10) [not yet implemented]"
+
+        case .basicRun:
+            let result = await basicHandler.runProgram()
+            return result.message
+
+        case .basicStop:
+            await emulator.pause()
+            return "STOP"
+
+        case .basicContinue:
+            let result = await basicHandler.continueProgram()
+            return result.message
+
+        case .basicNew:
+            let result = await basicHandler.newProgram()
+            return result.message
+
+        case .basicList(let start, let end):
+            // Use the detokenizer to list the program
+            let range: (start: Int?, end: Int?)? = (start != nil || end != nil)
+                ? (start: start, end: end)
+                : nil
+            let listing = await basicHandler.listProgram(range: range)
+
+            if listing.isEmpty {
+                return "No program in memory"
+            }
+            return listing
+
+        case .basicVars(let name):
+            // List variables from the Variable Name Table
+            let variables = await basicHandler.listVariables()
+
+            if variables.isEmpty {
+                return "No variables defined"
+            }
+
+            // If a specific name was requested, filter for it
+            if let searchName = name {
+                let matching = variables.filter {
+                    $0.name.uppercased() == searchName.uppercased() ||
+                    $0.fullName.uppercased() == searchName.uppercased()
+                }
+                if matching.isEmpty {
+                    return "Variable '\(searchName)' not found"
+                }
+                return formatVariableList(matching)
+            }
+
+            // Format all variables by type
+            return formatVariableList(variables)
+
+        case .basicSaveATR(let filename):
+            return "SAVE \"\(filename)\" [requires ATR filesystem - Phase 12]"
+
+        case .basicLoadATR(let filename):
+            return "LOAD \"\(filename)\" [requires ATR filesystem - Phase 12]"
+
+        case .basicImport(let path):
+            return await executeBasicImport(path: path)
+
+        case .basicExport(let path):
+            return await executeBasicExport(path: path)
+
+        // =====================================================================
+        // DOS Commands
+        // =====================================================================
+
+        case .dosMountDisk(let drive, let path):
+            return await executeDOSMount(drive: drive, path: path)
+
+        case .dosUnmount(let drive):
+            return await executeDOSUnmount(drive: drive)
+
+        case .dosDrives:
+            return await executeDOSDrives()
+
+        case .dosChangeDrive(let drive):
+            return await executeDOSChangeDrive(drive: drive)
+
+        case .dosDirectory(let pattern):
+            return await executeDOSDirectory(pattern: pattern)
+
+        case .dosFileInfo(let filename):
+            return await executeDOSFileInfo(filename: filename)
+
+        case .dosType(let filename):
+            return await executeDOSType(filename: filename)
+
+        case .dosDump(let filename):
+            return await executeDOSDump(filename: filename)
+
+        case .dosCopy(let source, let dest):
+            return await executeDOSCopy(source: source, dest: dest)
+
+        case .dosRename(let oldName, let newName):
+            return await executeDOSRename(oldName: oldName, newName: newName)
+
+        case .dosDelete(let filename):
+            return await executeDOSDelete(filename: filename)
+
+        case .dosLock(let filename):
+            return await executeDOSLock(filename: filename)
+
+        case .dosUnlock(let filename):
+            return await executeDOSUnlock(filename: filename)
+
+        case .dosExport(let filename, let path):
+            return await executeDOSExport(filename: filename, path: path)
+
+        case .dosImport(let path, let filename):
+            return await executeDOSImport(path: path, filename: filename)
+
+        case .dosNewDisk(let path, let type):
+            return await executeDOSNewDisk(path: path, type: type)
+
+        case .dosFormat:
+            return await executeDOSFormat()
+        }
+    }
+
+    // =========================================================================
+    // MARK: - DOS Command Implementations
+    // =========================================================================
+
+    /// Mounts an ATR disk image.
+    private func executeDOSMount(drive: Int, path: String) async -> String {
+        do {
+            let info = try await diskManager.mount(drive: drive, path: path)
+            let typeStr = info.diskType.displayName
+            return "Mounted D\(drive): \(info.filename) (\(typeStr), \(info.fileCount) files, \(info.freeSectors) free)"
+        } catch {
+            return formatDOSError(error)
+        }
+    }
+
+    /// Unmounts a disk.
+    private func executeDOSUnmount(drive: Int) async -> String {
+        do {
+            try await diskManager.unmount(drive: drive)
+            return "Unmounted D\(drive):"
+        } catch {
+            return formatDOSError(error)
+        }
+    }
+
+    /// Lists all drives.
+    private func executeDOSDrives() async -> String {
+        let drives = await diskManager.listDrives()
+        return drives.map { $0.displayString }.joined(separator: "\n")
+    }
+
+    /// Changes the current drive.
+    private func executeDOSChangeDrive(drive: Int) async -> String {
+        do {
+            try await diskManager.changeDrive(to: drive)
+            return "Changed to D\(drive):"
+        } catch {
+            return formatDOSError(error)
+        }
+    }
+
+    /// Lists directory contents.
+    private func executeDOSDirectory(pattern: String?) async -> String {
+        do {
+            let entries = try await diskManager.listDirectory(pattern: pattern)
+
+            if entries.isEmpty {
+                return "No files found"
+            }
+
+            // Format directory listing
+            var output = ""
+            var totalSectors = 0
+
+            for entry in entries {
+                let name = entry.trimmedFilename
+                let ext = entry.trimmedExtension
+                let lockedStr = entry.isLocked ? "*" : " "
+                output += String(format: "%@ %-8s %-3s %4d\n", lockedStr, name, ext, entry.sectorCount)
+                totalSectors += Int(entry.sectorCount)
+            }
+
+            // Get disk stats for free sectors
+            let currentDrive = await diskManager.currentDrive
+            if let info = try? await diskManager.getInfo(drive: currentDrive) {
+                output += "\(entries.count) files, \(totalSectors) sectors used, \(info.freeSectors) free"
+            } else {
+                output += "\(entries.count) files, \(totalSectors) sectors used"
+            }
+
+            return output
+        } catch {
+            return formatDOSError(error)
+        }
+    }
+
+    /// Shows file information.
+    private func executeDOSFileInfo(filename: String) async -> String {
+        do {
+            let info = try await diskManager.getFileInfo(name: filename)
+            return """
+              Filename: \(info.fullName)
+              Size: \(info.sectorCount) sectors (\(info.fileSize) bytes)
+              Start sector: \(info.startSector)
+              Flags: \(info.isLocked ? "Locked" : "Normal")
+            """
+        } catch {
+            return formatDOSError(error)
+        }
+    }
+
+    /// Displays a text file.
+    private func executeDOSType(filename: String) async -> String {
+        do {
+            let data = try await diskManager.readFile(name: filename)
+
+            // Convert to string, handling ATASCII to ASCII conversion
+            // ATASCII uses $9B for end of line (EOL)
+            var text = ""
+            for byte in data {
+                if byte == 0x9B {
+                    text += "\n"
+                } else if byte >= 0x20 && byte < 0x7F {
+                    text += String(Character(UnicodeScalar(byte)))
+                } else if byte == 0x00 {
+                    // Null byte - often padding, skip
+                    continue
+                } else {
+                    // Other control characters - show as placeholder
+                    text += "."
+                }
+            }
+
+            return text.trimmingCharacters(in: .whitespacesAndNewlines)
+        } catch {
+            return formatDOSError(error)
+        }
+    }
+
+    /// Hex dumps a file.
+    private func executeDOSDump(filename: String) async -> String {
+        do {
+            let data = try await diskManager.readFile(name: filename)
+            return formatHexDump(data: Array(data), baseAddress: 0)
+        } catch {
+            return formatDOSError(error)
+        }
+    }
+
+    /// Copies a file (placeholder - cross-drive copy not yet implemented).
+    private func executeDOSCopy(source: String, dest: String) async -> String {
+        do {
+            // Parse source and destination for drive prefixes (e.g., "D2:FILE.COM")
+            let (sourceDrive, sourceName) = parseDriveSpec(source)
+            let (destDrive, destName) = parseDriveSpec(dest)
+
+            let currentDrive = await diskManager.currentDrive
+            let srcDriveNum = sourceDrive ?? currentDrive
+            let dstDriveNum = destDrive ?? currentDrive
+            let dstFileName = destName.isEmpty ? sourceName : destName
+
+            let sectors = try await diskManager.copyFile(
+                from: srcDriveNum,
+                name: sourceName,
+                to: dstDriveNum,
+                as: dstFileName
+            )
+
+            if srcDriveNum == dstDriveNum {
+                return "Copied \(sourceName) to \(dstFileName) (\(sectors) sectors)"
+            } else {
+                return "Copied D\(srcDriveNum):\(sourceName) to D\(dstDriveNum):\(dstFileName) (\(sectors) sectors)"
+            }
+        } catch {
+            return formatDOSError(error)
+        }
+    }
+
+    /// Parses a drive specification like "D2:FILE.COM" into (driveNumber, filename).
+    /// Returns (nil, original) if no drive prefix found.
+    private func parseDriveSpec(_ spec: String) -> (Int?, String) {
+        let upper = spec.uppercased()
+        if upper.hasPrefix("D") && upper.count >= 3 && upper[upper.index(upper.startIndex, offsetBy: 2)] == ":" {
+            if let driveNum = Int(String(upper[upper.index(upper.startIndex, offsetBy: 1)])) {
+                let filename = String(spec.dropFirst(3))
+                return (driveNum, filename)
+            }
+        }
+        return (nil, spec)
+    }
+
+    /// Renames a file.
+    private func executeDOSRename(oldName: String, newName: String) async -> String {
+        do {
+            try await diskManager.renameFile(from: oldName, to: newName)
+            return "Renamed \(oldName) to \(newName)"
+        } catch {
+            return formatDOSError(error)
+        }
+    }
+
+    /// Deletes a file.
+    private func executeDOSDelete(filename: String) async -> String {
+        do {
+            try await diskManager.deleteFile(name: filename)
+            return "Deleted \(filename)"
+        } catch {
+            return formatDOSError(error)
+        }
+    }
+
+    /// Locks a file (makes read-only).
+    private func executeDOSLock(filename: String) async -> String {
+        do {
+            try await diskManager.lockFile(name: filename)
+            return "Locked \(filename)"
+        } catch {
+            return formatDOSError(error)
+        }
+    }
+
+    /// Unlocks a file.
+    private func executeDOSUnlock(filename: String) async -> String {
+        do {
+            try await diskManager.unlockFile(name: filename)
+            return "Unlocked \(filename)"
+        } catch {
+            return formatDOSError(error)
+        }
+    }
+
+    /// Exports a file to the host filesystem.
+    private func executeDOSExport(filename: String, path: String) async -> String {
+        do {
+            let bytes = try await diskManager.exportFile(name: filename, to: path)
+            let expandedPath = NSString(string: path).expandingTildeInPath
+            return "Exported \(filename) to \(expandedPath) (\(bytes) bytes)"
+        } catch {
+            return formatDOSError(error)
+        }
+    }
+
+    /// Imports a file from the host filesystem.
+    private func executeDOSImport(path: String, filename: String) async -> String {
+        do {
+            let sectors = try await diskManager.importFile(from: path, name: filename)
+            let expandedPath = NSString(string: path).expandingTildeInPath
+            return "Imported \(expandedPath) as \(filename) (\(sectors) sectors)"
+        } catch {
+            return formatDOSError(error)
+        }
+    }
+
+    /// Creates a new disk image.
+    private func executeDOSNewDisk(path: String, type: String?) async -> String {
+        do {
+            let diskType = type.flatMap { DiskType.fromString($0) } ?? .singleDensity
+            let url = try await diskManager.createDisk(at: path, type: diskType)
+            return "Created new disk image: \(url.path) (\(diskType.displayName))"
+        } catch {
+            return formatDOSError(error)
+        }
+    }
+
+    /// Formats the current disk (placeholder - requires confirmation).
+    private func executeDOSFormat() async -> String {
+        // Formatting is destructive - in a real implementation we'd ask for confirmation
+        // For now, just execute it
+        do {
+            let currentDrive = await diskManager.currentDrive
+            try await diskManager.formatDisk(drive: currentDrive)
+            return "Formatted D\(currentDrive):"
+        } catch {
+            return formatDOSError(error)
+        }
+    }
+
+    /// Formats a DOS-related error for display.
+    private func formatDOSError(_ error: Error) -> String {
+        if let diskError = error as? DiskManagerError {
+            return "Error: \(diskError.errorDescription ?? String(describing: diskError))"
+        } else if let atrError = error as? ATRError {
+            return "Error: \(atrError.errorDescription ?? String(describing: atrError))"
+        } else {
+            return "Error: \(error.localizedDescription)"
+        }
+    }
+
+    /// Formats data as a hex dump.
+    private func formatHexDump(data: [UInt8], baseAddress: Int) -> String {
+        var output = ""
+
+        for chunk in stride(from: 0, to: data.count, by: 16) {
+            let end = min(chunk + 16, data.count)
+            let lineBytes = Array(data[chunk..<end])
+            let addr = baseAddress + chunk
+
+            // Address
+            output += String(format: "%04X: ", addr)
+
+            // Hex bytes
+            for (i, byte) in lineBytes.enumerated() {
+                output += String(format: "%02X ", byte)
+                if i == 7 { output += " " }  // Extra space in middle
+            }
+
+            // Padding for incomplete line
+            if lineBytes.count < 16 {
+                let missing = 16 - lineBytes.count
+                output += String(repeating: "   ", count: missing)
+                if lineBytes.count < 8 { output += " " }
+            }
+
+            // ASCII representation
+            output += " |"
+            for byte in lineBytes {
+                let char = (byte >= 0x20 && byte < 0x7F) ? Character(UnicodeScalar(byte)) : "."
+                output.append(char)
+            }
+            output += "|\n"
+        }
+
+        return output.trimmingCharacters(in: .newlines)
+    }
+
+    // =========================================================================
+    // MARK: - Output Formatting
+    // =========================================================================
+
+    /// Formats an error for display.
+    private func formatError(_ error: AtticError) -> String {
+        var output = "Error: \(error.errorDescription ?? "Unknown error")"
+        if case .invalidCommand(_, let suggestion) = error, let suggestion = suggestion {
+            output += "\n  Suggestion: \(suggestion)"
+        }
+        return output
+    }
+
+    /// Formats help text.
+    private func formatHelp(topic: String?) -> String {
+        if let topic = topic {
+            // TODO: Implement topic-specific help
+            return "Help for '\(topic)' not available"
+        }
+
+        // General help plus mode-specific help
+        return """
+        Global Commands:
+          .monitor          Switch to monitor mode
+          .basic [turbo]    Switch to BASIC mode
+          .dos              Switch to DOS mode
+          .help [topic]     Show help
+          .status           Show emulator status
+          .reset            Cold reset
+          .warmstart        Warm reset
+          .screenshot [p]   Take screenshot
+          .state save <p>   Save state
+          .state load <p>   Load state
+          .quit             Exit CLI
+          .shutdown         Exit and close GUI
+
+        \(mode.helpText)
+        """
+    }
+
+    // =========================================================================
+    // MARK: - State Metadata Collection
+    // =========================================================================
+
+    /// Collects metadata about the current session for state saving.
+    ///
+    /// This gathers information about mounted disks and REPL mode to include
+    /// in the state file. Disk paths are stored for reference only - they are
+    /// not automatically remounted on load.
+    private func collectStateMetadata() async -> StateMetadata {
+        // Collect mounted disk information
+        let driveStatuses = await diskManager.listDrives()
+        let mountedDisks = driveStatuses.compactMap { status -> MountedDiskReference? in
+            guard status.mounted, let path = status.path else { return nil }
+            return MountedDiskReference(
+                drive: status.drive,
+                path: path,
+                diskType: status.diskType?.shortName ?? "Unknown",
+                readOnly: status.isReadOnly
+            )
+        }
+
+        return StateMetadata.create(
+            replMode: mode,
+            mountedDisks: mountedDisks
+        )
+    }
+
+    // =========================================================================
+    // MARK: - Status Formatting
+    // =========================================================================
+
+    /// Formats emulator status.
+    private func formatStatus() async -> String {
+        let state = await emulator.state
+        let regs = await emulator.getRegisters()
+        let breakpoints = await emulator.getBreakpoints()
+
+        var output = """
+        Emulator Status
+          State: \(state)
+          PC: $\(String(format: "%04X", regs.pc))
+        """
+
+        // TODO: Add disk mount status
+
+        if breakpoints.isEmpty {
+            output += "\n  Breakpoints: (none)"
+        } else {
+            output += "\n  Breakpoints: " + breakpoints.map { "$\(String(format: "%04X", $0))" }.joined(separator: ", ")
+        }
+
+        output += "\n  Mode: \(mode.description)"
+
+        return output
+    }
+
+    /// Formats CPU registers for display.
+    private func formatRegisters(_ regs: CPURegisters) -> String {
+        """
+          \(regs.formatted)
+          Flags: \(regs.flagsFormatted)
+        """
+    }
+
+    /// Formats a memory dump.
+    private func formatMemoryDump(address: UInt16, bytes: [UInt8]) -> String {
+        var output = ""
+        var addr = address
+
+        for chunk in stride(from: 0, to: bytes.count, by: 16) {
+            let end = min(chunk + 16, bytes.count)
+            let lineBytes = Array(bytes[chunk..<end])
+
+            // Address
+            output += String(format: "%04X: ", addr)
+
+            // Hex bytes
+            for (i, byte) in lineBytes.enumerated() {
+                output += String(format: "%02X ", byte)
+                if i == 7 { output += " " }  // Extra space in middle
+            }
+
+            // Padding for incomplete line
+            if lineBytes.count < 16 {
+                let missing = 16 - lineBytes.count
+                output += String(repeating: "   ", count: missing)
+                if lineBytes.count < 8 { output += " " }
+            }
+
+            // ASCII representation
+            output += " |"
+            for byte in lineBytes {
+                let char = (byte >= 0x20 && byte < 0x7F) ? Character(UnicodeScalar(byte)) : "."
+                output.append(char)
+            }
+            output += "|\n"
+
+            addr = addr &+ 16
+        }
+
+        return output.trimmingCharacters(in: .newlines)
+    }
+
+    // =========================================================================
+    // MARK: - BASIC Import/Export
+    // =========================================================================
+
+    /// Imports a .BAS text file into the BASIC program.
+    ///
+    /// Reads the file line by line and enters each numbered line into the program.
+    /// Lines without numbers are ignored. The program is cleared first with NEW.
+    ///
+    /// - Parameter path: Path to the .BAS file on the host filesystem.
+    /// - Returns: Status message describing the result.
+    private func executeBasicImport(path: String) async -> String {
+        // Expand tilde in path
+        let expandedPath = NSString(string: path).expandingTildeInPath
+        let url = URL(fileURLWithPath: expandedPath)
+
+        // Read the file
+        let contents: String
+        do {
+            contents = try String(contentsOf: url, encoding: .utf8)
+        } catch {
+            return "Error reading file: \(error.localizedDescription)"
+        }
+
+        // Clear the current program
+        _ = await basicHandler.newProgram()
+
+        // Parse and enter each line
+        let lines = contents.components(separatedBy: .newlines)
+        var enteredCount = 0
+        var errorCount = 0
+        var errors: [String] = []
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            // Skip empty lines
+            guard !trimmed.isEmpty else { continue }
+
+            // Check if line starts with a number (BASIC line number)
+            guard let firstChar = trimmed.first, firstChar.isNumber else {
+                continue  // Skip lines without line numbers
+            }
+
+            // Enter the line
+            let result = await basicHandler.enterLine(trimmed)
+            if result.success {
+                enteredCount += 1
+            } else {
+                errorCount += 1
+                if errors.count < 5 {  // Limit error messages
+                    errors.append(result.message)
+                }
+            }
+        }
+
+        // Build result message
+        var message = "Imported \(enteredCount) lines from \(url.lastPathComponent)"
+        if errorCount > 0 {
+            message += " (\(errorCount) errors)"
+            if !errors.isEmpty {
+                message += "\n" + errors.joined(separator: "\n")
+            }
+        }
+
+        return message
+    }
+
+    /// Exports the current BASIC program to a .BAS text file.
+    ///
+    /// Uses the detokenizer to convert the tokenized program to text,
+    /// then writes it to the specified file.
+    ///
+    /// - Parameter path: Path for the output file on the host filesystem.
+    /// - Returns: Status message describing the result.
+    private func executeBasicExport(path: String) async -> String {
+        // Get the program listing
+        let listing = await basicHandler.listProgram(range: nil)
+
+        if listing.isEmpty {
+            return "No program to export"
+        }
+
+        // Expand tilde in path
+        let expandedPath = NSString(string: path).expandingTildeInPath
+        let url = URL(fileURLWithPath: expandedPath)
+
+        // Write the file
+        do {
+            try listing.write(to: url, atomically: true, encoding: .utf8)
+            let info = await basicHandler.getProgramInfo()
+            return "Exported \(info.lines) lines to \(url.path)"
+        } catch {
+            return "Error writing file: \(error.localizedDescription)"
+        }
+    }
+
+    /// Formats a list of variables for display.
+    ///
+    /// Groups variables by type and displays them in a formatted list.
+    ///
+    /// - Parameter variables: The variables to format.
+    /// - Returns: Formatted string showing variable names by type.
+    private func formatVariableList(_ variables: [BASICVariableName]) -> String {
+        // Group variables by type
+        var numeric: [String] = []
+        var strings: [String] = []
+        var numericArrays: [String] = []
+        var stringArrays: [String] = []
+
+        for variable in variables {
+            switch variable.type {
+            case .numeric:
+                numeric.append(variable.name)
+            case .string:
+                strings.append(variable.fullName)
+            case .numericArray:
+                numericArrays.append(variable.fullName)
+            case .stringArray:
+                stringArrays.append(variable.fullName)
+            }
+        }
+
+        var output: [String] = []
+
+        if !numeric.isEmpty {
+            output.append("Numeric: \(numeric.joined(separator: ", "))")
+        }
+        if !strings.isEmpty {
+            output.append("String: \(strings.joined(separator: ", "))")
+        }
+        if !numericArrays.isEmpty {
+            output.append("Numeric Arrays: \(numericArrays.joined(separator: ", "))")
+        }
+        if !stringArrays.isEmpty {
+            output.append("String Arrays: \(stringArrays.joined(separator: ", "))")
+        }
+
+        if output.isEmpty {
+            return "No variables defined"
+        }
+
+        return "\(variables.count) variables:\n" + output.joined(separator: "\n")
+    }
+
+    // =========================================================================
+    // MARK: - Session Control
+    // =========================================================================
+
+    /// Returns true if the REPL should continue running.
+    public var shouldContinue: Bool {
+        isRunning
+    }
+
+    /// Stops the REPL loop.
+    public func stop() {
+        isRunning = false
+    }
+}

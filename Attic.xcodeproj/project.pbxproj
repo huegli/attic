@@ -1,0 +1,1005 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A1000001001 /* AtticCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000001001 /* AtticCore.swift */; };
+		A1000001002 /* AudioEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000001002 /* AudioEngine.swift */; };
+		A1000001003 /* CPURegisters.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000001003 /* CPURegisters.swift */; };
+		A1000001004 /* EmulatorEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000001004 /* EmulatorEngine.swift */; };
+		A1000001005 /* LibAtari800Wrapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000001005 /* LibAtari800Wrapper.swift */; };
+		A1000001006 /* MemoryBus.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000001006 /* MemoryBus.swift */; };
+		A1000001007 /* KeyboardInputHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000001007 /* KeyboardInputHandler.swift */; };
+		A1000001008 /* CommandParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000001008 /* CommandParser.swift */; };
+		A1000001009 /* REPLEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000001009 /* REPLEngine.swift */; };
+		A1000001010 /* REPLMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000001010 /* REPLMode.swift */; };
+		A1000001011 /* CLIProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000001011 /* CLIProtocol.swift */; };
+		A1000001012 /* CLISocketClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000001012 /* CLISocketClient.swift */; };
+		A1000001013 /* CLISocketServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000001013 /* CLISocketServer.swift */; };
+		A2000001001 /* AESPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000001001 /* AESPClient.swift */; };
+		A2000001002 /* AESPMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000001002 /* AESPMessage.swift */; };
+		A2000001003 /* AESPMessageType.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000001003 /* AESPMessageType.swift */; };
+		A2000001004 /* AESPServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000001004 /* AESPServer.swift */; };
+		A3000001001 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3000001001 /* main.swift */; };
+		A3000001002 /* AtticCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = T1000000001 /* AtticCore.framework */; };
+		A4000001001 /* AtticApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4000001001 /* AtticApp.swift */; };
+		A4000001002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4000001002 /* ContentView.swift */; };
+		A4000001003 /* KeyEventView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4000001003 /* KeyEventView.swift */; };
+		A4000001004 /* EmulatorMetalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4000001004 /* EmulatorMetalView.swift */; };
+		A4000001005 /* MetalRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4000001005 /* MetalRenderer.swift */; };
+		A4000001006 /* AtticCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = T1000000001 /* AtticCore.framework */; };
+		A4000001007 /* AtticCore.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = T1000000001 /* AtticCore.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		A5000001001 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5000001001 /* main.swift */; };
+		A5000001002 /* AtticCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = T1000000001 /* AtticCore.framework */; };
+		A5000001003 /* AtticProtocol.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = T2000000001 /* AtticProtocol.framework */; };
+		A6000001001 /* libatari800.a in Frameworks */ = {isa = PBXBuildFile; fileRef = B6000001001 /* libatari800.a */; };
+		A6000001002 /* libz.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = B6000001002 /* libz.tbd */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		D3000000002 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = P0000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = N1000000001;
+			remoteInfo = AtticCore;
+		};
+		D4000000002 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = P0000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = N1000000001;
+			remoteInfo = AtticCore;
+		};
+		D5000000003 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = P0000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = N1000000001;
+			remoteInfo = AtticCore;
+		};
+		D5000000004 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = P0000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = N2000000001;
+			remoteInfo = AtticProtocol;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		C3000000001 /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C4000000001 /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				A4000001007 /* AtticCore.framework in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C5000000001 /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		B0000000001 /* Package.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Package.swift; sourceTree = "<group>"; };
+		B1000001001 /* AtticCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AtticCore.swift; sourceTree = "<group>"; };
+		B1000001002 /* AudioEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioEngine.swift; sourceTree = "<group>"; };
+		B1000001003 /* CPURegisters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CPURegisters.swift; sourceTree = "<group>"; };
+		B1000001004 /* EmulatorEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmulatorEngine.swift; sourceTree = "<group>"; };
+		B1000001005 /* LibAtari800Wrapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibAtari800Wrapper.swift; sourceTree = "<group>"; };
+		B1000001006 /* MemoryBus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryBus.swift; sourceTree = "<group>"; };
+		B1000001007 /* KeyboardInputHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardInputHandler.swift; sourceTree = "<group>"; };
+		B1000001008 /* CommandParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandParser.swift; sourceTree = "<group>"; };
+		B1000001009 /* REPLEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = REPLEngine.swift; sourceTree = "<group>"; };
+		B1000001010 /* REPLMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = REPLMode.swift; sourceTree = "<group>"; };
+		B1000001011 /* CLIProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLIProtocol.swift; sourceTree = "<group>"; };
+		B1000001012 /* CLISocketClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLISocketClient.swift; sourceTree = "<group>"; };
+		B1000001013 /* CLISocketServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLISocketServer.swift; sourceTree = "<group>"; };
+		B2000001001 /* AESPClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AESPClient.swift; sourceTree = "<group>"; };
+		B2000001002 /* AESPMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AESPMessage.swift; sourceTree = "<group>"; };
+		B2000001003 /* AESPMessageType.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AESPMessageType.swift; sourceTree = "<group>"; };
+		B2000001004 /* AESPServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AESPServer.swift; sourceTree = "<group>"; };
+		B3000001001 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
+		B4000001001 /* AtticApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AtticApp.swift; sourceTree = "<group>"; };
+		B4000001002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		B4000001003 /* KeyEventView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyEventView.swift; sourceTree = "<group>"; };
+		B4000001004 /* EmulatorMetalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmulatorMetalView.swift; sourceTree = "<group>"; };
+		B4000001005 /* MetalRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetalRenderer.swift; sourceTree = "<group>"; };
+		B5000001001 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
+		B6000001001 /* libatari800.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libatari800.a; path = Libraries/libatari800/lib/libatari800.a; sourceTree = "<group>"; };
+		B6000001002 /* libz.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libz.tbd; path = usr/lib/libz.tbd; sourceTree = SDKROOT; };
+		B6000001003 /* libatari800.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = libatari800.h; path = Libraries/libatari800/include/libatari800.h; sourceTree = "<group>"; };
+		B6000001004 /* module.modulemap */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.module-map"; name = module.modulemap; path = Libraries/libatari800/module.modulemap; sourceTree = "<group>"; };
+		T1000000001 /* AtticCore.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = AtticCore.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		T2000000001 /* AtticProtocol.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = AtticProtocol.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		T3000000001 /* attic */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = attic; sourceTree = BUILT_PRODUCTS_DIR; };
+		T4000000001 /* AtticGUI.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AtticGUI.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		T5000000001 /* AtticServer */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = AtticServer; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		F1000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A6000001001 /* libatari800.a in Frameworks */,
+				A6000001002 /* libz.tbd in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F2000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F3000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A3000001002 /* AtticCore.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F4000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A4000001006 /* AtticCore.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F5000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A5000001002 /* AtticCore.framework in Frameworks */,
+				A5000001003 /* AtticProtocol.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		G0000000001 = {
+			isa = PBXGroup;
+			children = (
+				B0000000001 /* Package.swift */,
+				G0000000002 /* Sources */,
+				G0000000003 /* Libraries */,
+				G0000000004 /* Resources */,
+				G0000000005 /* Products */,
+				G0000000006 /* Frameworks */,
+			);
+			sourceTree = "<group>";
+		};
+		G0000000002 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				G1000000001 /* AtticCore */,
+				G2000000001 /* AtticProtocol */,
+				G3000000001 /* AtticCLI */,
+				G4000000001 /* AtticGUI */,
+				G5000000001 /* AtticServer */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		G0000000003 /* Libraries */ = {
+			isa = PBXGroup;
+			children = (
+				G6000000001 /* libatari800 */,
+			);
+			path = Libraries;
+			sourceTree = "<group>";
+		};
+		G0000000004 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		G0000000005 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				T1000000001 /* AtticCore.framework */,
+				T2000000001 /* AtticProtocol.framework */,
+				T3000000001 /* attic */,
+				T4000000001 /* AtticGUI.app */,
+				T5000000001 /* AtticServer */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		G0000000006 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				B6000001002 /* libz.tbd */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		G1000000001 /* AtticCore */ = {
+			isa = PBXGroup;
+			children = (
+				B1000001001 /* AtticCore.swift */,
+				G1000000002 /* Audio */,
+				G1000000006 /* CLI */,
+				G1000000003 /* Emulator */,
+				G1000000004 /* Input */,
+				G1000000005 /* REPL */,
+			);
+			path = AtticCore;
+			sourceTree = "<group>";
+		};
+		G1000000002 /* Audio */ = {
+			isa = PBXGroup;
+			children = (
+				B1000001002 /* AudioEngine.swift */,
+			);
+			path = Audio;
+			sourceTree = "<group>";
+		};
+		G1000000003 /* Emulator */ = {
+			isa = PBXGroup;
+			children = (
+				B1000001003 /* CPURegisters.swift */,
+				B1000001004 /* EmulatorEngine.swift */,
+				B1000001005 /* LibAtari800Wrapper.swift */,
+				B1000001006 /* MemoryBus.swift */,
+			);
+			path = Emulator;
+			sourceTree = "<group>";
+		};
+		G1000000004 /* Input */ = {
+			isa = PBXGroup;
+			children = (
+				B1000001007 /* KeyboardInputHandler.swift */,
+			);
+			path = Input;
+			sourceTree = "<group>";
+		};
+		G1000000005 /* REPL */ = {
+			isa = PBXGroup;
+			children = (
+				B1000001008 /* CommandParser.swift */,
+				B1000001009 /* REPLEngine.swift */,
+				B1000001010 /* REPLMode.swift */,
+			);
+			path = REPL;
+			sourceTree = "<group>";
+		};
+		G1000000006 /* CLI */ = {
+			isa = PBXGroup;
+			children = (
+				B1000001011 /* CLIProtocol.swift */,
+				B1000001012 /* CLISocketClient.swift */,
+				B1000001013 /* CLISocketServer.swift */,
+			);
+			path = CLI;
+			sourceTree = "<group>";
+		};
+		G2000000001 /* AtticProtocol */ = {
+			isa = PBXGroup;
+			children = (
+				B2000001001 /* AESPClient.swift */,
+				B2000001002 /* AESPMessage.swift */,
+				B2000001003 /* AESPMessageType.swift */,
+				B2000001004 /* AESPServer.swift */,
+			);
+			path = AtticProtocol;
+			sourceTree = "<group>";
+		};
+		G3000000001 /* AtticCLI */ = {
+			isa = PBXGroup;
+			children = (
+				B3000001001 /* main.swift */,
+			);
+			path = AtticCLI;
+			sourceTree = "<group>";
+		};
+		G4000000001 /* AtticGUI */ = {
+			isa = PBXGroup;
+			children = (
+				B4000001001 /* AtticApp.swift */,
+				B4000001002 /* ContentView.swift */,
+				G4000000002 /* Input */,
+				G4000000003 /* Rendering */,
+			);
+			path = AtticGUI;
+			sourceTree = "<group>";
+		};
+		G4000000002 /* Input */ = {
+			isa = PBXGroup;
+			children = (
+				B4000001003 /* KeyEventView.swift */,
+			);
+			path = Input;
+			sourceTree = "<group>";
+		};
+		G4000000003 /* Rendering */ = {
+			isa = PBXGroup;
+			children = (
+				B4000001004 /* EmulatorMetalView.swift */,
+				B4000001005 /* MetalRenderer.swift */,
+			);
+			path = Rendering;
+			sourceTree = "<group>";
+		};
+		G5000000001 /* AtticServer */ = {
+			isa = PBXGroup;
+			children = (
+				B5000001001 /* main.swift */,
+			);
+			path = AtticServer;
+			sourceTree = "<group>";
+		};
+		G6000000001 /* libatari800 */ = {
+			isa = PBXGroup;
+			children = (
+				B6000001001 /* libatari800.a */,
+				B6000001003 /* libatari800.h */,
+				B6000001004 /* module.modulemap */,
+			);
+			name = libatari800;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		N1000000001 /* AtticCore */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = X1000000001 /* Build configuration list for PBXNativeTarget "AtticCore" */;
+			buildPhases = (
+				S1000000001 /* Sources */,
+				F1000000001 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = AtticCore;
+			productName = AtticCore;
+			productReference = T1000000001 /* AtticCore.framework */;
+			productType = "com.apple.product-type.framework";
+		};
+		N2000000001 /* AtticProtocol */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = X2000000001 /* Build configuration list for PBXNativeTarget "AtticProtocol" */;
+			buildPhases = (
+				S2000000001 /* Sources */,
+				F2000000001 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = AtticProtocol;
+			productName = AtticProtocol;
+			productReference = T2000000001 /* AtticProtocol.framework */;
+			productType = "com.apple.product-type.framework";
+		};
+		N3000000001 /* attic */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = X3000000001 /* Build configuration list for PBXNativeTarget "attic" */;
+			buildPhases = (
+				S3000000001 /* Sources */,
+				F3000000001 /* Frameworks */,
+				C3000000001 /* Embed Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D3000000001 /* PBXTargetDependency */,
+			);
+			name = attic;
+			productName = attic;
+			productReference = T3000000001 /* attic */;
+			productType = "com.apple.product-type.tool";
+		};
+		N4000000001 /* AtticGUI */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = X4000000001 /* Build configuration list for PBXNativeTarget "AtticGUI" */;
+			buildPhases = (
+				S4000000001 /* Sources */,
+				F4000000001 /* Frameworks */,
+				C4000000001 /* Embed Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D4000000001 /* PBXTargetDependency */,
+			);
+			name = AtticGUI;
+			productName = AtticGUI;
+			productReference = T4000000001 /* AtticGUI.app */;
+			productType = "com.apple.product-type.application";
+		};
+		N5000000001 /* AtticServer */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = X5000000001 /* Build configuration list for PBXNativeTarget "AtticServer" */;
+			buildPhases = (
+				S5000000001 /* Sources */,
+				F5000000001 /* Frameworks */,
+				C5000000001 /* Embed Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D5000000001 /* PBXTargetDependency */,
+				D5000000002 /* PBXTargetDependency */,
+			);
+			name = AtticServer;
+			productName = AtticServer;
+			productReference = T5000000001 /* AtticServer */;
+			productType = "com.apple.product-type.tool";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		P0000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 2620;
+				TargetAttributes = {
+					N1000000001 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+					N2000000001 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+					N3000000001 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+					N4000000001 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+					N5000000001 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+				};
+			};
+			buildConfigurationList = X0000000001 /* Build configuration list for PBXProject "Attic" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = G0000000001;
+			productRefGroup = G0000000005 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				N1000000001 /* AtticCore */,
+				N2000000001 /* AtticProtocol */,
+				N3000000001 /* attic */,
+				N4000000001 /* AtticGUI */,
+				N5000000001 /* AtticServer */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		S1000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A1000001001 /* AtticCore.swift in Sources */,
+				A1000001002 /* AudioEngine.swift in Sources */,
+				A1000001003 /* CPURegisters.swift in Sources */,
+				A1000001004 /* EmulatorEngine.swift in Sources */,
+				A1000001005 /* LibAtari800Wrapper.swift in Sources */,
+				A1000001006 /* MemoryBus.swift in Sources */,
+				A1000001007 /* KeyboardInputHandler.swift in Sources */,
+				A1000001008 /* CommandParser.swift in Sources */,
+				A1000001009 /* REPLEngine.swift in Sources */,
+				A1000001010 /* REPLMode.swift in Sources */,
+				A1000001011 /* CLIProtocol.swift in Sources */,
+				A1000001012 /* CLISocketClient.swift in Sources */,
+				A1000001013 /* CLISocketServer.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		S2000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A2000001001 /* AESPClient.swift in Sources */,
+				A2000001002 /* AESPMessage.swift in Sources */,
+				A2000001003 /* AESPMessageType.swift in Sources */,
+				A2000001004 /* AESPServer.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		S3000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A3000001001 /* main.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		S4000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A4000001001 /* AtticApp.swift in Sources */,
+				A4000001002 /* ContentView.swift in Sources */,
+				A4000001003 /* KeyEventView.swift in Sources */,
+				A4000001004 /* EmulatorMetalView.swift in Sources */,
+				A4000001005 /* MetalRenderer.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		S5000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A5000001001 /* main.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		D3000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = N1000000001 /* AtticCore */;
+			targetProxy = D3000000002 /* PBXContainerItemProxy */;
+		};
+		D4000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = N1000000001 /* AtticCore */;
+			targetProxy = D4000000002 /* PBXContainerItemProxy */;
+		};
+		D5000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = N1000000001 /* AtticCore */;
+			targetProxy = D5000000003 /* PBXContainerItemProxy */;
+		};
+		D5000000002 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = N2000000001 /* AtticProtocol */;
+			targetProxy = D5000000004 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		XC000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		XC000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		XC100000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEFINES_MODULE = YES;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				ENABLE_MODULE_VERIFIER = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = "$(PROJECT_DIR)/Libraries/libatari800/lib";
+				MARKETING_VERSION = 1.0;
+				MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS = "gnu17 gnu++20";
+				PRODUCT_BUNDLE_IDENTIFIER = com.example.AtticCore;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_INCLUDE_PATHS = "$(PROJECT_DIR)/Libraries/libatari800";
+			};
+			name = Debug;
+		};
+		XC100000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEFINES_MODULE = YES;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				ENABLE_MODULE_VERIFIER = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = "$(PROJECT_DIR)/Libraries/libatari800/lib";
+				MARKETING_VERSION = 1.0;
+				MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS = "gnu17 gnu++20";
+				PRODUCT_BUNDLE_IDENTIFIER = com.example.AtticCore;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_INCLUDE_PATHS = "$(PROJECT_DIR)/Libraries/libatari800";
+			};
+			name = Release;
+		};
+		XC200000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEFINES_MODULE = YES;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				ENABLE_MODULE_VERIFIER = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS = "gnu17 gnu++20";
+				PRODUCT_BUNDLE_IDENTIFIER = com.example.AtticProtocol;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Debug;
+		};
+		XC200000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEFINES_MODULE = YES;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				ENABLE_MODULE_VERIFIER = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS = "gnu17 gnu++20";
+				PRODUCT_BUNDLE_IDENTIFIER = com.example.AtticProtocol;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Release;
+		};
+		XC300000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEAD_CODE_STRIPPING = YES;
+				LIBRARY_SEARCH_PATHS = "$(PROJECT_DIR)/Libraries/libatari800/lib";
+				OTHER_SWIFT_FLAGS = "-parse-as-library";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_INCLUDE_PATHS = "$(PROJECT_DIR)/Libraries/libatari800";
+			};
+			name = Debug;
+		};
+		XC300000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEAD_CODE_STRIPPING = YES;
+				LIBRARY_SEARCH_PATHS = "$(PROJECT_DIR)/Libraries/libatari800/lib";
+				OTHER_SWIFT_FLAGS = "-parse-as-library";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_INCLUDE_PATHS = "$(PROJECT_DIR)/Libraries/libatari800";
+			};
+			name = Release;
+		};
+		XC400000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSMainStoryboardFile = "";
+				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = "$(PROJECT_DIR)/Libraries/libatari800/lib";
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.example.AtticGUI;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_INCLUDE_PATHS = "$(PROJECT_DIR)/Libraries/libatari800";
+			};
+			name = Debug;
+		};
+		XC400000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSMainStoryboardFile = "";
+				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = "$(PROJECT_DIR)/Libraries/libatari800/lib";
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.example.AtticGUI;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_INCLUDE_PATHS = "$(PROJECT_DIR)/Libraries/libatari800";
+			};
+			name = Release;
+		};
+		XC500000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEAD_CODE_STRIPPING = YES;
+				LIBRARY_SEARCH_PATHS = "$(PROJECT_DIR)/Libraries/libatari800/lib";
+				OTHER_SWIFT_FLAGS = "-parse-as-library";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_INCLUDE_PATHS = "$(PROJECT_DIR)/Libraries/libatari800";
+			};
+			name = Debug;
+		};
+		XC500000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEAD_CODE_STRIPPING = YES;
+				LIBRARY_SEARCH_PATHS = "$(PROJECT_DIR)/Libraries/libatari800/lib";
+				OTHER_SWIFT_FLAGS = "-parse-as-library";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_INCLUDE_PATHS = "$(PROJECT_DIR)/Libraries/libatari800";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		X0000000001 /* Build configuration list for PBXProject "Attic" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				XC000000001 /* Debug */,
+				XC000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		X1000000001 /* Build configuration list for PBXNativeTarget "AtticCore" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				XC100000001 /* Debug */,
+				XC100000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		X2000000001 /* Build configuration list for PBXNativeTarget "AtticProtocol" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				XC200000001 /* Debug */,
+				XC200000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		X3000000001 /* Build configuration list for PBXNativeTarget "attic" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				XC300000001 /* Debug */,
+				XC300000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		X4000000001 /* Build configuration list for PBXNativeTarget "AtticGUI" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				XC400000001 /* Debug */,
+				XC400000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		X5000000001 /* Build configuration list for PBXNativeTarget "AtticServer" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				XC500000001 /* Debug */,
+				XC500000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = P0000000001 /* Project object */;
+}
