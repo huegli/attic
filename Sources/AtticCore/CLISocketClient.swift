@@ -228,12 +228,16 @@ public actor CLISocketClient {
             await self?.eventReaderLoop()
         }
 
-        // Yield to allow the event reader task to start
-        await Task.yield()
+        // Give the event reader task time to start and enter its read loop
+        // Multiple yields help ensure the detached task has a chance to begin
+        for _ in 0..<3 {
+            await Task.yield()
+        }
 
-        // Verify connection with ping
+        // Verify connection with ping using a short timeout (pingTimeout)
+        // This prevents hanging for 30 seconds if the server is unresponsive
         do {
-            let response = try await send(.ping)
+            let response = try await send(.ping, timeout: CLIProtocolConstants.pingTimeout)
             guard case .ok(let data) = response, data == "pong" else {
                 await disconnect()
                 throw CLIProtocolError.connectionFailed("Server ping failed")
@@ -282,6 +286,17 @@ public actor CLISocketClient {
     /// - Returns: The server's response.
     /// - Throws: CLIProtocolError if sending fails or times out.
     public func send(_ command: CLICommand) async throws -> CLIResponse {
+        try await send(command, timeout: CLIProtocolConstants.commandTimeout)
+    }
+
+    /// Sends a command to the server with a custom timeout.
+    ///
+    /// - Parameters:
+    ///   - command: The command to send.
+    ///   - timeout: The timeout in seconds.
+    /// - Returns: The server's response.
+    /// - Throws: CLIProtocolError if sending fails or times out.
+    public func send(_ command: CLICommand, timeout: TimeInterval) async throws -> CLIResponse {
         guard isConnected else {
             throw CLIProtocolError.connectionFailed("Not connected")
         }
@@ -294,6 +309,9 @@ public actor CLISocketClient {
             throw CLIProtocolError.connectionFailed("Failed to encode command")
         }
 
+        // Capture socket for use in detached task
+        let socketFd = self.socket
+
         // Wait for response with timeout
         // IMPORTANT: Set up pendingResponse BEFORE sending to avoid race condition
         return try await withCheckedThrowingContinuation { continuation in
@@ -306,7 +324,7 @@ public actor CLISocketClient {
 
             // Send command
             let bytesSent = data.withUnsafeBytes { ptr in
-                write(self.socket, ptr.baseAddress, data.count)
+                write(socketFd, ptr.baseAddress, data.count)
             }
 
             if bytesSent != data.count {
@@ -316,14 +334,15 @@ public actor CLISocketClient {
                 return
             }
 
-            // Start timeout task
-            Task {
-                try? await Task.sleep(nanoseconds: UInt64(CLIProtocolConstants.commandTimeout * 1_000_000_000))
+            // Start timeout task as detached to ensure it fires reliably
+            // even if there are actor scheduling issues
+            Task.detached { [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
 
                 // If still pending after timeout AND same request, fail
                 // The request ID check prevents a timeout for request A from
                 // affecting request B if B started before A's timeout fired
-                await self.timeoutPendingResponse(requestId: requestId)
+                await self?.timeoutPendingResponse(requestId: requestId)
             }
         }
     }
@@ -334,6 +353,17 @@ public actor CLISocketClient {
     /// - Returns: The server's response.
     /// - Throws: CLIProtocolError if sending fails.
     public func sendRaw(_ commandLine: String) async throws -> CLIResponse {
+        try await sendRaw(commandLine, timeout: CLIProtocolConstants.commandTimeout)
+    }
+
+    /// Sends a raw command string to the server with a custom timeout.
+    ///
+    /// - Parameters:
+    ///   - commandLine: The raw command line (without CMD: prefix).
+    ///   - timeout: The timeout in seconds.
+    /// - Returns: The server's response.
+    /// - Throws: CLIProtocolError if sending fails.
+    public func sendRaw(_ commandLine: String, timeout: TimeInterval) async throws -> CLIResponse {
         guard isConnected else {
             throw CLIProtocolError.connectionFailed("Not connected")
         }
@@ -343,6 +373,9 @@ public actor CLISocketClient {
         guard let data = line.data(using: .utf8) else {
             throw CLIProtocolError.connectionFailed("Failed to encode command")
         }
+
+        // Capture socket for use in detached task
+        let socketFd = self.socket
 
         // Wait for response with timeout
         // IMPORTANT: Set up pendingResponse BEFORE sending to avoid race condition
@@ -356,7 +389,7 @@ public actor CLISocketClient {
 
             // Send command
             let bytesSent = data.withUnsafeBytes { ptr in
-                write(self.socket, ptr.baseAddress, data.count)
+                write(socketFd, ptr.baseAddress, data.count)
             }
 
             if bytesSent != data.count {
@@ -366,12 +399,12 @@ public actor CLISocketClient {
                 return
             }
 
-            // Start timeout task
-            Task {
-                try? await Task.sleep(nanoseconds: UInt64(CLIProtocolConstants.commandTimeout * 1_000_000_000))
+            // Start timeout task as detached to ensure it fires reliably
+            Task.detached { [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
 
                 // If still pending after timeout AND same request, fail
-                await self.timeoutPendingResponse(requestId: requestId)
+                await self?.timeoutPendingResponse(requestId: requestId)
             }
         }
     }
