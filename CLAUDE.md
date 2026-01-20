@@ -137,11 +137,16 @@ See `BEADS-QUICKSTART.md` for complete setup and usage instructions.
 - ROMs: User must provide ATARIXL.ROM and ATARIBAS.ROM
 - Beads: https://github.com/steveyegge/beads (for issue tracking)
 
-## Common Commands
+## Building & Running
+
+### Using Swift CLI
 
 ```bash
-# Build
+# Build all targets (debug)
 swift build
+
+# Build all targets (release, optimized)
+swift build -c release
 
 # Run emulator server (required for GUI in client mode)
 swift run AtticServer
@@ -165,3 +170,37 @@ swift run attic --headless --silent
 # Tests
 swift test
 ```
+
+### Using Xcode
+
+This is a Swift Package Manager project. Open it in Xcode by double-clicking `Package.swift` or:
+
+```bash
+open Package.swift
+```
+
+**Available Schemes:**
+
+| Scheme | Description |
+|--------|-------------|
+| AtticGUI | Main GUI application (SwiftUI + Metal) |
+| AtticServer | Standalone emulator server (AESP protocol) |
+| attic | Command-line REPL tool |
+| AtticCore | Shared library (emulator, audio, input) |
+| AtticProtocol | AESP protocol library |
+
+**To build and run:**
+1. Select the desired scheme from the scheme selector (top-left of Xcode)
+2. Press `Cmd+R` to build and run, or `Cmd+B` to build only
+
+**Build configurations:**
+- **Debug** — Includes debug symbols, no optimization, assertions enabled
+- **Release** — Optimized build, suitable for distribution
+
+**Debugging in Xcode:**
+- Set breakpoints by clicking in the gutter next to any line
+- Use `Debug > View Debugging > Capture View Hierarchy` for SwiftUI issues
+- Use `Debug > Capture GPU Workload` for Metal rendering issues
+- Clean build if needed: `Cmd+Shift+K` or delete `~/Library/Developer/Xcode/DerivedData/Attic-*`
+
+**Note:** Linker warnings about "macOS version (26.0) than being linked (15.0)" from libatari800 are benign and can be ignored.

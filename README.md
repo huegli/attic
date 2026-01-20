@@ -69,10 +69,10 @@ swift test
 
 ### Using Xcode
 
-Open the Xcode project:
+This is a Swift Package Manager project. Open it in Xcode by double-clicking `Package.swift` or:
 
 ```bash
-open Attic.xcodeproj
+open Package.swift
 ```
 
 **Available Schemes:**
@@ -109,8 +109,7 @@ Attic/
 │   └── ROM/              # Place ROM files here
 ├── Tests/
 │   └── AtticCoreTests/   # Unit tests
-├── Package.swift         # Swift Package Manager configuration
-└── Attic.xcodeproj/      # Xcode project
+└── Package.swift         # Swift Package Manager configuration (open in Xcode)
 ```
 
 ## Debugging
