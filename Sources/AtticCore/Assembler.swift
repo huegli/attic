@@ -935,7 +935,7 @@ public final class Assembler: @unchecked Sendable {
 
         // Try to find a matching opcode
         var mode = parsedOperand.mode
-        var value = parsedOperand.value
+        let value = parsedOperand.value
 
         // Handle zero page optimization: if absolute but value fits in ZP, try ZP mode
         if mode == .absolute && value <= 0xFF {

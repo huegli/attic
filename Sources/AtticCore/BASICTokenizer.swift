@@ -322,7 +322,6 @@ public struct BASICLexer: Sendable {
 
     /// Lexes a word (keyword or identifier).
     private mutating func lexWord() throws -> LexToken {
-        let startColumn = column
         var word = ""
 
         // Collect alphanumeric characters

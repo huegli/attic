@@ -501,26 +501,9 @@ func printHelp(mode: SocketREPLMode) {
 // MARK: - Socket Connection
 // =============================================================================
 
-/// The global socket client for CLI communication.
-/// Uses @MainActor for thread-safety as the CLI runs on the main actor.
-@MainActor var socketClient: CLISocketClient?
-
-/// Connects to AtticServer via Unix socket.
-///
-/// - Parameter path: Path to the Unix socket.
-/// - Returns: True if connection successful.
-@MainActor func connectToSocket(path: String) async -> Bool {
-    let client = CLISocketClient()
-
-    do {
-        try await client.connect(to: path)
-        socketClient = client
-        return true
-    } catch {
-        printError("Failed to connect to \(path): \(error.localizedDescription)")
-        return false
-    }
-}
+// Note: socketClient and connectToSocket moved inside AtticCLI struct
+// to avoid Swift 6 error with top-level @MainActor variables in modules
+// with top-level code.
 
 /// Launches AtticServer as a subprocess.
 ///
@@ -643,6 +626,26 @@ func discoverSocket() -> String? {
 
 @main
 struct AtticCLI {
+    /// The socket client for CLI communication.
+    @MainActor static var socketClient: CLISocketClient?
+
+    /// Connects to AtticServer via Unix socket.
+    ///
+    /// - Parameter path: Path to the Unix socket.
+    /// - Returns: True if connection successful.
+    @MainActor static func connectToSocket(path: String) async -> Bool {
+        let client = CLISocketClient()
+
+        do {
+            try await client.connect(to: path)
+            socketClient = client
+            return true
+        } catch {
+            printError("Failed to connect to \(path): \(error.localizedDescription)")
+            return false
+        }
+    }
+
     static func main() async {
         // Parse arguments
         let args = parseArguments()
@@ -689,13 +692,13 @@ struct AtticCLI {
         }
 
         print("Connecting to \(path)...")
-        if await !connectToSocket(path: path) {
+        if await !Self.connectToSocket(path: path) {
             printError("Failed to connect to AtticServer")
             exit(1)
         }
 
         // Get the connected client and run REPL
-        guard let client = socketClient else {
+        guard let client = Self.socketClient else {
             printError("Socket client not initialized")
             exit(1)
         }

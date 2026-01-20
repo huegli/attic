@@ -210,7 +210,8 @@ public struct VTOC: Sendable {
         }
 
         // Mark system sectors as used
-        var vtoc = try! VTOC(data: data, diskType: diskType, validationMode: .lenient)
+        // Validate the initial VTOC structure (result unused, just for validation)
+        _ = try! VTOC(data: data, diskType: diskType, validationMode: .lenient)
 
         // Create a mutable copy and mark system sectors
         var mutableData = data
@@ -676,8 +677,8 @@ public struct MutableVTOC: Sendable {
         var allocated: [UInt16] = []
         allocated.reserveCapacity(count)
 
-        // Skip reserved sectors: boot (1-3), VTOC (360), directory (361-368)
-        let reserved: Set<Int> = Set(1...3).union([360]).union(Set(361...368))
+        // Note: Reserved sectors (boot 1-3, VTOC 360, directory 361-368) are
+        // skipped by the search range below (4-359, then 369+)
 
         // First pass: sectors 4-359
         for sector in 4...359 where allocated.count < count {

@@ -656,7 +656,7 @@ public final class ATRFileSystem: @unchecked Sendable {
         }
 
         // Check if file already exists
-        if let existingEntry = try? findFile(name) {
+        if (try? findFile(name)) != nil {
             throw ATRError.fileExists(name)
         }
 
@@ -812,7 +812,7 @@ public final class ATRFileSystem: @unchecked Sendable {
         try disk.writeSector(DOSLayout.vtocSector, data: mutableVTOC.encode())
 
         // Mark directory entry as deleted
-        var deletedEntry = DirectoryEntry(
+        let deletedEntry = DirectoryEntry(
             flags: 0x80,  // Deleted
             sectorCount: entry.sectorCount,
             startSector: entry.startSector,

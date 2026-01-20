@@ -299,7 +299,7 @@ public enum ATRError: Error, LocalizedError, Equatable {
             return "Ensure the file is a valid ATR disk image."
         case .sizeMismatch:
             return "The disk image may be truncated. Try obtaining a fresh copy."
-        case .fileNotFound(let filename):
+        case .fileNotFound:
             return "Check the filename spelling. Use 'dir' to list available files."
         case .fileLocked:
             return "Use 'unlock' command to remove the read-only flag."

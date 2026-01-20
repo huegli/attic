@@ -128,7 +128,11 @@ class KeyCaptureNSView: NSView {
     }
 
     deinit {
-        removeEventMonitors()
+        // Use assumeIsolated since NSView deinit runs on main thread
+        // but Swift 6 requires explicit isolation context
+        MainActor.assumeIsolated {
+            self.removeEventMonitors()
+        }
     }
 
     // =========================================================================

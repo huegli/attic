@@ -1,5 +1,6 @@
 // swift-tools-version: 6.0
 // The swift-tools-version declares the minimum version of Swift required to build this package.
+// MODIFIED: 2026-01-19 - Flattened AtticCore structure for Xcode 26 compatibility
 
 // =============================================================================
 // Package.swift - Swift Package Manager Configuration for Attic
@@ -108,6 +109,9 @@ let package = Package(
             name: "AtticCore",
             dependencies: ["CAtari800"],
             path: "Sources/AtticCore",
+            // Note: Files are now in flat structure (no subdirectories) to work
+            // around Xcode 26 bug where subdirectories added after initial project
+            // open are not properly discovered by xcodebuild.
             linkerSettings: [
                 // Link against the local libatari800.a static library
                 .unsafeFlags(["-L", "Libraries/libatari800/lib"]),
