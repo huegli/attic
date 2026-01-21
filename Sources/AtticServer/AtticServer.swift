@@ -806,6 +806,11 @@ struct AtticServer {
                 // Sleep only for the remaining time
                 let sleepTime = nextFrameTime - now
                 try? await Task.sleep(nanoseconds: sleepTime)
+            } else {
+                // Even when running behind schedule, yield to prevent actor starvation.
+                // Without this, CLI commands (like pause) that need emulator actor access
+                // could be starved because the main loop continuously makes actor calls.
+                await Task.yield()
             }
             // Schedule next frame (even if we're behind, this keeps us on pace)
             nextFrameTime += targetFrameTime
