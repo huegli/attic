@@ -61,4 +61,4 @@ sync-branch: "beads-sync"
 # - github.org
 # - github.repo
 
-routing.mode: "explicit"
+routing.mode: "auto"
