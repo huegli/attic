@@ -15,7 +15,7 @@ Attic is an Atari 800 XL emulator designed for developers and retrocomputing ent
 
 ## Requirements
 
-- macOS 15.0 (Sequoia) or later
+- macOS 26.0 or later
 - Atari 800 XL ROM files (not included)
   - `ATARIXL.ROM` — 16KB OS ROM
   - `ATARIBAS.ROM` — 8KB BASIC ROM

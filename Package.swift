@@ -34,9 +34,9 @@ let package = Package(
     name: "Attic",
 
     // Minimum platform requirements
-    // macOS 15 (Sequoia) is required for the latest SwiftUI and Metal features
+    // macOS 26 is required to match the libatari800 deployment target
     platforms: [
-        .macOS(.v15)
+        .macOS("26.0")
     ],
 
     // Products are the artifacts that can be used by other packages or run directly
