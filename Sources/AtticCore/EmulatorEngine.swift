@@ -197,15 +197,67 @@ public actor EmulatorEngine {
     ///                   If false, performs a warm reset (RESET key).
     public func reset(cold: Bool) async {
         if cold {
-            // Cold reset - reboot without any file
+            // Cold reset - reboot and run boot sequence
             wrapper.reboot(with: nil)
+
+            // Run frames to complete boot sequence.
+            // The Atari needs ~120 frames (~2 seconds) to complete boot.
+            var input = InputState()
+            for _ in 0..<150 {
+                _ = wrapper.executeFrame(input: &input)
+            }
+
+            // Clear BASIC memory by resetting pointers to empty state.
+            // This simulates the NEW command, clearing any stored program.
+            clearBASICProgram()
         } else {
-            // Warm reset - libatari800 doesn't have a separate warm reset,
-            // so we save state, reboot, and we could restore partial state
-            // For now, just reboot
+            // Warm reset - just reboot without clearing BASIC memory.
             wrapper.reboot(with: nil)
         }
         state = .paused
+    }
+
+    /// Clears the BASIC program from memory by resetting pointers.
+    ///
+    /// This is equivalent to issuing the NEW command in BASIC.
+    /// It resets all BASIC memory pointers to their empty state.
+    private func clearBASICProgram() {
+        // Read current LOMEM (defines start of BASIC memory region)
+        let lomem = UInt16(wrapper.readMemory(at: BASICPointers.lomem)) |
+                   (UInt16(wrapper.readMemory(at: BASICPointers.lomem + 1)) << 8)
+
+        // Read RAMTOP ($6A) which is the reliable source for top of RAM.
+        // RAMTOP is a single byte representing the number of 256-byte pages.
+        // Multiply by 256 to get the actual address.
+        // Note: We use RAMTOP instead of BASIC's MEMTOP ($90-91) because
+        // MEMTOP may not be correctly initialized after reboot.
+        let ramtopPages = UInt16(wrapper.readMemory(at: 0x006A))
+        let memtop = ramtopPages * 256
+
+        // Calculate empty state pointers
+        let emptyState = BASICMemoryState.empty(lomem: lomem, memtop: memtop)
+
+        // Helper to write 16-bit value
+        func writeWord(_ address: UInt16, _ value: UInt16) {
+            wrapper.writeMemory(at: address, value: UInt8(value & 0xFF))
+            wrapper.writeMemory(at: address + 1, value: UInt8(value >> 8))
+        }
+
+        // Reset all BASIC pointers
+        writeWord(BASICPointers.vntp, emptyState.vntp)
+        writeWord(BASICPointers.vntd, emptyState.vntd)
+        writeWord(BASICPointers.vvtp, emptyState.vvtp)
+        writeWord(BASICPointers.stmtab, emptyState.stmtab)
+        writeWord(BASICPointers.stmcur, emptyState.stmcur)
+        writeWord(BASICPointers.starp, emptyState.starp)
+        writeWord(BASICPointers.runstk, emptyState.runstk)
+        writeWord(BASICPointers.memtop, emptyState.memtop)
+
+        // Write the end-of-program marker at STMTAB
+        wrapper.writeMemoryBlock(at: emptyState.stmtab, bytes: BASICLineFormat.endOfProgramMarker)
+
+        // Write VNT terminator
+        wrapper.writeMemory(at: lomem, value: 0x00)
     }
 
     /// Reboots the emulator with an optional file to load.

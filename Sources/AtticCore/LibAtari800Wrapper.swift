@@ -557,24 +557,70 @@ public final class LibAtari800Wrapper: @unchecked Sendable {
 
     /// Saves the current emulator state.
     ///
+    /// Note: The emulator_state_t struct is ~210KB. Swift Tasks have limited
+    /// stack space (~512KB) which is insufficient for this operation. We run
+    /// the actual save on the main thread which has an 8MB stack.
+    ///
     /// - Returns: State data that can be restored later.
     public func saveState() -> EmulatorState {
         guard isInitialized else { return EmulatorState() }
 
-        var state = emulator_state_t()
-        libatari800_get_current_state(&state)
+        // If we're already on the main thread, do it directly
+        if Thread.isMainThread {
+            return _doSaveState()
+        }
 
-        return EmulatorState(from: state)
+        // Otherwise dispatch to main thread and wait
+        var result = EmulatorState()
+        DispatchQueue.main.sync {
+            result = self._doSaveState()
+        }
+        return result
+    }
+
+    /// Performs the actual save state operation.
+    /// Must be called from a thread with adequate stack space.
+    @inline(never)
+    private func _doSaveState() -> EmulatorState {
+        let statePtr = UnsafeMutablePointer<emulator_state_t>.allocate(capacity: 1)
+        defer { statePtr.deallocate() }
+
+        memset(statePtr, 0, MemoryLayout<emulator_state_t>.size)
+        libatari800_get_current_state(statePtr)
+        return EmulatorState(from: statePtr)
     }
 
     /// Restores a previously saved emulator state.
+    ///
+    /// Note: The emulator_state_t struct is ~210KB. Swift Tasks have limited
+    /// stack space (~512KB) which is insufficient for this operation. We run
+    /// the actual restore on the main thread which has an 8MB stack.
     ///
     /// - Parameter state: State to restore.
     public func restoreState(_ state: EmulatorState) {
         guard isInitialized else { return }
 
-        var cState = state.toCState()
-        libatari800_restore_state(&cState)
+        // If we're already on the main thread, do it directly
+        if Thread.isMainThread {
+            _doRestoreState(state)
+            return
+        }
+
+        // Otherwise dispatch to main thread and wait
+        DispatchQueue.main.sync {
+            self._doRestoreState(state)
+        }
+    }
+
+    /// Performs the actual restore state operation.
+    /// Must be called from a thread with adequate stack space.
+    @inline(never)
+    private func _doRestoreState(_ state: EmulatorState) {
+        let statePtr = UnsafeMutablePointer<emulator_state_t>.allocate(capacity: 1)
+        defer { statePtr.deallocate() }
+
+        state.fillCState(statePtr)
+        libatari800_restore_state(statePtr)
         stateIsCached = false
     }
 
@@ -799,60 +845,82 @@ public struct EmulatorState: Sendable {
         self.flags = StateFlags()
     }
 
-    init(from cState: emulator_state_t) {
-        let state = cState
-
+    /// Initializes from a pointer to a C state struct.
+    ///
+    /// This is the preferred initializer when the caller has heap-allocated
+    /// the emulator_state_t, as it avoids copying the 210KB struct to the stack.
+    ///
+    /// - Parameter statePtr: Pointer to the C state struct.
+    init(from statePtr: UnsafePointer<emulator_state_t>) {
         self.tags = StateTags(
-            size: state.tags.size,
-            cpu: state.tags.cpu,
-            pc: state.tags.pc,
-            baseRam: state.tags.base_ram,
-            antic: state.tags.antic,
-            gtia: state.tags.gtia,
-            pia: state.tags.pia,
-            pokey: state.tags.pokey
+            size: statePtr.pointee.tags.size,
+            cpu: statePtr.pointee.tags.cpu,
+            pc: statePtr.pointee.tags.pc,
+            baseRam: statePtr.pointee.tags.base_ram,
+            antic: statePtr.pointee.tags.antic,
+            gtia: statePtr.pointee.tags.gtia,
+            pia: statePtr.pointee.tags.pia,
+            pokey: statePtr.pointee.tags.pokey
         )
 
         self.flags = StateFlags(
-            selfTestEnabled: state.flags.selftest_enabled != 0,
-            frameCount: state.flags.nframes
+            selfTestEnabled: statePtr.pointee.flags.selftest_enabled != 0,
+            frameCount: statePtr.pointee.flags.nframes
         )
 
         // Copy state data using pointer arithmetic
         // Swift can't directly access the large state[] array
-        let size = Int(state.tags.size)
-        var mutableState = state
-        self.data = withUnsafePointer(to: &mutableState) { statePtr in
-            let basePtr = UnsafeRawPointer(statePtr)
-            let stateDataPtr = basePtr.advanced(by: 256).assumingMemoryBound(to: UInt8.self)
-            return Array(UnsafeBufferPointer(start: stateDataPtr, count: min(size, 210000)))
+        let size = Int(statePtr.pointee.tags.size)
+        let basePtr = UnsafeRawPointer(statePtr)
+        let stateDataPtr = basePtr.advanced(by: 256).assumingMemoryBound(to: UInt8.self)
+        self.data = Array(UnsafeBufferPointer(start: stateDataPtr, count: min(size, 210000)))
+    }
+
+    /// Initializes from a C state struct value.
+    ///
+    /// WARNING: This copies the ~210KB struct to the stack. Prefer using
+    /// init(from: UnsafePointer<emulator_state_t>) when possible.
+    init(from cState: emulator_state_t) {
+        var mutableState = cState
+        self.init(from: &mutableState)
+    }
+
+    /// Fills a pre-allocated emulator_state_t struct with this state's data.
+    ///
+    /// This method is preferred over toCState() when the caller has already
+    /// allocated the struct on the heap, avoiding a 210KB stack allocation.
+    ///
+    /// - Parameter statePtr: Pointer to the struct to fill.
+    func fillCState(_ statePtr: UnsafeMutablePointer<emulator_state_t>) {
+        statePtr.pointee.tags.size = tags.size
+        statePtr.pointee.tags.cpu = tags.cpu
+        statePtr.pointee.tags.pc = tags.pc
+        statePtr.pointee.tags.base_ram = tags.baseRam
+        statePtr.pointee.tags.antic = tags.antic
+        statePtr.pointee.tags.gtia = tags.gtia
+        statePtr.pointee.tags.pia = tags.pia
+        statePtr.pointee.tags.pokey = tags.pokey
+
+        statePtr.pointee.flags.selftest_enabled = flags.selfTestEnabled ? 1 : 0
+        statePtr.pointee.flags.nframes = flags.frameCount
+
+        // Copy state data back using pointer arithmetic
+        let basePtr = UnsafeMutableRawPointer(statePtr)
+        let stateDataPtr = basePtr.advanced(by: 256).assumingMemoryBound(to: UInt8.self)
+        for (i, byte) in data.enumerated() where i < 210000 {
+            stateDataPtr[i] = byte
         }
     }
 
+    /// Converts this state to a C struct.
+    ///
+    /// WARNING: This allocates a ~210KB struct on the stack. Prefer using
+    /// fillCState() with a heap-allocated struct when called from Swift Tasks.
     func toCState() -> emulator_state_t {
         var state = emulator_state_t()
-
-        state.tags.size = tags.size
-        state.tags.cpu = tags.cpu
-        state.tags.pc = tags.pc
-        state.tags.base_ram = tags.baseRam
-        state.tags.antic = tags.antic
-        state.tags.gtia = tags.gtia
-        state.tags.pia = tags.pia
-        state.tags.pokey = tags.pokey
-
-        state.flags.selftest_enabled = flags.selfTestEnabled ? 1 : 0
-        state.flags.nframes = flags.frameCount
-
-        // Copy state data back using pointer arithmetic
-        withUnsafeMutablePointer(to: &state) { statePtr in
-            let basePtr = UnsafeMutableRawPointer(statePtr)
-            let stateDataPtr = basePtr.advanced(by: 256).assumingMemoryBound(to: UInt8.self)
-            for (i, byte) in data.enumerated() where i < 210000 {
-                stateDataPtr[i] = byte
-            }
+        withUnsafeMutablePointer(to: &state) { ptr in
+            fillCState(ptr)
         }
-
         return state
     }
 }

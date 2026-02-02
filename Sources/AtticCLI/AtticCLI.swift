@@ -395,8 +395,8 @@ struct AtticCLI {
         case .monitor:
             return translateMonitorCommand(trimmed)
         case .basic:
-            // BASIC commands are mostly local; pass through for now
-            return trimmed
+            // Prefix BASIC input with "basic " for the server protocol
+            return "basic \(trimmed)"
         case .dos:
             return translateDOSCommand(trimmed)
         }
