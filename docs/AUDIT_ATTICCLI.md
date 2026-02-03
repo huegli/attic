@@ -108,6 +108,27 @@ Never used - commands sent via `formatCommand()` or `sendRaw()`.
 
 AtticCLI imports AtticCore but reimplements mode switching and prompt generation locally (SocketREPLMode enum) instead of using REPLEngine's facilities.
 
+### 2.3 AtticCore Import Analysis
+
+AtticCLI imports the entire AtticCore module but only uses a subset:
+
+| Symbol | Line(s) | Required? |
+|--------|---------|-----------|
+| `CLISocketClient` | 232, 515, 522, 645 | **Yes** - socket communication |
+| `CLIProtocolConstants.socketPath()` | 578 | **Yes** - socket path generation |
+| `AtticCore.fullTitle` | 145 | **Yes** - version display |
+| `AtticCore.buildConfiguration` | 146 | **Yes** - version display |
+| `AtticCore.welcomeBanner` | 168, 234 | **Yes** - welcome message |
+| `REPLEngine` | 166 | **No** - only in dead `runLocalREPL()` |
+
+**Analysis**: The import IS necessary for socket communication (`CLISocketClient`, `CLIProtocolConstants`). However:
+
+1. `REPLEngine` is only referenced in dead code - removing `runLocalREPL()` eliminates this dependency
+2. Version strings (`fullTitle`, `buildConfiguration`, `welcomeBanner`) could be moved to a lightweight `AtticVersion` module to reduce coupling
+3. The core requirement is `CLISocketClient` and `CLIProtocolConstants` - these are essential
+
+**Recommendation**: After removing dead code, consider whether a smaller `AtticProtocol` module (containing just CLI socket/protocol code) would be cleaner than depending on all of AtticCore.
+
 ---
 
 ## 3. Redundant Code
