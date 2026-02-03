@@ -567,9 +567,14 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
             }
 
         case .basicList:
-            // LIST requires detokenizer (Phase 15), show program info instead
-            let info = await basicHandler.getProgramInfo()
-            return .ok("program \(info.lines) lines, \(info.bytes) bytes, \(info.variables) variables")
+            // Use the detokenizer to list the program
+            let listing = await basicHandler.listProgram(range: nil)
+            if listing.isEmpty {
+                return .ok("No program in memory")
+            }
+            // Split by newlines and use okMultiLine to properly format for CLI protocol
+            let lines = listing.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+            return .okMultiLine(lines)
         }
     }
 
@@ -704,6 +709,10 @@ struct AtticServer {
 
         do {
             try await emulator.initialize(romPath: romPath)
+            // Run cold reset to complete boot sequence and initialize BASIC memory.
+            // Without this, BASIC pointers (MEMTOP, RUNSTK, etc.) are uninitialized,
+            // causing "Out of memory" errors when entering BASIC lines.
+            await emulator.reset(cold: true)
             print("Emulator initialized successfully")
         } catch {
             print("Error initializing emulator: \(error)")

@@ -251,10 +251,23 @@ public actor BASICLineHandler {
         state: BASICMemoryState,
         existingVariables: [BASICVariable]
     ) async -> BASICLineResult {
-        // Find where this line should go
+        // Pause emulator for memory operations
+        await emulator.pause()
+
+        // If we have new variables, add them first.
+        // This shifts STMTAB forward, so we must do this BEFORE calculating
+        // the line insertion position.
+        if !line.newVariables.isEmpty {
+            await addNewVariables(line.newVariables, state: state, existingCount: existingVariables.count)
+        }
+
+        // Re-read state after variable additions (STMTAB may have moved)
+        let currentState = await readMemoryState()
+
+        // Now find where this line should go using the CURRENT state
         let position = await findLinePosition(
             lineNumber: line.lineNumber,
-            state: state
+            state: currentState
         )
 
         // Calculate memory changes needed
@@ -264,28 +277,18 @@ public actor BASICLineHandler {
         )
 
         // Check if we have enough memory
-        let newStarp = Int(state.starp) + shift
-        if newStarp > Int(state.runstk) - 256 {
+        let newStarp = Int(currentState.starp) + shift
+        if newStarp > Int(currentState.runstk) - 256 {
+            await emulator.resume()
             return .error("Out of memory")
         }
-
-        // Pause emulator for memory operations
-        await emulator.pause()
-
-        // If we have new variables, add them first
-        if !line.newVariables.isEmpty {
-            await addNewVariables(line.newVariables, state: state, existingCount: existingVariables.count)
-        }
-
-        // Re-read state after variable additions
-        let updatedState = await readMemoryState()
 
         // Shift memory if needed
         if shift != 0 {
             await shiftMemory(
                 from: position.address + UInt16(position.existingLength),
                 by: shift,
-                until: updatedState.starp
+                until: currentState.starp
             )
         }
 
@@ -293,7 +296,7 @@ public actor BASICLineHandler {
         await emulator.writeMemoryBlock(at: position.address, bytes: line.bytes)
 
         // Update STARP pointer
-        let newStarpValue = UInt16(Int(updatedState.starp) + shift)
+        let newStarpValue = UInt16(Int(currentState.starp) + shift)
         await emulator.writeWord(at: BASICPointers.starp, value: newStarpValue)
 
         // Resume emulator

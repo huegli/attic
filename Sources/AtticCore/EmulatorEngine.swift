@@ -350,6 +350,10 @@ public actor EmulatorEngine {
     public func executeFrame() async -> FrameResult {
         guard wrapper.isInitialized else { return .notInitialized }
 
+        // Don't execute frames when paused - this prevents race conditions
+        // when CLI commands modify memory while expecting emulation to be stopped.
+        guard shouldRun else { return .ok }
+
         var input = inputState
         let result = wrapper.executeFrame(input: &input)
         frameCount += 1
