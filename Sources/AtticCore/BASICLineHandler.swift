@@ -141,31 +141,63 @@ public actor BASICLineHandler {
         }
     }
 
-    /// Enters a numbered line (stored program line).
+    /// Enters a numbered line (stored program line) using keyboard injection.
+    ///
+    /// This method uses keyboard injection to type the BASIC line character by
+    /// character, then presses RETURN. The Atari's built-in BASIC interpreter
+    /// handles all tokenization correctly, avoiding memory corruption bugs that
+    /// can occur with direct memory injection when variables are involved.
+    ///
+    /// - Parameter input: The BASIC line to enter (including line number).
+    /// - Returns: The result of the operation.
     private func enterNumberedLine(_ input: String) async -> BASICLineResult {
-        // Read current BASIC state
-        let state = await readMemoryState()
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // Read existing variables from VNT
-        let existingVariables = await readVariables(state: state)
-
-        // Check for line number only (delete line)
-        if let lineNumOnly = parseLineNumberOnly(input) {
-            return await deleteLine(lineNumOnly, state: state)
+        // Validate that the line starts with a valid line number (0-32767)
+        guard let lineNumber = parseLineNumber(from: trimmed) else {
+            return .error("Invalid line number")
         }
 
-        // Tokenize the line
-        let tokenizedLine: TokenizedLine
-        do {
-            tokenizedLine = try tokenizer.tokenize(input, existingVariables: existingVariables)
-        } catch let error as BASICTokenizerError {
-            return .error(error.message)
-        } catch {
-            return .error("Tokenization error: \(error.localizedDescription)")
+        // Check for line number only (delete line) - this also uses keyboard injection
+        if String(lineNumber) == trimmed {
+            // Just a line number - this deletes the line in Atari BASIC
+            let success = await emulator.injectString(trimmed, appendReturn: true)
+            if success {
+                return .deleted(lineNumber: UInt16(lineNumber))
+            } else {
+                return .error("Failed to delete line \(lineNumber)")
+            }
         }
 
-        // Inject into memory
-        return await injectLine(tokenizedLine, state: state, existingVariables: existingVariables)
+        // Use keyboard injection to type the line and press RETURN
+        let success = await emulator.injectString(trimmed, appendReturn: true)
+
+        if success {
+            // Estimate bytes used (line number + length byte + tokens + EOL marker)
+            // This is an approximation since we don't parse tokens anymore
+            let estimatedBytes = trimmed.count + 5
+            return .success(lineNumber: UInt16(lineNumber), bytesUsed: estimatedBytes)
+        } else {
+            return .error("Failed to inject line \(lineNumber)")
+        }
+    }
+
+    /// Parses a line number from the beginning of a BASIC line.
+    ///
+    /// - Parameter input: The input string starting with a line number.
+    /// - Returns: The line number (0-32767), or nil if invalid.
+    private func parseLineNumber(from input: String) -> Int? {
+        var numStr = ""
+        for char in input {
+            if char.isNumber {
+                numStr.append(char)
+            } else {
+                break
+            }
+        }
+        guard !numStr.isEmpty else { return nil }
+        guard let num = Int(numStr), num >= 0, num <= 32767 else { return nil }
+        return num
     }
 
     /// Handles immediate mode commands (RUN, LIST, NEW, etc.).
@@ -242,10 +274,24 @@ public actor BASICLineHandler {
     }
 
     // =========================================================================
-    // MARK: - Line Injection
+    // MARK: - Line Injection (Deprecated - Memory Injection)
+    // =========================================================================
+    //
+    // The following methods are deprecated and kept for reference only.
+    // They implement direct memory injection which causes bugs when variables
+    // are introduced (STMTAB shifts, leading to corruption).
+    //
+    // The new approach uses keyboard injection via EmulatorEngine.injectString()
+    // which lets the Atari BASIC interpreter handle tokenization correctly.
+    //
+    // These methods will be removed in a future version.
     // =========================================================================
 
     /// Injects a tokenized line into emulator memory.
+    ///
+    /// - Warning: DEPRECATED. This method causes memory corruption when variables
+    ///   are involved. Use keyboard injection via `enterNumberedLine()` instead.
+    @available(*, deprecated, message: "Use keyboard injection instead - memory injection causes corruption with variables")
     private func injectLine(
         _ line: TokenizedLine,
         state: BASICMemoryState,
@@ -306,6 +352,9 @@ public actor BASICLineHandler {
     }
 
     /// Finds the position where a line should be inserted/replaced.
+    ///
+    /// - Warning: DEPRECATED. Part of the memory injection system.
+    @available(*, deprecated, message: "Part of deprecated memory injection system")
     private func findLinePosition(
         lineNumber: UInt16,
         state: BASICMemoryState
@@ -340,6 +389,9 @@ public actor BASICLineHandler {
     }
 
     /// Shifts memory to make room for or remove a line.
+    ///
+    /// - Warning: DEPRECATED. Part of the memory injection system.
+    @available(*, deprecated, message: "Part of deprecated memory injection system")
     private func shiftMemory(from address: UInt16, by shift: Int, until endAddress: UInt16) async {
         guard shift != 0 else { return }
 
@@ -362,6 +414,9 @@ public actor BASICLineHandler {
     }
 
     /// Adds new variables to the VNT and VVT.
+    ///
+    /// - Warning: DEPRECATED. Part of the memory injection system.
+    @available(*, deprecated, message: "Part of deprecated memory injection system")
     private func addNewVariables(
         _ variables: [BASICVariableName],
         state: BASICMemoryState,
@@ -412,10 +467,14 @@ public actor BASICLineHandler {
     }
 
     // =========================================================================
-    // MARK: - Line Deletion
+    // MARK: - Line Deletion (Deprecated - Memory Injection)
     // =========================================================================
 
     /// Parses a line number only (for deletion).
+    ///
+    /// - Warning: DEPRECATED. Line deletion is now handled via keyboard injection
+    ///   in `enterNumberedLine()`.
+    @available(*, deprecated, message: "Line deletion now uses keyboard injection")
     private func parseLineNumberOnly(_ input: String) -> UInt16? {
         let trimmed = input.trimmingCharacters(in: .whitespaces)
         guard let lineNum = Int(trimmed), lineNum >= 0, lineNum <= 32767 else {
@@ -428,7 +487,12 @@ public actor BASICLineHandler {
         return nil
     }
 
-    /// Deletes a line from the program.
+    /// Deletes a line from the program using memory manipulation.
+    ///
+    /// - Warning: DEPRECATED. Line deletion is now handled via keyboard injection
+    ///   in `enterNumberedLine()`. This method uses the deprecated memory injection
+    ///   system which can cause issues.
+    @available(*, deprecated, message: "Line deletion now uses keyboard injection")
     private func deleteLine(_ lineNumber: UInt16, state: BASICMemoryState) async -> BASICLineResult {
         // Find the line
         let position = await findLinePosition(lineNumber: lineNumber, state: state)
@@ -462,70 +526,45 @@ public actor BASICLineHandler {
     // MARK: - Program Commands
     // =========================================================================
 
-    /// Clears the current BASIC program (NEW command).
+    /// Clears the current BASIC program using keyboard injection (NEW command).
+    ///
+    /// This types "NEW" and presses RETURN, letting the Atari BASIC interpreter
+    /// handle the program clearing correctly. This ensures all BASIC pointers
+    /// and internal state are properly reset.
     public func newProgram() async -> BASICLineResult {
-        await emulator.pause()
-
-        // Read LOMEM and MEMTOP
-        let lomem = await emulator.readWord(at: BASICPointers.lomem)
-        let memtop = await emulator.readWord(at: BASICPointers.memtop)
-
-        // Set up empty program state
-        // VNT is empty (just terminator)
-        await emulator.writeMemoryBlock(at: lomem, bytes: [0x00])
-
-        // VVT starts right after VNT terminator
-        let vvtp = lomem + 1
-
-        // STMTAB starts at VVT (no variables)
-        let stmtab = vvtp
-
-        // Write end-of-program marker
-        await emulator.writeMemoryBlock(at: stmtab, bytes: BASICLineFormat.endOfProgramMarker)
-
-        // STARP is after end marker
-        let starp = stmtab + 3
-
-        // Update all pointers
-        await emulator.writeWord(at: BASICPointers.vntp, value: lomem)
-        await emulator.writeWord(at: BASICPointers.vntd, value: lomem)
-        await emulator.writeWord(at: BASICPointers.vvtp, value: vvtp)
-        await emulator.writeWord(at: BASICPointers.stmtab, value: stmtab)
-        await emulator.writeWord(at: BASICPointers.stmcur, value: stmtab)
-        await emulator.writeWord(at: BASICPointers.starp, value: starp)
-        await emulator.writeWord(at: BASICPointers.runstk, value: memtop)
-
-        await emulator.resume()
-
-        return .immediate("NEW - Program cleared")
-    }
-
-    /// Runs the current BASIC program.
-    public func runProgram() async -> BASICLineResult {
-        // To run, we need to trigger BASIC's RUN behavior
-        // This typically means setting STMCUR to STMTAB and resuming
-
-        let state = await readMemoryState()
-
-        // Check if there's a program
-        let firstLineNum = await emulator.readWord(at: state.stmtab)
-        if firstLineNum == 0 {
-            return .error("No program to run")
+        let success = await emulator.injectString("NEW", appendReturn: true)
+        if success {
+            return .immediate("NEW - Program cleared")
+        } else {
+            return .error("Failed to execute NEW")
         }
-
-        // Reset STMCUR to start of program
-        await emulator.writeWord(at: BASICPointers.stmcur, value: state.stmtab)
-
-        // Resume emulator
-        await emulator.resume()
-
-        return .immediate("Running")
     }
 
-    /// Continues a stopped program.
+    /// Runs the current BASIC program using keyboard injection.
+    ///
+    /// This types "RUN" and presses RETURN, letting the Atari BASIC interpreter
+    /// handle program execution correctly. The emulator continues running after
+    /// injection so the program can execute.
+    public func runProgram() async -> BASICLineResult {
+        let success = await emulator.injectString("RUN", appendReturn: true)
+        if success {
+            return .immediate("Running")
+        } else {
+            return .error("Failed to execute RUN")
+        }
+    }
+
+    /// Continues a stopped program using keyboard injection.
+    ///
+    /// This types "CONT" and presses RETURN, letting the Atari BASIC interpreter
+    /// continue execution from where it was stopped.
     public func continueProgram() async -> BASICLineResult {
-        await emulator.resume()
-        return .immediate("Continuing")
+        let success = await emulator.injectString("CONT", appendReturn: true)
+        if success {
+            return .immediate("Continuing")
+        } else {
+            return .error("Failed to execute CONT")
+        }
     }
 
     // =========================================================================

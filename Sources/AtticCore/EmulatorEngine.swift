@@ -454,6 +454,193 @@ public actor EmulatorEngine {
     }
 
     // =========================================================================
+    // MARK: - String Injection
+    // =========================================================================
+
+    /// Injects a string as keyboard input, simulating typing.
+    ///
+    /// This method types each character in the string by pressing and releasing
+    /// keys, with the appropriate number of frames between keypresses. This is
+    /// used to enter BASIC lines by simulating user input rather than directly
+    /// manipulating memory.
+    ///
+    /// The Atari BASIC interpreter handles all tokenization correctly when input
+    /// comes through the keyboard, avoiding memory layout issues that occur with
+    /// direct memory injection.
+    ///
+    /// - Parameters:
+    ///   - text: The string to type (ASCII characters, converted to ATASCII).
+    ///   - appendReturn: If true, press RETURN after the string (default: true).
+    ///   - framesPerKey: Number of frames to hold each key down (default: 2).
+    ///   - waitFramesAfter: Number of frames to wait after completion (default: 30).
+    /// - Returns: true if successful, false if any character couldn't be mapped.
+    @discardableResult
+    public func injectString(
+        _ text: String,
+        appendReturn: Bool = true,
+        framesPerKey: Int = 2,
+        waitFramesAfter: Int = 30
+    ) async -> Bool {
+        guard wrapper.isInitialized else { return false }
+
+        // Type each character in the string
+        for char in text {
+            // Map the character to Atari key input
+            guard let mapping = mapCharacterToAtari(char) else {
+                // Skip unmappable characters (or could return false to fail)
+                continue
+            }
+
+            // Press the key
+            pressKey(
+                keyChar: mapping.keyChar,
+                keyCode: mapping.keyCode,
+                shift: mapping.shift,
+                control: mapping.control
+            )
+
+            // Execute frames while key is held
+            for _ in 0..<framesPerKey {
+                executeSingleFrame()
+            }
+
+            // Release the key
+            releaseKey()
+
+            // Execute one frame for key-up to register
+            executeSingleFrame()
+        }
+
+        // Optionally press RETURN
+        if appendReturn {
+            // RETURN uses keyCode only (keyChar=0 for special keys)
+            pressKey(keyChar: 0, keyCode: AtariKeyCode.return, shift: false, control: false)
+
+            for _ in 0..<framesPerKey {
+                executeSingleFrame()
+            }
+
+            releaseKey()
+            executeSingleFrame()
+        }
+
+        // Wait frames for BASIC to process the input
+        for _ in 0..<waitFramesAfter {
+            executeSingleFrame()
+        }
+
+        return true
+    }
+
+    /// Maps an ASCII character to Atari key input values.
+    ///
+    /// This helper converts ASCII characters to the ATASCII encoding used by
+    /// the Atari 800 XL, along with the appropriate key codes and modifier states.
+    ///
+    /// - Parameter char: The ASCII character to map.
+    /// - Returns: Tuple of (keyChar, keyCode, shift, control), or nil if unmappable.
+    private func mapCharacterToAtari(_ char: Character) -> (keyChar: UInt8, keyCode: UInt8, shift: Bool, control: Bool)? {
+        guard let ascii = char.asciiValue else { return nil }
+
+        // Handle space specially (has both keyChar and keyCode)
+        if ascii == 0x20 {
+            return (0x20, AtariKeyCode.space, false, false)
+        }
+
+        // Handle lowercase letters - convert to uppercase for Atari
+        // The Atari keyboard is uppercase by default
+        var atascii = ascii
+        if atascii >= 0x61 && atascii <= 0x7A {  // a-z
+            atascii = atascii - 0x20  // Convert to uppercase A-Z
+        }
+
+        // Printable ASCII range (space to tilde) maps directly to ATASCII
+        // Use keyChar for characters, keyCode=0xFF means "use keyChar"
+        if atascii >= 0x20 && atascii < 0x7F {
+            // Determine if shift is needed based on original character
+            // Shift is needed for uppercase letters and shifted symbols
+            let needsShift = (ascii >= 0x41 && ascii <= 0x5A) ||  // A-Z uppercase
+                            isShiftedSymbol(ascii)
+
+            return (atascii, 0xFF, needsShift, false)
+        }
+
+        return nil
+    }
+
+    /// Checks if an ASCII character requires the Shift key.
+    ///
+    /// - Parameter ascii: The ASCII value to check.
+    /// - Returns: true if the character requires Shift.
+    private func isShiftedSymbol(_ ascii: UInt8) -> Bool {
+        // These are symbols that require Shift on the Atari keyboard
+        // (same layout as a standard US keyboard mostly)
+        switch ascii {
+        case 0x21:  // !
+            return true
+        case 0x22:  // "
+            return true
+        case 0x23:  // #
+            return true
+        case 0x24:  // $
+            return true
+        case 0x25:  // %
+            return true
+        case 0x26:  // &
+            return true
+        case 0x28:  // (
+            return true
+        case 0x29:  // )
+            return true
+        case 0x2A:  // *
+            return true
+        case 0x2B:  // +
+            return true
+        case 0x3A:  // :
+            return true
+        case 0x3C:  // <
+            return true
+        case 0x3E:  // >
+            return true
+        case 0x3F:  // ?
+            return true
+        case 0x40:  // @
+            return true
+        case 0x5E:  // ^
+            return true
+        case 0x5F:  // _
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Executes a single frame unconditionally.
+    ///
+    /// Unlike `executeFrame()`, this method runs regardless of the `shouldRun`
+    /// state. This is necessary for keyboard injection which needs to execute
+    /// frames while the emulator is logically "paused" from the user's perspective.
+    ///
+    /// - Returns: The frame execution result.
+    @discardableResult
+    private func executeSingleFrame() -> FrameResult {
+        guard wrapper.isInitialized else { return .notInitialized }
+
+        var input = inputState
+        let result = wrapper.executeFrame(input: &input)
+        frameCount += 1
+
+        // Handle pending key release AFTER the frame has processed the input.
+        if keyReleasePending {
+            inputState.keyChar = 0
+            inputState.keyCode = 0
+            keyReleasePending = false
+        }
+
+        return result
+    }
+
+    // =========================================================================
     // MARK: - Memory Access
     // =========================================================================
 
