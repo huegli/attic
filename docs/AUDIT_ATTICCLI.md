@@ -8,7 +8,7 @@
 
 The AtticCLI module functions but has several documentation mismatches, redundant code (~105 lines), and incomplete command translation. The most significant issues are:
 
-1. **Non-functional flag**: `--headless` is parsed but never passed to AtticServer
+1. **Non-functional flags**: `--headless` and `--repl` are parsed but have no effect
 2. **Dead code**: Local REPL implementation is never called
 3. **Duplicated code**: fd_set helpers copied between client/server
 4. **Incomplete translation**: Many documented commands not forwarded to server
@@ -43,7 +43,34 @@ The `headless` parameter is received by `launchServer()` but never added to the 
 2. Remove the flag entirely if headless mode isn't supported
 3. Implement true local headless mode using `runLocalREPL()` (currently dead code)
 
-### 1.2 Prompt Format Discrepancy (HIGH)
+### 1.2 `--repl` Flag Useless (MEDIUM)
+
+The `--repl` flag is documented but **completely unnecessary**.
+
+**Code analysis:**
+```swift
+// Line 48: Defaults to true
+var repl: Bool = true
+
+// Line 76-77: Can only set to true (already the default)
+case "--repl":
+    args.repl = true
+
+// args.repl is NEVER READ anywhere in main() or elsewhere
+```
+
+**Location**: AtticCLI.swift:48, 76-77
+
+The flag:
+- Defaults to `true`
+- Has no `--no-repl` counterpart
+- Is never checked to make any decision
+
+Running `attic --repl` is identical to running `attic`.
+
+**Recommendation**: Remove `--repl` flag entirely - it serves no purpose.
+
+### 1.3 Prompt Format Discrepancy (HIGH)
 
 | Source | Format |
 |--------|--------|
@@ -52,7 +79,7 @@ The `headless` parameter is received by `launchServer()` but never added to the 
 
 **Impact**: Loses debugging context; may break Emacs comint regex matching.
 
-### 1.3 Breakpoint Command Syntax (MEDIUM)
+### 1.4 Breakpoint Command Syntax (MEDIUM)
 
 | Source | Set Breakpoint | Clear Breakpoint |
 |--------|---------------|------------------|
@@ -62,7 +89,7 @@ The `headless` parameter is received by `launchServer()` but never added to the 
 
 **Impact**: Documented shortcuts (`bp`, `bc`) don't work as expected.
 
-### 1.4 Missing Command Translations (HIGH)
+### 1.5 Missing Command Translations (HIGH)
 
 Commands documented in `REPL_COMMANDS.md` but NOT translated in `AtticCLI.swift`:
 
@@ -83,7 +110,7 @@ Commands documented in `REPL_COMMANDS.md` but NOT translated in `AtticCLI.swift`
 - ✓ `mount`, `unmount`, `drives`
 - ✗ `cd`, `type`, `dump`, `info`, `copy`, `rename`, `delete`, `lock`, `unlock`, `export`, `import`, `newdisk`, `format`
 
-### 1.5 `.basic turbo` Mode (LOW)
+### 1.6 `.basic turbo` Mode (LOW)
 
 - **Doc** (REPL_COMMANDS.md:29): Should switch to Turbo BASIC XL tokenizer
 - **Code** (AtticCLI.swift:271): Accepts command but doesn't configure different tokenizer variant
@@ -209,13 +236,17 @@ User input
   → Server executes CLICommand
 ```
 
-### 4.2 Fix or Remove Headless Mode
+### 4.2 Fix or Remove Non-Functional Flags
 
-The `--headless` flag is **non-functional** (see section 1.1). The flag is parsed but never passed to AtticServer. Options:
+Two flags are non-functional:
 
+**`--headless`** (see section 1.1): Parsed but never passed to AtticServer. Options:
 1. **Quick fix**: Add `if headless { arguments.append("--headless") }` in `launchServer()`
 2. **Proper fix**: Implement true local headless mode using `runLocalREPL()` with embedded emulator
 3. **Remove**: Delete the flag and document that AtticServer is always required
+
+**`--repl`** (see section 1.2): Defaults to true, can only be set to true, and is never read.
+- **Remove**: Delete the flag entirely - it serves no purpose
 
 ### 4.3 Complete or Remove Partial Translations
 
@@ -252,6 +283,7 @@ The `--headless` flag is **non-functional** (see section 1.1). The flag is parse
 | Action | Files | Effort |
 |--------|-------|--------|
 | Fix `--headless` flag (pass to server or remove) | AtticCLI.swift:551-555 | 15 min |
+| Remove useless `--repl` flag | AtticCLI.swift:48, 76-77, 119 | 10 min |
 
 ### High Priority
 
