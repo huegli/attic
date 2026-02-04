@@ -20,12 +20,14 @@ This is a macOS application that emulates the Atari 800 XL home computer. It use
 ```
 attic/
 ├── Package.swift
+├── .mcp.json                   # MCP server configuration for Claude Code
 ├── Sources/
 │   ├── AtticCore/              # Shared library (emulator, REPL, tokenizer)
 │   ├── AtticProtocol/          # AESP binary protocol (message types, server, client)
 │   ├── AtticServer/            # Standalone emulator server executable
 │   ├── AtticCLI/               # Command-line executable (attic)
-│   └── AtticGUI/               # SwiftUI + Metal application (AtticGUI)
+│   ├── AtticGUI/               # SwiftUI + Metal application (AtticGUI)
+│   └── AtticMCP/               # MCP server for Claude Code integration
 ├── Libraries/
 │   └── libatari800/            # Pre-compiled emulator core
 └── Resources/
@@ -41,6 +43,7 @@ attic/
 5. **BASIC Tokenization**: We tokenize BASIC source and inject into emulator memory rather than interpreting
 6. **BRK-Based Breakpoints**: Debugger uses 6502 BRK instruction ($00) for breakpoints
 7. **Emacs Integration**: REPL designed for comint compatibility with clear prompts
+8. **MCP Integration**: AtticMCP server exposes emulator tools to AI assistants like Claude Code
 
 ## Implementation Status
 
@@ -61,6 +64,7 @@ See `docs/IMPLEMENTATION_PLAN.md` for detailed phase-by-phase progress. Summary:
 - `docs/ARCHITECTURE.md` - System architecture details
 - `docs/SPECIFICATION.md` - Complete feature specification
 - `docs/PROTOCOL.md` - CLI/GUI socket protocol
+- `docs/MCP_USAGE.md` - MCP server tools for Claude Code integration
 - `docs/BASIC_TOKENIZER.md` - BASIC tokenization implementation
 - `docs/ATR_FILESYSTEM.md` - ATR disk image format
 - `docs/6502_REFERENCE.md` - 6502 instruction set reference
@@ -130,6 +134,45 @@ bd sync
 **WARNING**: Never use `bd edit` (opens interactive editor). Use `bd update` with flags instead.
 
 See `BEADS-QUICKSTART.md` for complete setup and usage instructions.
+
+## MCP Integration (Claude Code)
+
+This project includes an MCP server (AtticMCP) that allows Claude Code to directly interact with the Atari 800 XL emulator. The `.mcp.json` file in the project root configures this integration.
+
+### Prerequisites
+
+AtticServer must be running before using MCP tools:
+
+```bash
+swift run AtticServer
+```
+
+### Available Tools
+
+When working in this repository, Claude Code has access to these emulator tools:
+
+| Tool | Description |
+|------|-------------|
+| `emulator_status` | Get emulator state (running/paused, PC, disks, breakpoints) |
+| `emulator_pause` | Pause emulation |
+| `emulator_resume` | Resume emulation |
+| `emulator_reset` | Reset emulator (cold/warm) |
+| `emulator_read_memory` | Read bytes from memory |
+| `emulator_write_memory` | Write bytes to memory (must be paused) |
+| `emulator_get_registers` | Get CPU registers (A, X, Y, S, P, PC) |
+| `emulator_set_registers` | Set CPU registers (must be paused) |
+| `emulator_execute_frames` | Run for N frames |
+| `emulator_disassemble` | Disassemble 6502 code |
+| `emulator_set_breakpoint` | Set breakpoint |
+| `emulator_clear_breakpoint` | Clear breakpoint |
+| `emulator_list_breakpoints` | List all breakpoints |
+| `emulator_press_key` | Simulate key press |
+| `emulator_enter_basic_line` | Enter BASIC program line |
+| `emulator_run_basic` | Execute RUN |
+| `emulator_list_basic` | List BASIC program |
+| `emulator_new_basic` | Clear BASIC program |
+
+See `docs/MCP_USAGE.md` for detailed documentation and examples.
 
 ## External Dependencies
 
