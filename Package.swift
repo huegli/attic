@@ -65,6 +65,11 @@ let package = Package(
         .executable(
             name: "AtticServer",
             targets: ["AtticServer"]
+        ),
+        // MCP server executable - for Claude Code integration
+        .executable(
+            name: "AtticMCP",
+            targets: ["AtticMCP"]
         )
     ],
 
@@ -162,6 +167,20 @@ let package = Package(
             name: "AtticServer",
             dependencies: ["AtticCore", "AtticProtocol"],
             path: "Sources/AtticServer"
+        ),
+
+        // =================================================================
+        // AtticMCP - MCP Server for Claude Code Integration
+        // =================================================================
+        // An MCP (Model Context Protocol) server that exposes emulator
+        // functionality to AI assistants like Claude Code.
+        // - Communicates via JSON-RPC over stdin/stdout
+        // - Connects to AtticServer via CLI socket protocol
+        // - Provides tools for memory access, debugging, BASIC interaction
+        .executableTarget(
+            name: "AtticMCP",
+            dependencies: ["AtticCore"],
+            path: "Sources/AtticMCP"
         ),
 
         // =================================================================
