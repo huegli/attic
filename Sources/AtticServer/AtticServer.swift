@@ -468,13 +468,9 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
             let actualPath = path ?? "~/Desktop/Attic-\(Date()).png"
             return .ok("screenshot \(actualPath)")
 
-        // BASIC injection
-        case .injectBasic(let base64Data):
-            // TODO: Implement BASIC injection
-            guard Data(base64Encoded: base64Data) != nil else {
-                return .error("Invalid base64 data")
-            }
-            return .ok("injected basic (not yet implemented)")
+        // BASIC injection - DISABLED per attic-ahl (direct memory manipulation)
+        case .injectBasic:
+            return .error("BASIC injection is disabled. Use keyboard input instead.")
 
         case .injectKeys(let text):
             // TODO: Implement keyboard injection
@@ -485,7 +481,7 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
             return await handleDisassemble(address: address, lines: lines)
 
         // Phase 11: Monitor mode commands (not fully implemented yet)
-        case .assemble(let address):
+        case .assemble:
             // Interactive assembly mode - not supported via CLI protocol
             return .error("Interactive assembly not supported via protocol. Use assembleLine for single instructions.")
 
@@ -541,31 +537,17 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
             }
             return .ok("filled $\(String(format: "%04X", start))-$\(String(format: "%04X", end)) with $\(String(format: "%02X", value))")
 
-        // BASIC line entry and commands
-        case .basicLine(let line):
-            let result = await basicHandler.enterLine(line)
-            if result.success {
-                return .ok(result.message)
-            } else {
-                return .error(result.message)
-            }
+        // BASIC line entry and commands - DISABLED per attic-ahl (direct memory manipulation)
+        case .basicLine:
+            return .error("BASIC line injection is disabled. Use keyboard input instead.")
 
         case .basicNew:
-            let result = await basicHandler.newProgram()
-            if result.success {
-                return .ok(result.message)
-            } else {
-                return .error(result.message)
-            }
+            return .error("BASIC NEW injection is disabled. Use keyboard input instead.")
 
         case .basicRun:
-            let result = await basicHandler.runProgram()
-            if result.success {
-                return .ok(result.message)
-            } else {
-                return .error(result.message)
-            }
+            return .error("BASIC RUN injection is disabled. Use keyboard input instead.")
 
+        // BASIC listing is read-only, so it remains enabled
         case .basicList:
             // LIST requires detokenizer (Phase 15), show program info instead
             let info = await basicHandler.getProgramInfo()

@@ -106,14 +106,15 @@ final class MCPToolHandler: Sendable {
             return await executePressKey(arguments: arguments)
 
         // BASIC
+        // NOTE: BASIC injection tools are disabled per attic-ahl (direct memory manipulation)
         case "emulator_enter_basic_line":
-            return await executeEnterBasicLine(arguments: arguments)
+            return .error("BASIC line injection is disabled. Use emulator_press_key to type BASIC commands.")
         case "emulator_run_basic":
-            return await executeRunBasic()
+            return .error("BASIC run injection is disabled. Use emulator_press_key to type RUN.")
+        case "emulator_new_basic":
+            return .error("BASIC new injection is disabled. Use emulator_press_key to type NEW.")
         case "emulator_list_basic":
             return await executeListBasic()
-        case "emulator_new_basic":
-            return await executeNewBasic()
 
         default:
             return .error("Unknown tool: \(tool)")

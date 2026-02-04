@@ -49,11 +49,8 @@ enum MCPToolDefinitions {
             // Input
             emulatorPressKey,
 
-            // BASIC
-            emulatorEnterBasicLine,
-            emulatorRunBasic,
+            // BASIC (read-only tools only - injection tools disabled per attic-ahl)
             emulatorListBasic,
-            emulatorNewBasic,
         ]
     }
 
