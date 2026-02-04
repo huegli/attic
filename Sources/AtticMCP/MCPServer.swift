@@ -162,7 +162,7 @@ final class MCPServer {
                     capabilities: ServerCapabilities(tools: .init()),
                     serverInfo: serverInfo
                 )
-                sendResult(id: request.id, result: AnyCodable(encodeResult(result)))
+                sendResult(id: request.id, result: result)
                 return
             }
 
@@ -186,14 +186,14 @@ final class MCPServer {
             serverInfo: serverInfo
         )
 
-        sendResult(id: request.id, result: AnyCodable(encodeResult(result)))
+        sendResult(id: request.id, result: result)
     }
 
     /// Handles the tools/list request.
     private func handleToolsList(_ request: JSONRPCRequest) {
         let tools = MCPToolDefinitions.allTools
         let result = ToolsListResult(tools: tools)
-        sendResult(id: request.id, result: AnyCodable(encodeResult(result)))
+        sendResult(id: request.id, result: result)
     }
 
     /// Handles a tools/call request.
@@ -212,16 +212,51 @@ final class MCPServer {
             arguments = [:]
         }
 
+        // Try to connect if not already connected
+        if toolHandler == nil {
+            await tryConnect()
+        }
+
         // Check if we're connected
         guard let handler = toolHandler else {
             let result = ToolCallResult.error("Not connected to AtticServer. Make sure AtticServer is running.")
-            sendResult(id: request.id, result: AnyCodable(encodeResult(result)))
+            sendResult(id: request.id, result: result)
             return
         }
 
         // Execute the tool
         let result = await handler.execute(tool: toolName, arguments: arguments)
-        sendResult(id: request.id, result: AnyCodable(encodeResult(result)))
+        sendResult(id: request.id, result: result)
+    }
+
+    /// Attempts to connect to AtticServer if not already connected.
+    /// This is called on-demand when a tool is invoked.
+    private func tryConnect() async {
+        // Already have a tool handler? Nothing to do
+        guard toolHandler == nil else { return }
+
+        // Create client if needed
+        if client == nil {
+            client = CLISocketClient()
+        }
+
+        // Discover socket
+        guard let socketPath = client?.discoverSocket() else {
+            log("No AtticServer socket found")
+            return
+        }
+
+        // Try to connect
+        do {
+            log("Connecting to AtticServer at \(socketPath)")
+            try await client?.connect(to: socketPath)
+            toolHandler = MCPToolHandler(client: client!)
+            log("Connected to AtticServer")
+        } catch {
+            log("Failed to connect to AtticServer: \(error)")
+            // Reset client so we can try again next time
+            client = nil
+        }
     }
 
     // =========================================================================
@@ -229,45 +264,26 @@ final class MCPServer {
     // =========================================================================
 
     /// Sends a successful result response.
-    private func sendResult(id: RequestID, result: AnyCodable) {
-        let response = JSONRPCResponse(id: id, result: result)
-        sendResponse(response)
+    /// The result is encoded directly to JSON bytes to avoid JSONSerialization's
+    /// problematic conversion of 0/1 to false/true.
+    private func sendResult<T: Encodable>(id: RequestID, result: T) {
+        do {
+            let resultData = try encoder.encode(result)
+            let response = JSONRPCResponse(id: id, resultData: resultData)
+            let json = response.toJSON(encoder: encoder)
+            print(json)
+            fflush(stdout)
+        } catch {
+            log("Failed to encode result: \(error)")
+        }
     }
 
     /// Sends an error response.
     private func sendError(id: RequestID, error: JSONRPCError) {
         let response = JSONRPCResponse(id: id, error: error)
-        sendResponse(response)
-    }
-
-    /// Sends a JSON-RPC response to stdout.
-    private func sendResponse(_ response: JSONRPCResponse) {
-        do {
-            let data = try encoder.encode(response)
-            if let json = String(data: data, encoding: .utf8) {
-                print(json)
-                fflush(stdout)
-            }
-        } catch {
-            log("Failed to encode response: \(error)")
-        }
-    }
-
-    // =========================================================================
-    // MARK: - Helper Functions
-    // =========================================================================
-
-    /// Encodes a Codable value to a dictionary for AnyCodable wrapping.
-    private func encodeResult<T: Codable>(_ value: T) -> [String: Any] {
-        do {
-            let data = try encoder.encode(value)
-            if let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                return dict
-            }
-        } catch {
-            log("Failed to encode result: \(error)")
-        }
-        return [:]
+        let json = response.toJSON(encoder: encoder)
+        print(json)
+        fflush(stdout)
     }
 
     /// Logs a message to stderr (stdout is reserved for JSON-RPC).

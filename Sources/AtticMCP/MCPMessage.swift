@@ -33,24 +33,62 @@ struct JSONRPCRequest: Codable, Sendable {
 }
 
 /// A JSON-RPC 2.0 response message.
-struct JSONRPCResponse: Codable, Sendable {
+/// Note: We avoid Codable for encoding to prevent JSONSerialization from
+/// converting 0/1 to false/true booleans. Instead, we manually construct JSON.
+struct JSONRPCResponse: Sendable {
     let jsonrpc: String
     let id: RequestID
-    let result: AnyCodable?
+    let resultData: Data?  // Pre-encoded JSON for result
     let error: JSONRPCError?
 
-    init(id: RequestID, result: AnyCodable) {
+    init(id: RequestID, resultData: Data) {
         self.jsonrpc = "2.0"
         self.id = id
-        self.result = result
+        self.resultData = resultData
         self.error = nil
     }
 
     init(id: RequestID, error: JSONRPCError) {
         self.jsonrpc = "2.0"
         self.id = id
-        self.result = nil
+        self.resultData = nil
         self.error = error
+    }
+
+    /// Manually constructs JSON to embed pre-encoded result data without re-parsing.
+    /// This preserves exact numeric types (0 stays 0, not false).
+    func toJSON(encoder: JSONEncoder) -> String {
+        var parts: [String] = []
+
+        // Encode id
+        let idString: String
+        switch id {
+        case .string(let s):
+            // Escape the string for JSON
+            let escaped = s.replacingOccurrences(of: "\\", with: "\\\\")
+                           .replacingOccurrences(of: "\"", with: "\\\"")
+            idString = "\"\(escaped)\""
+        case .number(let n):
+            idString = "\(n)"
+        case .null:
+            idString = "null"
+        }
+        parts.append("\"id\":\(idString)")
+        parts.append("\"jsonrpc\":\"2.0\"")
+
+        if let resultData = resultData,
+           let resultString = String(data: resultData, encoding: .utf8) {
+            parts.append("\"result\":\(resultString)")
+        }
+
+        if let error = error {
+            if let errorData = try? encoder.encode(error),
+               let errorString = String(data: errorData, encoding: .utf8) {
+                parts.append("\"error\":\(errorString)")
+            }
+        }
+
+        return "{\(parts.joined(separator: ","))}"
     }
 }
 
