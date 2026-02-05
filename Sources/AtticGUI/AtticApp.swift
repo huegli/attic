@@ -1010,16 +1010,23 @@ struct AtticCommands: Commands {
             .keyboardShortcut("3")
         }
 
+        // Hide the standard Close menu item (we handle it in app termination)
+        CommandGroup(replacing: .saveItem) {
+            // Empty - removes Save/Save As which we don't need
+        }
+
         // App termination options
         // Replace the default Quit command with our shutdown options
         CommandGroup(replacing: .appTermination) {
-            // Disconnect from server but leave it running
-            Button("Disconnect") {
+            // Close window / disconnect from server but leave it running
+            Button("Close") {
                 NSApplication.shared.terminate(nil)
             }
-            .keyboardShortcut("W", modifiers: [.command, .shift])
+            .keyboardShortcut("W")
 
-            // Shutdown server and quit (this is the default Cmd+Q behavior)
+            Divider()
+
+            // Shutdown server and quit
             Button("Shutdown All") {
                 Task {
                     await viewModel.shutdownServer()
