@@ -494,30 +494,40 @@ public enum BASICTokenLookup {
 
     /// Finds the closest keyword to a misspelled word (for error suggestions).
     ///
-    /// Uses simple prefix matching to find likely intended keywords.
+    /// Uses Levenshtein distance to find the keyword with the smallest edit
+    /// distance to the input. Returns the best match if within threshold.
     ///
     /// - Parameter word: The misspelled word.
     /// - Returns: A suggested correction, or nil if no close match found.
     public static func suggestKeyword(_ word: String) -> String? {
         let upper = word.uppercased()
+        var bestMatch: String?
+        var bestDistance = Int.max
 
         // Check statement keywords
         for token in BASICStatementToken.allCases {
             let kw = token.keyword
-            if !kw.isEmpty && (kw.hasPrefix(upper) || levenshteinDistance(upper, kw) <= 2) {
-                return kw
+            guard !kw.isEmpty else { continue }
+
+            let distance = levenshteinDistance(upper, kw)
+            if distance < bestDistance {
+                bestDistance = distance
+                bestMatch = kw
             }
         }
 
         // Check function keywords
         for token in BASICFunctionToken.allCases {
             let kw = token.keyword
-            if kw.hasPrefix(upper) || levenshteinDistance(upper, kw) <= 2 {
-                return kw
+            let distance = levenshteinDistance(upper, kw)
+            if distance < bestDistance {
+                bestDistance = distance
+                bestMatch = kw
             }
         }
 
-        return nil
+        // Only return if within reasonable threshold (2 edits)
+        return bestDistance <= 2 ? bestMatch : nil
     }
 
     /// Calculates the Levenshtein distance between two strings.
