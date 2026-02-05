@@ -614,8 +614,14 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
         let framesPerKeyPress = 3
         // Number of frames between key release and next key press
         let framesBetweenKeys = 2
+        // Extra frames needed when pressing the same key twice in a row
+        // The Atari OS keyboard handler needs to see the key released for
+        // several frames before it will accept a new press of the same key
+        let extraFramesForRepeat = 4
 
         var injectedCount = 0
+        var previousKeyChar: UInt8 = 0
+        var previousKeyCode: UInt8 = 0xFF
 
         for char in text {
             // Convert character to Atari key codes
@@ -624,6 +630,17 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
             // Skip if we couldn't map the character
             if keyChar == 0 && keyCode == 0xFF {
                 continue
+            }
+
+            // Check if this is the same key as the previous one
+            let isSameKey = (keyChar == previousKeyChar && keyChar != 0) ||
+                           (keyCode == previousKeyCode && keyCode != 0xFF)
+
+            // If same key, add extra frames for keyboard debounce
+            if isSameKey {
+                for _ in 0..<extraFramesForRepeat {
+                    await emulator.executeFrame()
+                }
             }
 
             // Press the key
@@ -641,6 +658,10 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
             for _ in 0..<framesBetweenKeys {
                 await emulator.executeFrame()
             }
+
+            // Remember this key for repeat detection
+            previousKeyChar = keyChar
+            previousKeyCode = keyCode
 
             injectedCount += 1
         }
