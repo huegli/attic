@@ -27,7 +27,7 @@ final class BASICDetokenizerTests: XCTestCase {
     let tokenizer = BASICTokenizer()
 
     /// Helper to create a minimal tokenized line for testing.
-    /// Format: [lineNum low, lineNum high, length, ...content..., $16]
+    /// Format: [lineNum low, lineNum high, lineOffset, stmtOffset, ...content..., $16]
     func makeLineBytes(
         lineNumber: UInt16,
         content: [UInt8]
@@ -35,8 +35,9 @@ final class BASICDetokenizerTests: XCTestCase {
         var bytes: [UInt8] = []
         bytes.append(UInt8(lineNumber & 0xFF))
         bytes.append(UInt8(lineNumber >> 8))
-        let length = UInt8(3 + content.count + 1)  // header + content + EOL
-        bytes.append(length)
+        let length = UInt8(4 + content.count + 1)  // header (4) + content + EOL
+        bytes.append(length)  // Line offset
+        bytes.append(length)  // Statement offset (same for single-statement lines)
         bytes.append(contentsOf: content)
         bytes.append(BASICSpecialToken.endOfLine)
         return bytes

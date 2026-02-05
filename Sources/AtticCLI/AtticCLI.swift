@@ -395,13 +395,7 @@ struct AtticCLI {
         case .monitor:
             return translateMonitorCommand(trimmed)
         case .basic:
-            // Use inject keys to type BASIC input via keyboard (natural input)
-            // Escape special characters and add RETURN at the end
-            let escaped = trimmed
-                .replacingOccurrences(of: "\\", with: "\\\\")
-                .replacingOccurrences(of: " ", with: "\\s")
-                .replacingOccurrences(of: "\t", with: "\\t")
-            return "inject keys \(escaped)\\n"
+            return translateBASICCommand(trimmed)
         case .dos:
             return translateDOSCommand(trimmed)
         }
@@ -438,6 +432,30 @@ struct AtticCLI {
         default:
             return cmd
         }
+    }
+
+    /// Translates a BASIC mode command.
+    ///
+    /// Recognizes special commands (list, run, new) and translates them to
+    /// protocol commands. Everything else is sent as injected keystrokes.
+    static func translateBASICCommand(_ cmd: String) -> String {
+        let upper = cmd.uppercased()
+
+        // Handle LIST command - use protocol command to read and display listing
+        if upper == "LIST" || upper.hasPrefix("LIST ") {
+            return "basic list"
+        }
+
+        // Handle RUN command - these are disabled on server, fall through to key injection
+        // Handle NEW command - these are disabled on server, fall through to key injection
+
+        // Default: inject keys to type BASIC input via keyboard (natural input)
+        // Escape special characters and add RETURN at the end
+        let escaped = cmd
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: " ", with: "\\s")
+            .replacingOccurrences(of: "\t", with: "\\t")
+        return "inject keys \(escaped)\\n"
     }
 
     /// Translates a DOS mode command.

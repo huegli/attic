@@ -111,8 +111,8 @@ public struct BASICDetokenizer: Sendable {
         _ bytes: [UInt8],
         variables: [BASICVariableName]
     ) -> DetokenizedLine? {
-        // Minimum line: 2 bytes line number + 1 byte length + 1 byte EOL = 4 bytes
-        guard bytes.count >= 4 else { return nil }
+        // Minimum line: 2 bytes line number + 1 byte line offset + 1 byte stmt offset + 1 byte EOL = 5 bytes
+        guard bytes.count >= 5 else { return nil }
 
         // Extract line number (little-endian)
         let lineNumber = UInt16(bytes[0]) | (UInt16(bytes[1]) << 8)
@@ -120,9 +120,12 @@ public struct BASICDetokenizer: Sendable {
         // Line number 0 indicates end of program
         guard lineNumber > 0 else { return nil }
 
+        // Line 32768 is the immediate mode line buffer - skip it
+        guard lineNumber != BASICLineFormat.immediateModeLine else { return nil }
+
         // Extract line length
         let lineLength = Int(bytes[2])
-        guard lineLength >= 4 && lineLength <= bytes.count else { return nil }
+        guard lineLength >= 5 && lineLength <= bytes.count else { return nil }
 
         // Extract content bytes (skip header, exclude EOL marker)
         let contentStart = BASICLineFormat.contentOffset
@@ -166,10 +169,10 @@ public struct BASICDetokenizer: Sendable {
         var offset = 0
 
         while offset < bytes.count {
-            // Check for end-of-program marker (line number 0)
+            // Check for end-of-program marker (line number 0) or immediate mode line (32768)
             if bytes.count - offset >= 2 {
                 let lineNum = UInt16(bytes[offset]) | (UInt16(bytes[offset + 1]) << 8)
-                if lineNum == 0 {
+                if lineNum == 0 || lineNum == BASICLineFormat.immediateModeLine {
                     break
                 }
             }
@@ -177,7 +180,7 @@ public struct BASICDetokenizer: Sendable {
             // Read line length
             guard offset + 2 < bytes.count else { break }
             let lineLength = Int(bytes[offset + 2])
-            guard lineLength >= 4 && offset + lineLength <= bytes.count else { break }
+            guard lineLength >= 5 && offset + lineLength <= bytes.count else { break }
 
             // Extract line bytes
             let lineBytes = Array(bytes[offset..<(offset + lineLength)])

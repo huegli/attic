@@ -124,22 +124,32 @@ public enum BASICMemoryDefaults {
 /// ```
 /// Offset  Size  Description
 /// 0       2     Line number (little-endian)
-/// 2       1     Line length (total bytes including this header)
-/// 3       n     Tokenized statement data
-/// n+3     1     End of line marker ($16)
+/// 2       1     Line offset (total bytes to next line)
+/// 3       1     Statement offset (bytes to next statement, for multi-statement lines)
+/// 4       n     Tokenized statement data
+/// n+4     1     End of line marker ($16)
 /// ```
+///
+/// Note: Line 32768 ($8000) is the immediate mode line buffer and should be
+/// skipped when listing programs.
 public enum BASICLineFormat {
     /// Offset of line number in a tokenized line.
     public static let lineNumberOffset: Int = 0
 
-    /// Offset of line length byte.
+    /// Offset of line length/offset byte.
     public static let lineLengthOffset: Int = 2
 
-    /// Offset where tokenized content begins.
-    public static let contentOffset: Int = 3
+    /// Offset of statement offset byte (for multi-statement lines with colons).
+    public static let statementOffsetOffset: Int = 3
 
-    /// Size of the line header (line number + length byte).
-    public static let headerSize: Int = 3
+    /// Offset where tokenized content begins.
+    public static let contentOffset: Int = 4
+
+    /// Size of the line header (line number + line offset + statement offset).
+    public static let headerSize: Int = 4
+
+    /// Line number for the immediate mode line buffer (should be skipped in listings).
+    public static let immediateModeLine: UInt16 = 32768
 
     /// End of line marker byte.
     public static let endOfLineMarker: UInt8 = 0x16

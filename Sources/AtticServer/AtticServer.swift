@@ -548,9 +548,14 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
 
         // BASIC listing is read-only, so it remains enabled
         case .basicList:
-            // LIST requires detokenizer (Phase 15), show program info instead
-            let info = await basicHandler.getProgramInfo()
-            return .ok("program \(info.lines) lines, \(info.bytes) bytes, \(info.variables) variables")
+            // List the BASIC program using the detokenizer
+            let listing = await basicHandler.listProgram(range: nil)
+            if listing.isEmpty {
+                return .ok("(no program)")
+            }
+            // Convert newlines to multi-line separator for CLI protocol
+            let lines = listing.split(separator: "\n", omittingEmptySubsequences: false)
+            return .okMultiLine(lines.map(String.init))
         }
     }
 
