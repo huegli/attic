@@ -315,7 +315,13 @@ struct AtticCLI {
                     break
 
                 default:
-                    if trimmed.hasPrefix(".state ") || trimmed == ".reset" || trimmed == ".warmstart" {
+                    // Handle commands that forward to server
+                    let lowerTrimmed = trimmed.lowercased()
+                    if lowerTrimmed.hasPrefix(".state ") ||
+                       lowerTrimmed == ".reset" ||
+                       lowerTrimmed == ".warmstart" ||
+                       lowerTrimmed == ".screenshot" ||
+                       lowerTrimmed.hasPrefix(".screenshot ") {
                         // Forward to server
                         break
                     }
@@ -371,19 +377,27 @@ struct AtticCLI {
 
         // Handle dot commands
         if trimmed.hasPrefix(".") {
-            switch trimmed.lowercased() {
+            let lowerTrimmed = trimmed.lowercased()
+            switch lowerTrimmed {
             case ".status":
                 return "status"
             case ".reset":
                 return "reset cold"
             case ".warmstart":
                 return "reset warm"
+            case ".screenshot":
+                return "screenshot"
             default:
+                // Handle .screenshot with path
+                if lowerTrimmed.hasPrefix(".screenshot ") {
+                    let path = String(trimmed.dropFirst(12))
+                    return "screenshot \(path)"
+                }
                 // Handle .state save/load
-                if trimmed.lowercased().hasPrefix(".state save ") {
+                if lowerTrimmed.hasPrefix(".state save ") {
                     let path = String(trimmed.dropFirst(12))
                     return "state save \(path)"
-                } else if trimmed.lowercased().hasPrefix(".state load ") {
+                } else if lowerTrimmed.hasPrefix(".state load ") {
                     let path = String(trimmed.dropFirst(12))
                     return "state load \(path)"
                 }
@@ -487,6 +501,7 @@ struct AtticCLI {
           .dos              Switch to DOS mode
           .help             Show help
           .status           Show emulator status
+          .screenshot [p]   Save screenshot (default: ~/Desktop/Attic-<time>.png)
           .reset            Cold reset
           .warmstart        Warm reset
           .state save <p>   Save state to file
