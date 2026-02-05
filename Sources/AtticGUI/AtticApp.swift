@@ -788,6 +788,40 @@ class AtticViewModel: ObservableObject {
         }
     }
 
+    /// Presses the HELP key (for HELP button).
+    func pressHelpKey() {
+        Task {
+            switch mode {
+            case .client:
+                await client?.sendKeyDown(
+                    keyChar: 0,
+                    keyCode: AtariKeyCode.help,
+                    shift: false,
+                    control: false
+                )
+            case .embedded:
+                await emulator?.pressKey(
+                    keyChar: 0,
+                    keyCode: AtariKeyCode.help,
+                    shift: false,
+                    control: false
+                )
+            }
+        }
+    }
+
+    /// Releases the HELP key (for HELP button).
+    func releaseHelpKey() {
+        Task {
+            switch mode {
+            case .client:
+                await client?.sendKeyUp()
+            case .embedded:
+                await emulator?.releaseKey()
+            }
+        }
+    }
+
     // =========================================================================
     // MARK: - Emulation Loop (Embedded Mode Only)
     // =========================================================================

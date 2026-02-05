@@ -242,6 +242,36 @@ struct ControlPanelView: View {
                         )
                     }
                 )
+
+                // Divider between console keys and system keys
+                Rectangle()
+                    .fill(Color.white.opacity(0.2))
+                    .frame(width: 1, height: 24)
+                    .padding(.horizontal, 4)
+
+                // HELP key (XL/XE only)
+                ConsoleButton(
+                    label: "HELP",
+                    key: "F4",
+                    isPressed: false,  // HELP doesn't have persistent state
+                    onPress: {
+                        viewModel.pressHelpKey()
+                    },
+                    onRelease: {
+                        viewModel.releaseHelpKey()
+                    }
+                )
+
+                // RESET button (warm reset)
+                ActionButton(
+                    label: "RESET",
+                    key: "F5",
+                    action: {
+                        Task {
+                            await viewModel.reset(cold: false)
+                        }
+                    }
+                )
             }
             .padding(.leading)
 
@@ -273,10 +303,52 @@ struct ControlPanelView: View {
 }
 
 // =============================================================================
+// MARK: - Action Button
+// =============================================================================
+
+/// A styled button for single-action controls (like RESET).
+///
+/// Unlike ConsoleButton which tracks press/release, ActionButton triggers
+/// a single action on click.
+struct ActionButton: View {
+    /// The label text (e.g., "RESET").
+    let label: String
+
+    /// The keyboard shortcut hint (e.g., "F5").
+    let key: String
+
+    /// The action to perform when clicked.
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 2) {
+                Text(label)
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                Text(key)
+                    .font(.system(size: 8, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.5))
+            }
+            .frame(width: 60, height: 32)
+            .background(
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color.white.opacity(0.1))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 4)
+                    .stroke(Color.white.opacity(0.3), lineWidth: 1)
+            )
+            .foregroundColor(.white)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// =============================================================================
 // MARK: - Console Button
 // =============================================================================
 
-/// A styled button for console controls (START, SELECT, OPTION).
+/// A styled button for console controls (START, SELECT, OPTION, HELP).
 ///
 /// Console buttons support press and release actions to match the Atari's
 /// console key behavior. The button appearance changes when pressed
