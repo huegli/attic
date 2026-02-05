@@ -678,6 +678,15 @@ class AtticViewModel: ObservableObject {
             command: event.modifierFlags.contains(.command)
         )
 
+        // F5 triggers warm reset (Atari RESET key)
+        // This is handled specially because RESET is not part of the keyboard matrix
+        if event.keyCode == 0x60 {  // MacKeyCode.f5
+            Task {
+                await reset(cold: false)
+            }
+            return
+        }
+
         // Convert to Atari key
         if let (keyChar, keyCode, atariShift, atariControl) = keyboardHandler.keyDown(
             keyCode: event.keyCode,
