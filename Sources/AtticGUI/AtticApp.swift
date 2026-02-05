@@ -227,6 +227,13 @@ class AtticViewModel: ObservableObject {
     /// Task for receiving audio samples.
     private var audioReceiverTask: Task<Void, Never>?
 
+    /// PID of the AtticServer process if we launched it.
+    /// Used for shutdown functionality.
+    private var serverPID: Int32?
+
+    /// Path to the CLI socket for sending shutdown commands.
+    private var cliSocketPath: String?
+
     // =========================================================================
     // MARK: - Embedded Mode Components
     // =========================================================================
@@ -357,6 +364,9 @@ class AtticViewModel: ObservableObject {
             switch result {
             case .success(let socketPath, let pid):
                 debugLog("AtticServer started (PID: \(pid)) at \(socketPath)")
+                // Store server info for shutdown functionality
+                serverPID = pid
+                cliSocketPath = socketPath
                 // Wait a moment for AESP to initialize
                 try? await Task.sleep(nanoseconds: 500_000_000)  // 0.5 seconds
                 // Try connecting again
@@ -849,6 +859,44 @@ class AtticViewModel: ObservableObject {
     }
 
     // =========================================================================
+    // MARK: - Server Shutdown
+    // =========================================================================
+
+    /// Shuts down the AtticServer if we launched it.
+    ///
+    /// Sends the shutdown command via CLI socket, which causes the server
+    /// to gracefully stop. This should be called before quitting the app
+    /// when the user wants to shut down everything.
+    func shutdownServer() async {
+        guard mode == .client else { return }
+
+        // If we have a CLI socket path, send shutdown command
+        if let socketPath = cliSocketPath {
+            let cliClient = CLISocketClient()
+            do {
+                try await cliClient.connect(to: socketPath)
+                _ = try await cliClient.send(.shutdown)
+                await cliClient.disconnect()
+                print("[AtticGUI] Sent shutdown to AtticServer")
+            } catch {
+                print("[AtticGUI] Failed to send shutdown: \(error)")
+                // Fall back to terminating by PID if CLI fails
+                if let pid = serverPID {
+                    kill(pid, SIGTERM)
+                    print("[AtticGUI] Sent SIGTERM to AtticServer (PID: \(pid))")
+                }
+            }
+        } else if let pid = serverPID {
+            // No socket path, terminate by PID
+            kill(pid, SIGTERM)
+            print("[AtticGUI] Sent SIGTERM to AtticServer (PID: \(pid))")
+        }
+
+        serverPID = nil
+        cliSocketPath = nil
+    }
+
+    // =========================================================================
     // MARK: - Cleanup
     // =========================================================================
 
@@ -960,6 +1008,29 @@ struct AtticCommands: Commands {
                 // TODO: Resize window
             }
             .keyboardShortcut("3")
+        }
+
+        // App termination options
+        // Replace the default Quit command with our shutdown options
+        CommandGroup(replacing: .appTermination) {
+            // Disconnect from server but leave it running
+            Button("Disconnect") {
+                NSApplication.shared.terminate(nil)
+            }
+            .keyboardShortcut("W", modifiers: [.command, .shift])
+
+            // Shutdown server and quit (this is the default Cmd+Q behavior)
+            Button("Shutdown All") {
+                Task {
+                    await viewModel.shutdownServer()
+                    // Give server a moment to shut down, then quit
+                    try? await Task.sleep(nanoseconds: 200_000_000)
+                    await MainActor.run {
+                        NSApplication.shared.terminate(nil)
+                    }
+                }
+            }
+            .keyboardShortcut("Q")
         }
     }
 }
