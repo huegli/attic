@@ -311,15 +311,115 @@ class AtticViewModel: ObservableObject {
     // MARK: - Client Mode Initialization
     // =========================================================================
 
-    /// Initializes client mode by connecting to an existing AtticServer.
+    /// Writes a debug message to a log file (for debugging GUI startup).
+    private func debugLog(_ message: String) {
+        let logPath = "/tmp/attic-gui-debug.log"
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let line = "[\(timestamp)] \(message)\n"
+        if let data = line.data(using: .utf8) {
+            if FileManager.default.fileExists(atPath: logPath) {
+                if let handle = FileHandle(forWritingAtPath: logPath) {
+                    handle.seekToEndOfFile()
+                    handle.write(data)
+                    handle.closeFile()
+                }
+            } else {
+                FileManager.default.createFile(atPath: logPath, contents: data)
+            }
+        }
+    }
+
+    /// Initializes client mode by connecting to AtticServer.
     ///
-    /// The server must be started separately before launching the GUI.
-    /// If no server is running, an error message is displayed.
+    /// If no server is running, automatically launches one first.
     private func initializeClientMode() async {
+        debugLog("initializeClientMode() called")
         statusMessage = "Connecting to server..."
 
+        // Try to connect to existing server first
+        let connected = await tryConnectToServer()
+        debugLog("tryConnectToServer() returned: \(connected)")
+
+        if !connected {
+            // No server running - try to launch one
+            debugLog("No server running, attempting to launch...")
+            statusMessage = "Starting server..."
+
+            let launcher = ServerLauncher()
+            if let execPath = launcher.findServerExecutable() {
+                debugLog("Found server executable at: \(execPath)")
+            } else {
+                debugLog("Server executable NOT found")
+            }
+            let result = launcher.launchServer(options: ServerLaunchOptions(silent: false))
+            debugLog("launchServer result: \(result)")
+
+            switch result {
+            case .success(let socketPath, let pid):
+                debugLog("AtticServer started (PID: \(pid)) at \(socketPath)")
+                // Wait a moment for AESP to initialize
+                try? await Task.sleep(nanoseconds: 500_000_000)  // 0.5 seconds
+                // Try connecting again
+                let retryConnected = await tryConnectToServer()
+                if !retryConnected {
+                    initializationError = """
+                        AtticServer started but connection failed.
+
+                        Try running in embedded mode:
+                          swift run AtticGUI --embedded
+                        """
+                    statusMessage = "Connection Failed"
+                    await cleanup()
+                }
+
+            case .executableNotFound:
+                print("[AtticGUI] AtticServer executable not found")
+                initializationError = """
+                    AtticServer executable not found.
+
+                    Make sure AtticServer is built:
+                      swift build
+
+                    Or run in embedded mode:
+                      swift run AtticGUI --embedded
+                    """
+                statusMessage = "Server Not Found"
+                await cleanup()
+
+            case .launchFailed(let error):
+                print("[AtticGUI] Failed to launch AtticServer: \(error)")
+                initializationError = """
+                    Failed to launch AtticServer: \(error.localizedDescription)
+
+                    Try starting it manually:
+                      swift run AtticServer
+
+                    Or run in embedded mode:
+                      swift run AtticGUI --embedded
+                    """
+                statusMessage = "Launch Failed"
+                await cleanup()
+
+            case .socketTimeout(let pid):
+                print("[AtticGUI] AtticServer started (PID: \(pid)) but socket not ready")
+                initializationError = """
+                    AtticServer started but socket not ready.
+
+                    Try running in embedded mode:
+                      swift run AtticGUI --embedded
+                    """
+                statusMessage = "Server Timeout"
+                await cleanup()
+            }
+        }
+    }
+
+    /// Attempts to connect to an existing AtticServer via AESP protocol.
+    ///
+    /// - Returns: True if connection successful, false otherwise.
+    private func tryConnectToServer() async -> Bool {
         do {
-            // Create and connect client to existing server
+            // Create and connect client
             let clientConfig = AESPClientConfiguration(
                 host: "localhost",
                 controlPort: AESPConstants.defaultControlPort,
@@ -359,23 +459,13 @@ class AtticViewModel: ObservableObject {
             audioEngine.resume()
 
             print("[AtticGUI] Connected to server")
+            return true
 
         } catch {
-            // No server is running - show error message
             print("[AtticGUI] Failed to connect to server: \(error)")
-            initializationError = """
-                No AtticServer found on localhost:\(AESPConstants.defaultControlPort)
-
-                Please start the server first:
-                  swift run AtticServer
-
-                Or run in embedded mode:
-                  swift run AtticGUI --embedded
-                """
-            statusMessage = "No Server"
-
-            // Clean up
-            await cleanup()
+            // Clean up partial state
+            client = nil
+            return false
         }
     }
 

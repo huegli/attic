@@ -569,111 +569,33 @@ struct AtticCLI {
         }
     }
 
-    /// Launches AtticServer as a subprocess.
+    /// Launches AtticServer as a subprocess using the shared ServerLauncher.
     ///
     /// - Parameters:
-    ///   - headless: Whether to run without GUI.
+    ///   - headless: Whether to run without GUI (unused, kept for API compatibility).
     ///   - silent: Whether to disable audio.
     /// - Returns: The socket path if successful, nil otherwise.
     static func launchServer(headless: Bool, silent: Bool) -> String? {
-        // Build the path to AtticServer executable
-        // In development, it's in the same build directory
-        // In production, it would be in /usr/local/bin or similar
+        let launcher = ServerLauncher()
+        let options = ServerLaunchOptions(silent: silent)
 
-        let serverPath = findServerExecutable()
-        guard let serverPath = serverPath else {
+        switch launcher.launchServer(options: options) {
+        case .success(let socketPath, let pid):
+            print("AtticServer started (PID: \(pid))")
+            return socketPath
+
+        case .executableNotFound:
             printError("Could not find AtticServer executable")
             return nil
-        }
 
-        // Create arguments
-        var arguments: [String] = []
-        if silent {
-            arguments.append("--silent")
-        }
-
-        // Launch server
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: serverPath)
-        process.arguments = arguments
-
-        // Redirect output to /dev/null to avoid cluttering CLI output
-        // In debug mode, you might want to redirect to a log file instead
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-        } catch {
+        case .launchFailed(let error):
             printError("Failed to launch AtticServer: \(error.localizedDescription)")
             return nil
+
+        case .socketTimeout(let pid):
+            printError("AtticServer started (PID: \(pid)) but socket not found")
+            return nil
         }
-
-        // Wait briefly for server to start and create socket
-        Thread.sleep(forTimeInterval: 0.5)
-
-        // The socket path is based on the server's PID
-        let socketPath = CLIProtocolConstants.socketPath(for: process.processIdentifier)
-
-        // Wait for socket to appear (with timeout)
-        var retries = 10
-        while retries > 0 {
-            if FileManager.default.fileExists(atPath: socketPath) {
-                print("AtticServer started (PID: \(process.processIdentifier))")
-                return socketPath
-            }
-            Thread.sleep(forTimeInterval: 0.2)
-            retries -= 1
-        }
-
-        printError("AtticServer started but socket not found at \(socketPath)")
-        return nil
-    }
-
-    /// Finds the AtticServer executable.
-    ///
-    /// Searches in several locations:
-    /// 1. Same directory as the CLI executable
-    /// 2. PATH environment variable
-    /// 3. Common installation locations
-    static func findServerExecutable() -> String? {
-        let fileManager = FileManager.default
-
-        // Get the directory containing this CLI executable
-        let executablePath = CommandLine.arguments[0]
-        let executableDir = (executablePath as NSString).deletingLastPathComponent
-
-        // Check in same directory
-        let sameDirPath = (executableDir as NSString).appendingPathComponent("AtticServer")
-        if fileManager.isExecutableFile(atPath: sameDirPath) {
-            return sameDirPath
-        }
-
-        // Check in PATH
-        if let pathEnv = ProcessInfo.processInfo.environment["PATH"] {
-            for dir in pathEnv.split(separator: ":") {
-                let path = (String(dir) as NSString).appendingPathComponent("AtticServer")
-                if fileManager.isExecutableFile(atPath: path) {
-                    return path
-                }
-            }
-        }
-
-        // Check common locations
-        let commonPaths = [
-            "/usr/local/bin/AtticServer",
-            "/opt/homebrew/bin/AtticServer",
-            "~/.local/bin/AtticServer"
-        ]
-
-        for path in commonPaths {
-            let expandedPath = (path as NSString).expandingTildeInPath
-            if fileManager.isExecutableFile(atPath: expandedPath) {
-                return expandedPath
-            }
-        }
-
-        return nil
     }
 
     /// Discovers an existing AtticServer socket.

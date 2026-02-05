@@ -132,6 +132,7 @@ public actor CLISocketClient {
     /// Discovers available AtticServer sockets.
     ///
     /// Scans /tmp for attic-*.sock files and returns the paths of valid sockets.
+    /// Only returns sockets whose server process is still running (validates PID).
     /// Sockets are sorted by modification time (most recent first).
     ///
     /// - Returns: Array of socket paths, or empty if none found.
@@ -149,6 +150,15 @@ public actor CLISocketClient {
             if file.hasPrefix("attic-") && file.hasSuffix(".sock") {
                 let fullPath = (tmpPath as NSString).appendingPathComponent(file)
 
+                // Extract PID from filename (attic-<PID>.sock)
+                // and verify the process is still running
+                guard isServerProcessRunning(socketFilename: file) else {
+                    // Stale socket - server process no longer running
+                    // Clean up the stale socket file
+                    try? fileManager.removeItem(atPath: fullPath)
+                    continue
+                }
+
                 // Check if socket exists and get modification time
                 if let attrs = try? fileManager.attributesOfItem(atPath: fullPath),
                    let modified = attrs[.modificationDate] as? Date {
@@ -161,6 +171,27 @@ public actor CLISocketClient {
         sockets.sort { $0.modified > $1.modified }
 
         return sockets.map { $0.path }
+    }
+
+    /// Checks if the server process for a socket file is still running.
+    ///
+    /// Extracts the PID from the socket filename (format: attic-<PID>.sock)
+    /// and checks if that process is still alive.
+    ///
+    /// - Parameter socketFilename: The socket filename (e.g., "attic-1234.sock").
+    /// - Returns: True if the process is running, false otherwise.
+    private nonisolated func isServerProcessRunning(socketFilename: String) -> Bool {
+        // Extract PID from filename: attic-<PID>.sock
+        let withoutPrefix = socketFilename.dropFirst("attic-".count)
+        let withoutSuffix = withoutPrefix.dropLast(".sock".count)
+
+        guard let pid = Int32(withoutSuffix) else {
+            return false
+        }
+
+        // Check if process is running using kill(pid, 0)
+        // This doesn't send a signal, just checks if the process exists
+        return kill(pid, 0) == 0
     }
 
     /// Discovers the most recently active AtticServer socket.

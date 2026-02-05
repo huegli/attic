@@ -38,6 +38,7 @@ import Foundation
 #if canImport(Network)
 import Network
 #endif
+@preconcurrency import Dispatch
 import os.lock
 
 // MARK: - Continuation Resume Guard
@@ -351,34 +352,48 @@ public actor AESPClient {
     }
 
     #if canImport(Network)
-    /// Creates a connection to the specified host and port.
+    /// Creates a connection to the specified host and port with timeout.
     ///
     /// - Parameters:
     ///   - host: The host to connect to.
     ///   - port: The port to connect to.
     ///   - channel: The channel type (for logging and state management).
     /// - Returns: The established NWConnection.
+    /// - Throws: `AESPError.connectionError` if connection fails or times out.
     private func createConnection(host: String, port: Int, channel: AESPChannel) async throws -> NWConnection {
         let endpoint = NWEndpoint.hostPort(
             host: NWEndpoint.Host(host),
             port: NWEndpoint.Port(integerLiteral: UInt16(port))
         )
         let connection = NWConnection(to: endpoint, using: .tcp)
+        let timeout = configuration.connectionTimeout
 
         return try await withCheckedThrowingContinuation { continuation in
             // Use a thread-safe flag to track whether continuation has been resumed
             let resumeGuard = ContinuationResumeGuard()
+
+            // Set up timeout - if connection doesn't establish in time, cancel it
+            let timeoutWorkItem = DispatchWorkItem {
+                if resumeGuard.tryResume() {
+                    connection.cancel()
+                    continuation.resume(throwing: AESPError.connectionError("Connection timed out after \(timeout)s"))
+                }
+            }
+            DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: timeoutWorkItem)
 
             connection.stateUpdateHandler = { [resumeGuard, weak self] state in
                 switch state {
                 case .ready:
                     // Only resume continuation once
                     if resumeGuard.tryResume() {
+                        // Cancel the timeout since we connected successfully
+                        timeoutWorkItem.cancel()
                         // Keep monitoring state for disconnection events
                         continuation.resume(returning: connection)
                     }
                 case .failed(let error):
                     if resumeGuard.tryResume() {
+                        timeoutWorkItem.cancel()
                         continuation.resume(throwing: error)
                     } else {
                         // Connection failed after initial establishment
@@ -388,6 +403,7 @@ public actor AESPClient {
                     }
                 case .cancelled:
                     if resumeGuard.tryResume() {
+                        timeoutWorkItem.cancel()
                         continuation.resume(throwing: AESPError.connectionError("Connection cancelled"))
                     } else {
                         // Connection cancelled after initial establishment

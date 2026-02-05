@@ -154,8 +154,29 @@ final class MCPServer {
             client = CLISocketClient()
 
             // Discover running AtticServer socket (scans /tmp/attic-*.sock)
-            guard let socketPath = client?.discoverSocket() else {
-                log("No AtticServer socket found. Make sure AtticServer is running.")
+            var socketPath = client?.discoverSocket()
+
+            // If no server running, try to launch one
+            if socketPath == nil {
+                log("No AtticServer socket found. Attempting to launch server...")
+                let launcher = ServerLauncher()
+                let result = launcher.launchServer(options: ServerLaunchOptions(silent: true))
+
+                switch result {
+                case .success(let path, let pid):
+                    log("AtticServer started (PID: \(pid))")
+                    socketPath = path
+                case .executableNotFound:
+                    log("AtticServer executable not found")
+                case .launchFailed(let error):
+                    log("Failed to launch AtticServer: \(error)")
+                case .socketTimeout(let pid):
+                    log("AtticServer started (PID: \(pid)) but socket not ready")
+                }
+            }
+
+            guard let socketPath = socketPath else {
+                log("No AtticServer available. Tools will return errors.")
                 // Send initialize response even without connection - tools will error
                 let result = InitializeResult(
                     protocolVersion: "2024-11-05",
@@ -231,6 +252,7 @@ final class MCPServer {
 
     /// Attempts to connect to AtticServer if not already connected.
     /// This is called on-demand when a tool is invoked.
+    /// Will auto-launch the server if not running.
     private func tryConnect() async {
         // Already have a tool handler? Nothing to do
         guard toolHandler == nil else { return }
@@ -240,8 +262,31 @@ final class MCPServer {
             client = CLISocketClient()
         }
 
-        // Discover socket
-        guard let socketPath = client?.discoverSocket() else {
+        // Discover socket or launch server
+        var socketPath = client?.discoverSocket()
+
+        if socketPath == nil {
+            log("No AtticServer socket found. Attempting to launch server...")
+            let launcher = ServerLauncher()
+            let result = launcher.launchServer(options: ServerLaunchOptions(silent: true))
+
+            switch result {
+            case .success(let path, let pid):
+                log("AtticServer started (PID: \(pid))")
+                socketPath = path
+            case .executableNotFound:
+                log("AtticServer executable not found")
+                return
+            case .launchFailed(let error):
+                log("Failed to launch AtticServer: \(error)")
+                return
+            case .socketTimeout(let pid):
+                log("AtticServer started (PID: \(pid)) but socket not ready")
+                return
+            }
+        }
+
+        guard let socketPath = socketPath else {
             log("No AtticServer socket found")
             return
         }
