@@ -471,12 +471,13 @@ public actor CLISocketClient {
         case .injectBasic(let base64Data):
             return "inject basic \(base64Data)"
         case .injectKeys(let text):
-            // Escape special characters
+            // Escape special characters (including space to prevent parser issues)
             let escaped = text
                 .replacingOccurrences(of: "\\", with: "\\\\")
                 .replacingOccurrences(of: "\n", with: "\\n")
                 .replacingOccurrences(of: "\t", with: "\\t")
                 .replacingOccurrences(of: "\r", with: "\\r")
+                .replacingOccurrences(of: " ", with: "\\s")
             return "inject keys \(escaped)"
         case .disassemble(let address, let lines):
             // Format: disassemble [address] [lines]

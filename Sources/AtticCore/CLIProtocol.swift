@@ -690,6 +690,7 @@ public struct CLICommandParser: Sendable {
                     case "n": result.append("\n")
                     case "t": result.append("\t")
                     case "r": result.append("\r")
+                    case "s": result.append(" ")  // Space
                     case "e": result.append("\u{1B}")  // Escape
                     case "\\": result.append("\\")
                     default: result.append(escaped)
