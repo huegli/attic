@@ -395,8 +395,13 @@ struct AtticCLI {
         case .monitor:
             return translateMonitorCommand(trimmed)
         case .basic:
-            // Prefix BASIC input with "basic " for the server protocol
-            return "basic \(trimmed)"
+            // Use inject keys to type BASIC input via keyboard (natural input)
+            // Escape special characters and add RETURN at the end
+            let escaped = trimmed
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: " ", with: "\\s")
+                .replacingOccurrences(of: "\t", with: "\\t")
+            return "inject keys \(escaped)\\n"
         case .dos:
             return translateDOSCommand(trimmed)
         }
