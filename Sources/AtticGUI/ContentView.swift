@@ -243,12 +243,6 @@ struct ControlPanelView: View {
                     }
                 )
 
-                // Divider between console keys and system keys
-                Rectangle()
-                    .fill(Color.white.opacity(0.2))
-                    .frame(width: 1, height: 24)
-                    .padding(.horizontal, 4)
-
                 // HELP key (XL/XE only)
                 ConsoleButton(
                     label: "HELP",
@@ -261,6 +255,12 @@ struct ControlPanelView: View {
                         viewModel.releaseHelpKey()
                     }
                 )
+
+                // Divider between keyboard keys and system reset
+                Rectangle()
+                    .fill(Color.white.opacity(0.2))
+                    .frame(width: 1, height: 24)
+                    .padding(.horizontal, 4)
 
                 // RESET button (warm reset)
                 ActionButton(
