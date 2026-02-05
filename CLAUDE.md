@@ -167,10 +167,8 @@ When working in this repository, Claude Code has access to these emulator tools:
 | `emulator_clear_breakpoint` | Clear breakpoint |
 | `emulator_list_breakpoints` | List all breakpoints |
 | `emulator_press_key` | Simulate key press |
-| `emulator_enter_basic_line` | Enter BASIC program line |
-| `emulator_run_basic` | Execute RUN |
-| `emulator_list_basic` | List BASIC program |
-| `emulator_new_basic` | Clear BASIC program |
+| `emulator_screenshot` | Capture display as PNG screenshot |
+| `emulator_list_basic` | List BASIC program in memory |
 
 See `docs/MCP_USAGE.md` for detailed documentation and examples.
 

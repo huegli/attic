@@ -182,39 +182,54 @@ Arguments: { "key": "RETURN" }
 Result: Key pressed: RETURN
 ```
 
+### Display
+
+| Tool | Description |
+|------|-------------|
+| `emulator_screenshot` | Capture screenshot of the Atari display as PNG |
+
+**Example - Take Screenshot:**
+```
+Tool: emulator_screenshot
+Result: screenshot saved to /Users/name/Desktop/Attic-2026-02-04-223421.png
+```
+
+**Example - Save to Custom Path:**
+```
+Tool: emulator_screenshot
+Arguments: { "path": "~/screenshots/atari-game.png" }
+Result: screenshot saved to /Users/name/screenshots/atari-game.png
+```
+
 ### BASIC Programming
 
 | Tool | Description |
 |------|-------------|
-| `emulator_enter_basic_line` | Enter a BASIC program line |
-| `emulator_run_basic` | Execute RUN command |
-| `emulator_list_basic` | List the current BASIC program |
-| `emulator_new_basic` | Clear BASIC program memory |
+| `emulator_list_basic` | List the current BASIC program in memory |
 
-**Example - Enter and Run a Program:**
+**Note:** Direct BASIC memory injection tools (`emulator_enter_basic_line`, `emulator_run_basic`, `emulator_new_basic`) are disabled for safety. Use `emulator_press_key` to type BASIC commands interactively instead.
+
+**Example - List BASIC Program:**
 ```
-# Clear existing program
-Tool: emulator_new_basic
-Result: BASIC program cleared
-
-# Enter program lines
-Tool: emulator_enter_basic_line
-Arguments: { "line": "10 PRINT \"HELLO WORLD\"" }
-Result: Line entered: 10 PRINT "HELLO WORLD"
-
-Tool: emulator_enter_basic_line
-Arguments: { "line": "20 GOTO 10" }
-Result: Line entered: 20 GOTO 10
-
-# List the program
 Tool: emulator_list_basic
 Result:
 10 PRINT "HELLO WORLD"
 20 GOTO 10
+```
 
-# Run it
-Tool: emulator_run_basic
-Result: BASIC RUN executed
+**Example - Type BASIC Commands:**
+```
+# Type a BASIC line using key presses
+Tool: emulator_press_key
+Arguments: { "key": "1" }
+
+Tool: emulator_press_key
+Arguments: { "key": "0" }
+
+# ... continue typing ...
+
+Tool: emulator_press_key
+Arguments: { "key": "RETURN" }
 ```
 
 ## Example Workflows
@@ -245,34 +260,52 @@ Result: BASIC RUN executed
    Arguments: { "address": 128, "count": 32 }
 ```
 
-### Workflow 2: Writing a BASIC Program
+### Workflow 2: Capturing Screenshots
 
 ```
-1. Clear any existing program
-   Tool: emulator_new_basic
+1. Take a screenshot of current display
+   Tool: emulator_screenshot
+   Result: screenshot saved to ~/Desktop/Attic-2026-02-04-120000.png
 
-2. Enter program lines
-   Tool: emulator_enter_basic_line
-   Arguments: { "line": "10 FOR I=1 TO 10" }
+2. Or save to a specific location
+   Tool: emulator_screenshot
+   Arguments: { "path": "~/projects/atari/screens/demo.png" }
 
-   Tool: emulator_enter_basic_line
-   Arguments: { "line": "20 PRINT I*I" }
+3. Run program and capture result
+   Tool: emulator_execute_frames
+   Arguments: { "count": 60 }
 
-   Tool: emulator_enter_basic_line
-   Arguments: { "line": "30 NEXT I" }
+   Tool: emulator_screenshot
+   Arguments: { "path": "~/output/result.png" }
+```
 
-3. Verify the program
+### Workflow 3: Interacting with BASIC
+
+```
+1. Check what program is in memory
    Tool: emulator_list_basic
 
-4. Run it
-   Tool: emulator_run_basic
+2. Type BASIC commands using key injection
+   # Type "10 PRINT "HI""
+   Tool: emulator_press_key
+   Arguments: { "key": "1" }
+   Tool: emulator_press_key
+   Arguments: { "key": "0" }
+   Tool: emulator_press_key
+   Arguments: { "key": "SPACE" }
+   # ... continue with P, R, I, N, T, etc.
+   Tool: emulator_press_key
+   Arguments: { "key": "RETURN" }
 
-5. Let it execute
+3. Let the emulator process input
    Tool: emulator_execute_frames
-   Arguments: { "count": 120 }
+   Arguments: { "count": 10 }
+
+4. Verify the program was entered
+   Tool: emulator_list_basic
 ```
 
-### Workflow 3: Examining Atari Memory Map
+### Workflow 4: Examining Atari Memory Map
 
 ```
 # Check BASIC pointers (LOMEM, VNTP, etc.)
