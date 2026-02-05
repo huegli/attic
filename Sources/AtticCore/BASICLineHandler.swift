@@ -619,30 +619,38 @@ public actor BASICLineHandler {
 // =============================================================================
 
 /// Extension to make EmulatorEngine conform to BASICMemoryReader.
+///
+/// These methods wrap the synchronous memory access methods on EmulatorEngine
+/// to satisfy the async protocol requirements. Since EmulatorEngine is an actor,
+/// the actual memory operations are actor-isolated and don't need await when
+/// called from within the actor.
 extension EmulatorEngine: BASICMemoryReader {
     /// Reads a 16-bit word from memory.
     public func readWord(at address: UInt16) async -> UInt16 {
-        let bytes = await readMemoryBlock(at: address, count: 2)
+        let bytes = readMemoryBlock(at: address, count: 2)
         guard bytes.count >= 2 else { return 0 }
         return UInt16(bytes[0]) | (UInt16(bytes[1]) << 8)
     }
 
     /// Reads a block of bytes from memory.
     public func readBlock(at address: UInt16, count: Int) async -> [UInt8] {
-        await readMemoryBlock(at: address, count: count)
+        readMemoryBlock(at: address, count: count)
     }
 }
 
 /// Extension to make EmulatorEngine conform to BASICMemoryWriter.
+///
+/// These methods wrap the synchronous memory access methods on EmulatorEngine
+/// to satisfy the async protocol requirements.
 extension EmulatorEngine: BASICMemoryWriter {
     /// Writes a 16-bit word to memory.
     public func writeWord(at address: UInt16, value: UInt16) async {
         let bytes = [UInt8(value & 0xFF), UInt8(value >> 8)]
-        await writeMemoryBlock(at: address, bytes: bytes)
+        writeMemoryBlock(at: address, bytes: bytes)
     }
 
     /// Writes a block of bytes to memory.
     public func writeBlock(at address: UInt16, bytes: [UInt8]) async {
-        await writeMemoryBlock(at: address, bytes: bytes)
+        writeMemoryBlock(at: address, bytes: bytes)
     }
 }
