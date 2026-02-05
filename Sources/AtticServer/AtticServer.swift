@@ -40,6 +40,9 @@
 import Foundation
 import AtticCore
 import AtticProtocol
+import CoreGraphics
+import ImageIO
+import UniformTypeIdentifiers
 
 // MARK: - Server Configuration
 
@@ -464,9 +467,7 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
 
         // Display
         case .screenshot(let path):
-            // TODO: Implement screenshot capture
-            let actualPath = path ?? "~/Desktop/Attic-\(Date()).png"
-            return .ok("screenshot \(actualPath)")
+            return await handleScreenshot(path: path)
 
         // BASIC injection - DISABLED per attic-ahl (direct memory manipulation)
         case .injectBasic:
@@ -557,6 +558,99 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
             let lines = listing.split(separator: "\n", omittingEmptySubsequences: false)
             return .okMultiLine(lines.map(String.init))
         }
+    }
+
+    /// Handles the screenshot command by capturing the current frame buffer and saving as PNG.
+    ///
+    /// The frame buffer is 384x240 pixels in BGRA format. This method converts it to
+    /// a PNG image and saves it to the specified path.
+    ///
+    /// - Parameter path: The file path to save the screenshot, or nil for auto-generated path.
+    /// - Returns: CLI response with the path where the screenshot was saved.
+    private func handleScreenshot(path: String?) async -> CLIResponse {
+        // Generate default path if not provided
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd-HHmmss"
+        let timestamp = dateFormatter.string(from: Date())
+        let defaultFilename = "Attic-\(timestamp).png"
+
+        let actualPath: String
+        if let providedPath = path {
+            // Expand ~ to home directory
+            actualPath = NSString(string: providedPath).expandingTildeInPath
+        } else {
+            // Save to Desktop by default
+            let desktopURL = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Desktop")
+            actualPath = desktopURL.appendingPathComponent(defaultFilename).path
+        }
+
+        // Get the frame buffer from the emulator
+        let frameBuffer = await emulator.getFrameBuffer()
+
+        // Frame buffer dimensions (Atari 800 XL standard)
+        let width = 384
+        let height = 240
+        let bytesPerPixel = 4  // BGRA
+        let bytesPerRow = width * bytesPerPixel
+
+        // Verify we have enough data
+        guard frameBuffer.count >= width * height * bytesPerPixel else {
+            return .error("Invalid frame buffer size: expected \(width * height * bytesPerPixel), got \(frameBuffer.count)")
+        }
+
+        // Create CGImage from BGRA data
+        guard let dataProvider = CGDataProvider(data: Data(frameBuffer) as CFData) else {
+            return .error("Failed to create data provider for screenshot")
+        }
+
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
+
+        guard let cgImage = CGImage(
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: bytesPerRow,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo,
+            provider: dataProvider,
+            decode: nil,
+            shouldInterpolate: false,
+            intent: .defaultIntent
+        ) else {
+            return .error("Failed to create CGImage for screenshot")
+        }
+
+        // Create destination URL
+        let destinationURL = URL(fileURLWithPath: actualPath)
+
+        // Create the directory if it doesn't exist
+        let directoryURL = destinationURL.deletingLastPathComponent()
+        do {
+            try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+        } catch {
+            return .error("Failed to create directory: \(error.localizedDescription)")
+        }
+
+        // Create PNG file
+        guard let destination = CGImageDestinationCreateWithURL(
+            destinationURL as CFURL,
+            UTType.png.identifier as CFString,
+            1,
+            nil
+        ) else {
+            return .error("Failed to create image destination for screenshot")
+        }
+
+        CGImageDestinationAddImage(destination, cgImage, nil)
+
+        guard CGImageDestinationFinalize(destination) else {
+            return .error("Failed to write screenshot to \(actualPath)")
+        }
+
+        return .ok("screenshot saved to \(actualPath)")
     }
 
     /// Handles the disassemble command.

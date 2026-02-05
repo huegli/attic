@@ -49,6 +49,9 @@ enum MCPToolDefinitions {
             // Input
             emulatorPressKey,
 
+            // Display
+            emulatorScreenshot,
+
             // BASIC (read-only tools only - injection tools disabled per attic-ahl)
             emulatorListBasic,
         ]
@@ -288,6 +291,22 @@ enum MCPToolDefinitions {
                 )
             ],
             required: ["key"]
+        )
+    )
+
+    // MARK: - Display Tools
+
+    static let emulatorScreenshot = ToolDefinition(
+        name: "emulator_screenshot",
+        description: "Capture a screenshot of the current Atari display and save it as a PNG file. Returns the path where the screenshot was saved.",
+        inputSchema: JSONSchema(
+            type: "object",
+            properties: [
+                "path": PropertySchema(
+                    type: "string",
+                    description: "File path to save the screenshot. If not specified, saves to ~/Desktop/Attic-<timestamp>.png. The path can use ~ for home directory."
+                )
+            ]
         )
     )
 

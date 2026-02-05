@@ -105,6 +105,10 @@ final class MCPToolHandler: Sendable {
         case "emulator_press_key":
             return await executePressKey(arguments: arguments)
 
+        // Display
+        case "emulator_screenshot":
+            return await executeScreenshot(arguments: arguments)
+
         // BASIC
         // NOTE: BASIC injection tools are disabled per attic-ahl (direct memory manipulation)
         case "emulator_enter_basic_line":
@@ -394,6 +398,22 @@ final class MCPToolHandler: Sendable {
             return formatResponse(response)
         } catch {
             return .error("Failed to press key: \(error.localizedDescription)")
+        }
+    }
+
+    // =========================================================================
+    // MARK: - Display Tools
+    // =========================================================================
+
+    /// Executes the screenshot tool.
+    private func executeScreenshot(arguments: [String: AnyCodable]) async -> ToolCallResult {
+        let path = arguments["path"]?.stringValue
+
+        do {
+            let response = try await client.send(.screenshot(path: path))
+            return formatResponse(response)
+        } catch {
+            return .error("Failed to take screenshot: \(error.localizedDescription)")
         }
     }
 
