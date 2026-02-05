@@ -298,6 +298,10 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
     /// Reference to the CLI socket server for sending events.
     private weak var cliServer: CLISocketServer?
 
+    /// Callback to signal server shutdown.
+    /// Called when the .shutdown command is received.
+    var onShutdown: (() -> Void)?
+
     /// Lock for thread-safe access.
     private let lock = NSLock()
 
@@ -328,7 +332,8 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
             return .ok("goodbye")
 
         case .shutdown:
-            // Signal shutdown (handled in main loop)
+            // Signal shutdown to main loop via callback
+            onShutdown?()
             return .ok("shutting down")
 
         // Emulator control
@@ -954,6 +959,10 @@ struct AtticServer {
 
             if let server = cliServer, let del = cliDelegate {
                 del.setServer(server)
+                // Set shutdown callback to stop the main loop
+                del.onShutdown = { [delegate] in
+                    delegate.shouldRun = false
+                }
                 await server.setDelegate(del)
 
                 do {
