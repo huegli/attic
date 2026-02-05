@@ -473,8 +473,7 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
             return .error("BASIC injection is disabled. Use keyboard input instead.")
 
         case .injectKeys(let text):
-            // TODO: Implement keyboard injection
-            return .ok("injected keys \(text.count)")
+            return await handleInjectKeys(text: text)
 
         // Disassembly
         case .disassemble(let address, let lines):
@@ -595,6 +594,115 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
         let output = outputLines.joined(separator: CLIProtocolConstants.multiLineSeparator)
 
         return .ok(output)
+    }
+
+    /// Handles the inject keys command by typing each character into the emulator.
+    ///
+    /// This injects keystrokes one at a time, executing frames between key presses
+    /// to ensure the emulator sees each key. This is the "natural input" method
+    /// that goes through the normal keyboard input pipeline.
+    ///
+    /// - Parameter text: The text to type, with escape sequences already parsed.
+    /// - Returns: CLI response indicating success or failure.
+    private func handleInjectKeys(text: String) async -> CLIResponse {
+        // Number of frames to hold each key down (for emulator to see it)
+        let framesPerKeyPress = 3
+        // Number of frames between key release and next key press
+        let framesBetweenKeys = 2
+
+        var injectedCount = 0
+
+        for char in text {
+            // Convert character to Atari key codes
+            let (keyChar, keyCode, shift, control) = characterToAtariKey(char)
+
+            // Skip if we couldn't map the character
+            if keyChar == 0 && keyCode == 0xFF {
+                continue
+            }
+
+            // Press the key
+            await emulator.pressKey(keyChar: keyChar, keyCode: keyCode, shift: shift, control: control)
+
+            // Execute frames while key is held
+            for _ in 0..<framesPerKeyPress {
+                await emulator.executeFrame()
+            }
+
+            // Release the key
+            await emulator.releaseKey()
+
+            // Execute frames for key release
+            for _ in 0..<framesBetweenKeys {
+                await emulator.executeFrame()
+            }
+
+            injectedCount += 1
+        }
+
+        return .ok("injected \(injectedCount) keys")
+    }
+
+    /// Converts a character to Atari keyChar and keyCode values.
+    ///
+    /// - Parameter char: The character to convert.
+    /// - Returns: Tuple of (keyChar, keyCode, shift, control) for the emulator.
+    private func characterToAtariKey(_ char: Character) -> (keyChar: UInt8, keyCode: UInt8, shift: Bool, control: Bool) {
+        // Handle special characters
+        switch char {
+        case "\n", "\r":
+            // Return/Enter - use keyCode, not keyChar
+            return (0, AtariKeyCode.return, false, false)
+
+        case "\t":
+            // Tab
+            return (0, AtariKeyCode.tab, false, false)
+
+        case "\u{1B}":
+            // Escape
+            return (0, AtariKeyCode.escape, false, false)
+
+        case "\u{7F}", "\u{08}":
+            // Delete/Backspace
+            return (0, AtariKeyCode.backspace, false, false)
+
+        case " ":
+            // Space
+            return (0x20, AtariKeyCode.space, false, false)
+
+        default:
+            break
+        }
+
+        // Get ASCII value
+        guard let ascii = char.asciiValue else {
+            // Non-ASCII character - skip
+            return (0, 0xFF, false, false)
+        }
+
+        // Control characters (Ctrl+A through Ctrl+Z produce codes 1-26)
+        if ascii >= 1 && ascii <= 26 {
+            return (ascii, 0xFF, false, true)
+        }
+
+        // Lowercase letters - convert to uppercase for Atari
+        if ascii >= 0x61 && ascii <= 0x7A {
+            let uppercase = ascii - 0x20
+            return (uppercase, 0xFF, false, false)
+        }
+
+        // Uppercase letters - need shift
+        if ascii >= 0x41 && ascii <= 0x5A {
+            return (ascii, 0xFF, true, false)
+        }
+
+        // Numbers and most punctuation pass through as-is
+        if ascii >= 0x20 && ascii <= 0x7E {
+            return (ascii, 0xFF, false, false)
+        }
+
+        // Unknown character
+        return (0, 0xFF, false, false)
     }
 
     func server(_ server: CLISocketServer, clientDidConnect clientId: UUID) async {
