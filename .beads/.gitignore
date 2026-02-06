@@ -33,6 +33,7 @@ beads.right.jsonl
 beads.right.meta.json
 
 .sync.lock
+.jsonl.lock
 sync_base.jsonl
 
 # NOTE: Do NOT add negation patterns (e.g., !issues.jsonl) here.
