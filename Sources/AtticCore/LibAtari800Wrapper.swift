@@ -270,6 +270,16 @@ public final class LibAtari800Wrapper: @unchecked Sendable {
         }
     }
 
+    /// Performs a warm start (like pressing RESET key on the Atari).
+    ///
+    /// This resets the CPU and restarts execution from the RESET vector,
+    /// but preserves RAM contents (unlike a cold reboot).
+    public func warmstart() {
+        guard isInitialized else { return }
+        stateIsCached = false
+        Atari800_Warmstart()
+    }
+
     // =========================================================================
     // MARK: - Memory Access
     // =========================================================================

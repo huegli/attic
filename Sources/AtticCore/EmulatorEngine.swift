@@ -201,7 +201,7 @@ public actor EmulatorEngine {
         let wasRunning = state == .running
 
         if cold {
-            // Cold reset - reboot and run boot sequence
+            // Cold reset - full reboot and run boot sequence
             wrapper.reboot(with: nil)
 
             // Run frames to complete boot sequence.
@@ -215,8 +215,9 @@ public actor EmulatorEngine {
             // This simulates the NEW command, clearing any stored program.
             clearBASICProgram()
         } else {
-            // Warm reset - just reboot without clearing BASIC memory.
-            wrapper.reboot(with: nil)
+            // Warm reset - like pressing RESET key on the Atari.
+            // Preserves RAM but restarts from RESET vector.
+            wrapper.warmstart()
         }
 
         // Restore previous state - if emulator was running, keep it running
