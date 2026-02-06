@@ -80,6 +80,13 @@ public enum AESPMessageType: UInt8, Sendable, CaseIterable {
     /// Response payload: See `AESPInfoPayload`
     case info = 0x06
 
+    /// Boot emulator with a file (disk image, executable, BASIC program, etc.).
+    /// Calls `libatari800_reboot_with_file` which mounts/loads the file and
+    /// performs a cold start.
+    /// Request payload: UTF-8 file path string
+    /// Response payload: 1 byte status (0x00=success, 0x01=failure) + UTF-8 message
+    case bootFile = 0x07
+
     /// Acknowledge receipt of a command (generic OK response).
     /// Payload: 1 byte - the message type being acknowledged
     case ack = 0x0F
@@ -255,7 +262,7 @@ extension AESPMessageType {
     /// Requests typically expect a response from the server.
     public var isRequest: Bool {
         switch self {
-        case .ping, .pause, .resume, .reset, .status, .info,
+        case .ping, .pause, .resume, .reset, .status, .info, .bootFile,
              .memoryRead, .memoryWrite, .registersRead, .registersWrite,
              .breakpointSet, .breakpointClear, .breakpointList,
              .keyDown, .keyUp, .joystick, .consoleKeys, .paddle,
@@ -293,6 +300,7 @@ extension AESPMessageType {
         case .reset: return "RESET"
         case .status: return "STATUS"
         case .info: return "INFO"
+        case .bootFile: return "BOOT_FILE"
         case .ack: return "ACK"
         case .memoryRead: return "MEMORY_READ"
         case .memoryWrite: return "MEMORY_WRITE"

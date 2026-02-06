@@ -304,6 +304,31 @@ public actor EmulatorEngine {
         state = .paused
     }
 
+    /// Boots the emulator with a file (disk image, executable, BASIC program, etc.).
+    ///
+    /// Validates the file exists, calls `libatari800_reboot_with_file`, and
+    /// sets the emulator running so the boot process continues naturally.
+    ///
+    /// - Parameter filePath: Absolute path to the file to boot.
+    /// - Returns: Tuple with success flag and optional error message.
+    public func bootFile(_ filePath: String) async -> (success: Bool, errorMessage: String?) {
+        // Validate the file exists before passing to libatari800
+        guard FileManager.default.fileExists(atPath: filePath) else {
+            return (success: false, errorMessage: "File not found: \(filePath)")
+        }
+
+        let success = wrapper.reboot(with: filePath)
+
+        if success {
+            // Let the emulator continue running so the boot process completes
+            state = .running
+            return (success: true, errorMessage: nil)
+        } else {
+            state = .paused
+            return (success: false, errorMessage: "Failed to load file: \(filePath)")
+        }
+    }
+
     /// Executes the emulation loop.
     ///
     /// This method runs frames until `pause()` is called or a breakpoint is hit.

@@ -716,6 +716,16 @@ public actor AESPClient {
         await sendMessage(.status())
     }
 
+    /// Boots the emulator with a file (disk image, executable, BASIC program, etc.).
+    ///
+    /// Sends a BOOT_FILE request to the server, which validates the file,
+    /// calls `libatari800_reboot_with_file`, and returns a response.
+    ///
+    /// - Parameter filePath: Absolute path to the file to boot.
+    public func bootFile(filePath: String) async {
+        await sendMessage(.bootFile(filePath: filePath))
+    }
+
     // =========================================================================
     // MARK: - Input
     // =========================================================================

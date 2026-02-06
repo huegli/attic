@@ -321,7 +321,8 @@ struct AtticCLI {
                        lowerTrimmed == ".reset" ||
                        lowerTrimmed == ".warmstart" ||
                        lowerTrimmed == ".screenshot" ||
-                       lowerTrimmed.hasPrefix(".screenshot ") {
+                       lowerTrimmed.hasPrefix(".screenshot ") ||
+                       lowerTrimmed.hasPrefix(".boot ") {
                         // Forward to server
                         break
                     }
@@ -400,6 +401,11 @@ struct AtticCLI {
                 } else if lowerTrimmed.hasPrefix(".state load ") {
                     let path = String(trimmed.dropFirst(12))
                     return "state load \(path)"
+                }
+                // Handle .boot <path>
+                if lowerTrimmed.hasPrefix(".boot ") {
+                    let path = String(trimmed.dropFirst(6))
+                    return "boot \(path)"
                 }
             }
         }
@@ -502,6 +508,7 @@ struct AtticCLI {
           .help             Show help
           .status           Show emulator status
           .screenshot [p]   Save screenshot (default: ~/Desktop/Attic-<time>.png)
+          .boot <path>      Boot with file (ATR, XEX, BAS, etc.)
           .reset            Cold reset
           .warmstart        Warm reset
           .state save <p>   Save state to file

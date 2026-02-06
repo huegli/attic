@@ -22,6 +22,7 @@
 // =============================================================================
 
 import SwiftUI
+import UniformTypeIdentifiers
 import AtticCore
 import AtticProtocol
 
@@ -125,6 +126,12 @@ struct AtticApp: App {
 /// We fix this by setting the activation policy to `.regular`, which makes
 /// the app behave as a normal foreground GUI application.
 class AppDelegate: NSObject, NSApplicationDelegate {
+    /// Callback for handling file open events from Finder.
+    /// Set by AtticViewModel during initialization so the AppDelegate
+    /// can forward file open requests to the view model.
+    /// Marked @MainActor because AppDelegate and the callback both run on the main thread.
+    @MainActor static var onOpenFile: ((URL) -> Void)?
+
     /// Called before the app finishes launching.
     ///
     /// We set the activation policy here to ensure the app becomes a proper
@@ -151,11 +158,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Server cleanup is handled by AtticViewModel's deinit
     }
 
-    /// Called when a file is opened via Finder (double-click on .atr file).
+    /// Called when a file is opened via Finder (double-click on .atr file, drag-and-drop, etc.).
+    ///
+    /// Forwards the file URL to the view model via the static callback.
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
             print("[AtticGUI] Open file: \(url.path)")
-            // TODO: Mount disk image or load state file
+            AppDelegate.onOpenFile?(url)
         }
     }
 
@@ -311,6 +320,15 @@ class AtticViewModel: ObservableObject {
             await initializeClientMode()
         case .embedded:
             await initializeEmbeddedMode()
+        }
+
+        // Register file open handler so AppDelegate can forward
+        // Finder file-open events (double-click, drag-and-drop) to us
+        AppDelegate.onOpenFile = { [weak self] url in
+            guard let self = self else { return }
+            Task { @MainActor in
+                await self.bootFile(url: url)
+            }
         }
     }
 
@@ -661,6 +679,37 @@ class AtticViewModel: ObservableObject {
         }
     }
 
+    /// Boots the emulator with a file (disk image, executable, BASIC program, etc.).
+    ///
+    /// Opens the file via `libatari800_reboot_with_file` which loads it and
+    /// performs a cold start. Works in both client and embedded modes.
+    ///
+    /// - Parameter url: URL of the file to boot.
+    func bootFile(url: URL) async {
+        let path = url.path
+
+        switch mode {
+        case .client:
+            await client?.bootFile(filePath: path)
+            audioEngine.clearBuffer()
+            keyboardHandler.reset()
+            isRunning = true
+            statusMessage = "Booting \(url.lastPathComponent)..."
+
+        case .embedded:
+            guard let emulator = emulator else { return }
+            let result = await emulator.bootFile(path)
+            audioEngine.clearBuffer()
+            keyboardHandler.reset()
+            if result.success {
+                isRunning = true
+                statusMessage = "Loaded \(url.lastPathComponent)"
+            } else {
+                statusMessage = "Boot failed: \(result.errorMessage ?? "Unknown error")"
+            }
+        }
+    }
+
     // =========================================================================
     // MARK: - Keyboard Input
     // =========================================================================
@@ -981,10 +1030,29 @@ struct AtticCommands: Commands {
     @ObservedObject var viewModel: AtticViewModel
 
     var body: some Commands {
-        // Replace the standard New/Open menu with our disk operations
+        // Replace the standard New/Open menu with our file operations
         CommandGroup(replacing: .newItem) {
-            Button("Open Disk Image...") {
-                // TODO: Show file picker for .atr files
+            Button("Open File...") {
+                // Present a file picker for all supported Atari file types.
+                // NSOpenPanel is used directly because SwiftUI's fileImporter
+                // doesn't easily support the Commands context.
+                let panel = NSOpenPanel()
+                panel.title = "Open Atari File"
+                panel.allowedContentTypes = [
+                    "atr", "xfd", "atx", "dcm", "pro",  // Disk images
+                    "xex", "com", "exe",                  // Executables
+                    "bas", "lst",                         // BASIC programs
+                    "rom", "car",                         // Cartridges
+                    "cas",                                // Cassettes
+                ].compactMap { UTType(filenameExtension: $0) }
+                panel.allowsMultipleSelection = false
+                panel.canChooseDirectories = false
+
+                if panel.runModal() == .OK, let url = panel.url {
+                    Task {
+                        await viewModel.bootFile(url: url)
+                    }
+                }
             }
             .keyboardShortcut("O")
 

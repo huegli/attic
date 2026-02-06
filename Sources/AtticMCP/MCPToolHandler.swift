@@ -74,6 +74,8 @@ final class MCPToolHandler: Sendable {
             return await executeResume()
         case "emulator_reset":
             return await executeReset(arguments: arguments)
+        case "emulator_boot_file":
+            return await executeBootFile(arguments: arguments)
 
         // Memory Access
         case "emulator_read_memory":
@@ -168,6 +170,22 @@ final class MCPToolHandler: Sendable {
             return formatResponse(response)
         } catch {
             return .error("Failed to reset: \(error.localizedDescription)")
+        }
+    }
+
+    /// Executes the boot file tool.
+    ///
+    /// Sends a `boot <path>` command to the server via the CLI socket protocol.
+    private func executeBootFile(arguments: [String: AnyCodable]) async -> ToolCallResult {
+        guard let path = arguments["path"]?.stringValue else {
+            return .error("Missing required parameter: path")
+        }
+
+        do {
+            let response = try await client.send(.boot(path: path))
+            return formatResponse(response)
+        } catch {
+            return .error("Failed to boot file: \(error.localizedDescription)")
         }
     }
 

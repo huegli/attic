@@ -28,6 +28,7 @@ enum MCPToolDefinitions {
             emulatorPause,
             emulatorResume,
             emulatorReset,
+            emulatorBootFile,
 
             // Memory Access
             emulatorReadMemory,
@@ -89,6 +90,21 @@ enum MCPToolDefinitions {
                     default: AnyCodable(true)
                 )
             ]
+        )
+    )
+
+    static let emulatorBootFile = ToolDefinition(
+        name: "emulator_boot_file",
+        description: "Boot the emulator with a file. Supports disk images (ATR, XFD, ATX, DCM, PRO), executables (XEX, COM, EXE), BASIC programs (BAS, LST), cartridges (ROM, CAR), and cassettes (CAS). The emulator performs a cold start after loading the file.",
+        inputSchema: JSONSchema(
+            type: "object",
+            properties: [
+                "path": PropertySchema(
+                    type: "string",
+                    description: "Absolute path to the file to boot"
+                )
+            ],
+            required: ["path"]
         )
     )
 

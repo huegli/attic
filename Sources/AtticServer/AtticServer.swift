@@ -222,6 +222,22 @@ final class ServerDelegate: AESPServerDelegate, @unchecked Sendable {
             await emulator.reset(cold: cold)
             await server.sendMessage(.ack(for: .reset), to: clientId, channel: .control)
 
+        case .bootFile:
+            if let filePath = message.parseBootFileRequest() {
+                print("[Server] Boot file: \(filePath) (requested by \(clientId))")
+                let result = await emulator.bootFile(filePath)
+                let response = AESPMessage.bootFileResponse(
+                    success: result.success,
+                    message: result.success ? "Booted \(filePath)" : (result.errorMessage ?? "Unknown error")
+                )
+                await server.sendMessage(response, to: clientId, channel: .control)
+            } else {
+                await server.sendMessage(
+                    .error(code: 0x01, message: "Invalid boot file request"),
+                    to: clientId, channel: .control
+                )
+            }
+
         case .status:
             let state = await emulator.state
             let isRunning = state == .running
@@ -360,6 +376,18 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
         case .reset(let cold):
             await emulator.reset(cold: cold)
             return .ok("reset \(cold ? "cold" : "warm")")
+
+        case .boot(let path):
+            // Validate file exists on the server side
+            guard FileManager.default.fileExists(atPath: path) else {
+                return .error("File not found '\(path)'")
+            }
+            let result = await emulator.bootFile(path)
+            if result.success {
+                return .ok("booted \(path)")
+            } else {
+                return .error(result.errorMessage ?? "Boot failed for '\(path)'")
+            }
 
         case .status:
             return await formatStatus()

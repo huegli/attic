@@ -490,6 +490,8 @@ public actor CLISocketClient {
             return "unmount \(drive)"
         case .drives:
             return "drives"
+        case .boot(let path):
+            return "boot \(path)"
         case .stateSave(let path):
             return "state save \(path)"
         case .stateLoad(let path):

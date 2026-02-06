@@ -374,6 +374,31 @@ extension AESPMessage {
         return AESPMessage(type: .info, payload: Data(json.utf8))
     }
 
+    /// Creates a BOOT_FILE request message.
+    ///
+    /// Requests the server to load a file and reboot the emulator.
+    /// Supported file types include disk images (ATR, XFD, ATX, DCM, PRO),
+    /// executables (XEX, COM, EXE), BASIC programs (BAS, LST), cartridges
+    /// (CART, ROM), and cassettes (CAS).
+    ///
+    /// - Parameter filePath: Absolute path to the file to boot.
+    public static func bootFile(filePath: String) -> AESPMessage {
+        return AESPMessage(type: .bootFile, payload: Data(filePath.utf8))
+    }
+
+    /// Creates a BOOT_FILE response message.
+    ///
+    /// - Parameters:
+    ///   - success: Whether the boot was successful.
+    ///   - message: Description of outcome (e.g. file type on success,
+    ///     error message on failure).
+    public static func bootFileResponse(success: Bool, message: String) -> AESPMessage {
+        var payload = Data(capacity: 1 + message.utf8.count)
+        payload.append(success ? 0x00 : 0x01)
+        payload.append(contentsOf: message.utf8)
+        return AESPMessage(type: .bootFile, payload: payload)
+    }
+
     /// Creates an ACK message.
     ///
     /// - Parameter acknowledgedType: The message type being acknowledged.
@@ -774,6 +799,29 @@ extension AESPMessage {
         let address = UInt16(payload[0]) << 8 | UInt16(payload[1])
         let data = payload.count > 2 ? payload.subdata(in: 2..<payload.count) : Data()
         return (address: address, data: data)
+    }
+
+    /// Parses the payload as a boot file request.
+    ///
+    /// - Returns: The file path string, or nil if invalid.
+    public func parseBootFileRequest() -> String? {
+        guard type == .bootFile, !payload.isEmpty else { return nil }
+        return String(decoding: payload, as: UTF8.self)
+    }
+
+    /// Parses the payload as a boot file response.
+    ///
+    /// - Returns: Tuple of (success, message), or nil if invalid.
+    public func parseBootFileResponse() -> (success: Bool, message: String)? {
+        guard type == .bootFile, payload.count >= 1 else { return nil }
+        let success = payload[0] == 0x00
+        let message: String
+        if payload.count > 1 {
+            message = String(decoding: payload[1...], as: UTF8.self)
+        } else {
+            message = ""
+        }
+        return (success: success, message: message)
     }
 
     /// Parses the payload as an error response.

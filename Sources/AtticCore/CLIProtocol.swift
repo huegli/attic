@@ -139,6 +139,11 @@ public enum CLICommand: Sendable {
     case unmount(drive: Int)
     case drives
 
+    // Boot with file
+    /// Boot the emulator with a file (ATR, XEX, BAS, LST, CAS, ROM, etc.).
+    /// Calls libatari800_reboot_with_file which loads the file and cold-starts.
+    case boot(path: String)
+
     // State management
     case stateSave(path: String)
     case stateLoad(path: String)
@@ -327,6 +332,10 @@ public struct CLICommandParser: Sendable {
             return try parseUnmount(argsString)
         case "drives":
             return .drives
+
+        // Boot with file
+        case "boot":
+            return try parseBoot(argsString)
 
         // State management
         case "state":
@@ -554,6 +563,20 @@ public struct CLICommandParser: Sendable {
             throw CLIProtocolError.invalidDriveNumber(args)
         }
         return .unmount(drive: drive)
+    }
+
+    /// Parses a `boot <path>` command.
+    ///
+    /// The path argument is required and may contain spaces. Tilde (~) is
+    /// expanded to the user's home directory.
+    private func parseBoot(_ args: String) throws -> CLICommand {
+        let path = args.trimmingCharacters(in: .whitespaces)
+        guard !path.isEmpty else {
+            throw CLIProtocolError.missingArgument("boot requires a file path")
+        }
+        // Expand ~ to home directory for convenience
+        let expandedPath = NSString(string: path).expandingTildeInPath
+        return .boot(path: expandedPath)
     }
 
     private func parseState(_ args: String) throws -> CLICommand {
