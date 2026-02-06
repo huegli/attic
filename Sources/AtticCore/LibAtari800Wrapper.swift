@@ -151,15 +151,18 @@ public final class LibAtari800Wrapper: @unchecked Sendable {
         // These configure the emulator for Atari 800 XL with BASIC
         //
         // Note: libatari800 parses these like command-line arguments.
-        // The library prints "Error opening" warnings for arguments it
-        // doesn't recognize as file paths - these warnings are harmless
-        // and occur because the library tries to open each argument as
-        // a file before processing it as an option.
+        // Each module's Initialise function consumes its recognized options
+        // from argv. Any unrecognized args left over get passed to the
+        // auto-start loop which tries to open them as disk image files,
+        // printing "Error opening" warnings. Use the exact option names
+        // from the libatari800 source (sysrom.c, sound.c, atari.c).
         let args = [
-            "attic",                           // Program name (argv[0], required)
+            "atari800",                        // Program name (argv[0]); must end with
+                                               // "atari800" so libatari800_init doesn't
+                                               // shift it into the arg list (api.c:106)
             "-xl",                             // Atari 800 XL machine type
-            "-xlrom", osRomPath.path,          // Path to XL OS ROM
-            "-basicrom", basicRomPath.path,    // Path to BASIC ROM
+            "-xlxe_rom", osRomPath.path,       // Path to XL/XE OS ROM (sysrom.c)
+            "-basic_rom", basicRomPath.path,   // Path to BASIC ROM (sysrom.c)
             "-basic",                          // Enable BASIC
             "-sound",                          // Enable sound
             "-audio16"                         // 16-bit audio
