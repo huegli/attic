@@ -201,8 +201,8 @@ public actor EmulatorEngine {
         let wasRunning = state == .running
 
         if cold {
-            // Cold reset - full reboot and run boot sequence
-            wrapper.reboot(with: nil)
+            // Cold reset - power cycle using Atari800_Coldstart
+            wrapper.coldstart()
 
             // Run frames to complete boot sequence.
             // The Atari needs ~120 frames (~2 seconds) to complete boot.

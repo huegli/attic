@@ -280,6 +280,16 @@ public final class LibAtari800Wrapper: @unchecked Sendable {
         Atari800_Warmstart()
     }
 
+    /// Performs a cold start (power cycle).
+    ///
+    /// This is a full system reset that clears all memory and restarts
+    /// the Atari from power-on state.
+    public func coldstart() {
+        guard isInitialized else { return }
+        stateIsCached = false
+        Atari800_Coldstart()
+    }
+
     // =========================================================================
     // MARK: - Memory Access
     // =========================================================================
