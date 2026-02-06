@@ -283,6 +283,18 @@ class AtticViewModel: ObservableObject {
         }
     }
 
+    /// Whether joystick emulation is enabled.
+    /// When enabled, arrow keys map to joystick directions and spacebar maps
+    /// to the fire button (port 0). Toggling off resets all joystick state
+    /// so no directions remain "stuck".
+    @Published var isJoystickEmulationEnabled: Bool = false {
+        didSet {
+            if !isJoystickEmulationEnabled {
+                resetJoystickState()
+            }
+        }
+    }
+
     // =========================================================================
     // MARK: - Internal State
     // =========================================================================
@@ -292,6 +304,15 @@ class AtticViewModel: ObservableObject {
 
     /// Last FPS update time.
     private var lastFPSUpdate: Date = Date()
+
+    // Joystick emulation key-held tracking.
+    // Each boolean tracks whether the corresponding key is currently held down.
+    // Multiple keys can be held simultaneously for diagonal movement.
+    private var joystickUpHeld: Bool = false
+    private var joystickDownHeld: Bool = false
+    private var joystickLeftHeld: Bool = false
+    private var joystickRightHeld: Bool = false
+    private var joystickTriggerHeld: Bool = false
 
     // =========================================================================
     // MARK: - Initialization
@@ -668,6 +689,7 @@ class AtticViewModel: ObservableObject {
             await client?.reset(cold: cold)
             audioEngine.clearBuffer()
             keyboardHandler.reset()
+            if isJoystickEmulationEnabled { resetJoystickState() }
             statusMessage = cold ? "Cold Reset" : "Warm Reset"
 
         case .embedded:
@@ -675,6 +697,7 @@ class AtticViewModel: ObservableObject {
             await emulator.reset(cold: cold)
             audioEngine.clearBuffer()
             keyboardHandler.reset()
+            if isJoystickEmulationEnabled { resetJoystickState() }
             statusMessage = cold ? "Cold Reset" : "Warm Reset"
         }
     }
@@ -727,6 +750,36 @@ class AtticViewModel: ObservableObject {
             command: event.modifierFlags.contains(.command)
         )
 
+        // When joystick emulation is active, intercept arrow keys and spacebar
+        // before they reach the normal keyboard handler. This allows games to be
+        // played using the keyboard as a virtual joystick on port 0.
+        if isJoystickEmulationEnabled {
+            switch event.keyCode {
+            case MacKeyCode.upArrow:
+                joystickUpHeld = true
+                sendJoystickState()
+                return
+            case MacKeyCode.downArrow:
+                joystickDownHeld = true
+                sendJoystickState()
+                return
+            case MacKeyCode.leftArrow:
+                joystickLeftHeld = true
+                sendJoystickState()
+                return
+            case MacKeyCode.rightArrow:
+                joystickRightHeld = true
+                sendJoystickState()
+                return
+            case MacKeyCode.space:
+                joystickTriggerHeld = true
+                sendJoystickState()
+                return
+            default:
+                break  // Fall through to normal keyboard handling
+            }
+        }
+
         // F5 triggers warm reset (Atari RESET key)
         // This is handled specially because RESET is not part of the keyboard matrix
         if event.keyCode == 0x60 {  // MacKeyCode.f5
@@ -770,6 +823,36 @@ class AtticViewModel: ObservableObject {
 
     /// Handles a key up event from the keyboard.
     func handleKeyUp(_ event: NSEvent) {
+        // When joystick emulation is active, intercept arrow/space key releases
+        // to clear the held state. Without this, releasing a direction key would
+        // also trigger a sendKeyUp which could interfere with keyboard input.
+        if isJoystickEmulationEnabled {
+            switch event.keyCode {
+            case MacKeyCode.upArrow:
+                joystickUpHeld = false
+                sendJoystickState()
+                return
+            case MacKeyCode.downArrow:
+                joystickDownHeld = false
+                sendJoystickState()
+                return
+            case MacKeyCode.leftArrow:
+                joystickLeftHeld = false
+                sendJoystickState()
+                return
+            case MacKeyCode.rightArrow:
+                joystickRightHeld = false
+                sendJoystickState()
+                return
+            case MacKeyCode.space:
+                joystickTriggerHeld = false
+                sendJoystickState()
+                return
+            default:
+                break  // Fall through to normal key up handling
+            }
+        }
+
         if keyboardHandler.keyUp(keyCode: event.keyCode) {
             // Release the key
             Task {
@@ -869,6 +952,64 @@ class AtticViewModel: ObservableObject {
                 await emulator?.releaseKey()
             }
         }
+    }
+
+    // =========================================================================
+    // MARK: - Joystick Emulation
+    // =========================================================================
+
+    /// Sends the current joystick state to the emulator based on held key state.
+    ///
+    /// Reads the five key-held booleans and dispatches to either the AESP client
+    /// (in client mode) or the embedded EmulatorEngine (in embedded mode).
+    /// For embedded mode, the direction byte uses the same active-high encoding
+    /// as the server: bit0=up, bit1=down, bit2=left, bit3=right.
+    private func sendJoystickState() {
+        let up = joystickUpHeld
+        let down = joystickDownHeld
+        let left = joystickLeftHeld
+        let right = joystickRightHeld
+        let trigger = joystickTriggerHeld
+
+        Task {
+            switch mode {
+            case .client:
+                await client?.sendJoystick(
+                    port: 0,
+                    up: up,
+                    down: down,
+                    left: left,
+                    right: right,
+                    trigger: trigger
+                )
+            case .embedded:
+                // Build direction byte matching the server's encoding:
+                // bit0=up, bit1=down, bit2=left, bit3=right (active-high)
+                var direction: UInt8 = 0
+                if up { direction |= 0x01 }
+                if down { direction |= 0x02 }
+                if left { direction |= 0x04 }
+                if right { direction |= 0x08 }
+                await emulator?.setJoystick(
+                    port: 0,
+                    direction: direction,
+                    trigger: trigger
+                )
+            }
+        }
+    }
+
+    /// Resets all joystick held state and sends the neutral position.
+    ///
+    /// Called when joystick emulation is toggled off or after an emulator reset,
+    /// to ensure no directions remain "stuck" from previously held keys.
+    private func resetJoystickState() {
+        joystickUpHeld = false
+        joystickDownHeld = false
+        joystickLeftHeld = false
+        joystickRightHeld = false
+        joystickTriggerHeld = false
+        sendJoystickState()
     }
 
     // =========================================================================
@@ -1093,6 +1234,13 @@ struct AtticCommands: Commands {
                 Task { await viewModel.reset(cold: false) }
             }
             .keyboardShortcut("R", modifiers: [.command, .option])
+
+            Divider()
+
+            // Joystick emulation toggle: maps arrow keys to joystick directions
+            // and spacebar to fire (port 0). Renders as a checkmark menu item.
+            Toggle("Joystick Emulation", isOn: $viewModel.isJoystickEmulationEnabled)
+                .keyboardShortcut("J")
 
             Divider()
 
