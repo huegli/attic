@@ -121,6 +121,9 @@ public actor EmulatorEngine {
     /// Frame counter for timing.
     private var frameCount: UInt64 = 0
 
+    /// Path to ROM directory, stored for cold reset reinitialization.
+    private var romPath: URL?
+
     /// Callback invoked when a breakpoint is hit.
     /// Set this to be notified asynchronously of breakpoint events.
     public var onBreakpointHit: (@Sendable (UInt16, CPURegisters) async -> Void)?
@@ -149,6 +152,7 @@ public actor EmulatorEngine {
     ///   The directory should contain ATARIXL.ROM and ATARIBAS.ROM.
     /// - Throws: AtticError if initialization fails.
     public func initialize(romPath: URL) async throws {
+        self.romPath = romPath
         try wrapper.initialize(romPath: romPath)
         state = .paused
         frameCount = 0
@@ -201,19 +205,44 @@ public actor EmulatorEngine {
         let wasRunning = state == .running
 
         if cold {
-            // Cold reset - power cycle using Atari800_Coldstart
-            wrapper.coldstart()
-
-            // Run frames to complete boot sequence.
-            // The Atari needs ~120 frames (~2 seconds) to complete boot.
-            var input = InputState()
-            for _ in 0..<150 {
-                _ = wrapper.executeFrame(input: &input)
+            // Cold reset - full power cycle by shutting down and reinitializing
+            // This completely resets the emulator state including all RAM.
+            guard let romPath = romPath else {
+                // If we don't have a ROM path (shouldn't happen), fall back to reboot
+                wrapper.reboot(with: nil)
+                var input = InputState()
+                for _ in 0..<150 {
+                    _ = wrapper.executeFrame(input: &input)
+                }
+                clearBASICProgram()
+                state = wasRunning ? .running : .paused
+                return
             }
 
-            // Clear BASIC memory by resetting pointers to empty state.
-            // This simulates the NEW command, clearing any stored program.
-            clearBASICProgram()
+            // Shutdown the emulator
+            wrapper.shutdown()
+
+            // Reinitialize with the same ROM path
+            do {
+                try wrapper.initialize(romPath: romPath)
+
+                // Run frames to complete boot sequence.
+                // The Atari needs ~120 frames (~2 seconds) to complete boot.
+                var input = InputState()
+                for _ in 0..<150 {
+                    _ = wrapper.executeFrame(input: &input)
+                }
+
+                // Clear breakpoints and frame counter
+                breakpoints.removeAll()
+                breakpointOriginalBytes.removeAll()
+                frameCount = 0
+
+            } catch {
+                // If reinitialization fails, leave emulator in uninitialized state
+                state = .uninitialized
+                return
+            }
         } else {
             // Warm reset - like pressing RESET key on the Atari.
             // Preserves RAM but restarts from RESET vector.
