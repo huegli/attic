@@ -571,6 +571,72 @@ final class CLIProtocolTests: XCTestCase {
     }
 
     // =========================================================================
+    // MARK: - CLICommandParser Tests - Boot With File
+    // =========================================================================
+
+    func testParseBoot() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("boot /path/to/game.atr")
+        guard case .boot(let path) = command else {
+            XCTFail("Expected .boot, got \(command)")
+            return
+        }
+        XCTAssertEqual(path, "/path/to/game.atr")
+    }
+
+    func testParseBootWithSpacesInPath() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("boot /path/with spaces/my game.xex")
+        guard case .boot(let path) = command else {
+            XCTFail("Expected .boot, got \(command)")
+            return
+        }
+        XCTAssertEqual(path, "/path/with spaces/my game.xex")
+    }
+
+    func testParseBootWithTilde() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("boot ~/Games/starraiders.atr")
+        guard case .boot(let path) = command else {
+            XCTFail("Expected .boot, got \(command)")
+            return
+        }
+        // Tilde should be expanded to the home directory
+        XCTAssertFalse(path.hasPrefix("~"), "Tilde should be expanded")
+        XCTAssertTrue(path.hasSuffix("Games/starraiders.atr"))
+    }
+
+    func testParseBootMissingPath() {
+        let parser = CLICommandParser()
+        XCTAssertThrowsError(try parser.parse("boot")) { error in
+            guard case CLIProtocolError.missingArgument = error else {
+                XCTFail("Expected missingArgument error, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testParseBootMissingPathWhitespaceOnly() {
+        let parser = CLICommandParser()
+        XCTAssertThrowsError(try parser.parse("boot   ")) { error in
+            guard case CLIProtocolError.missingArgument = error else {
+                XCTFail("Expected missingArgument error, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testParseBootWithCMDPrefix() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("CMD:boot /path/to/disk.atr")
+        guard case .boot(let path) = command else {
+            XCTFail("Expected .boot, got \(command)")
+            return
+        }
+        XCTAssertEqual(path, "/path/to/disk.atr")
+    }
+
+    // =========================================================================
     // MARK: - CLICommandParser Tests - State Management
     // =========================================================================
 

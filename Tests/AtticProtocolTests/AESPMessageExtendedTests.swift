@@ -189,6 +189,131 @@ final class AESPControlMessageExtendedTests: XCTestCase {
     }
 
     // =========================================================================
+    // MARK: - BOOT_FILE Tests
+    // =========================================================================
+
+    /// Test encoding BOOT_FILE request message.
+    func test_encode_bootFile() {
+        let message = AESPMessage.bootFile(filePath: "/path/to/game.atr")
+        let encoded = message.encode()
+
+        XCTAssertEqual(encoded[3], AESPMessageType.bootFile.rawValue)
+        XCTAssertEqual(encoded[3], 0x07)
+
+        // Payload should be UTF-8 encoded file path
+        let payloadBytes = encoded[8...]
+        let path = String(decoding: payloadBytes, as: UTF8.self)
+        XCTAssertEqual(path, "/path/to/game.atr")
+    }
+
+    /// Test decoding BOOT_FILE request message.
+    func test_decode_bootFile() throws {
+        let filePath = "/Users/test/game.xex"
+        var data = Data([0xAE, 0x50, 0x01, 0x07, 0x00, 0x00, 0x00])
+        data.append(UInt8(filePath.utf8.count))
+        data.append(contentsOf: filePath.utf8)
+
+        let (message, _) = try AESPMessage.decode(from: data)
+
+        guard let parsedPath = message.parseBootFileRequest() else {
+            XCTFail("Failed to parse boot file request")
+            return
+        }
+        XCTAssertEqual(parsedPath, filePath)
+    }
+
+    /// Test encoding BOOT_FILE response with success.
+    func test_encode_bootFileResponse_success() {
+        let message = AESPMessage.bootFileResponse(success: true, message: "Loaded ATR disk image")
+        let encoded = message.encode()
+
+        XCTAssertEqual(encoded[3], AESPMessageType.bootFile.rawValue)
+        XCTAssertEqual(encoded[8], 0x00) // success = 0x00
+    }
+
+    /// Test encoding BOOT_FILE response with failure.
+    func test_encode_bootFileResponse_failure() {
+        let message = AESPMessage.bootFileResponse(success: false, message: "File not found")
+        let encoded = message.encode()
+
+        XCTAssertEqual(encoded[3], AESPMessageType.bootFile.rawValue)
+        XCTAssertEqual(encoded[8], 0x01) // failure = 0x01
+    }
+
+    /// Test decoding BOOT_FILE response with success.
+    func test_decode_bootFileResponse_success() throws {
+        let msg = "Loaded ATR disk image"
+        var data = Data([0xAE, 0x50, 0x01, 0x07, 0x00, 0x00, 0x00])
+        data.append(UInt8(1 + msg.utf8.count))
+        data.append(0x00) // success
+        data.append(contentsOf: msg.utf8)
+
+        let (message, _) = try AESPMessage.decode(from: data)
+
+        guard let (success, responseMsg) = message.parseBootFileResponse() else {
+            XCTFail("Failed to parse boot file response")
+            return
+        }
+        XCTAssertTrue(success)
+        XCTAssertEqual(responseMsg, msg)
+    }
+
+    /// Test decoding BOOT_FILE response with failure.
+    func test_decode_bootFileResponse_failure() throws {
+        let msg = "File not found"
+        var data = Data([0xAE, 0x50, 0x01, 0x07, 0x00, 0x00, 0x00])
+        data.append(UInt8(1 + msg.utf8.count))
+        data.append(0x01) // failure
+        data.append(contentsOf: msg.utf8)
+
+        let (message, _) = try AESPMessage.decode(from: data)
+
+        guard let (success, responseMsg) = message.parseBootFileResponse() else {
+            XCTFail("Failed to parse boot file response")
+            return
+        }
+        XCTAssertFalse(success)
+        XCTAssertEqual(responseMsg, msg)
+    }
+
+    /// Test BOOT_FILE request round-trip.
+    func test_roundtrip_bootFile() throws {
+        let filePath = "/Users/test/my game/starraiders.atr"
+        let original = AESPMessage.bootFile(filePath: filePath)
+        let encoded = original.encode()
+        let (decoded, _) = try AESPMessage.decode(from: encoded)
+
+        guard let parsedPath = decoded.parseBootFileRequest() else {
+            XCTFail("Failed to parse boot file request")
+            return
+        }
+        XCTAssertEqual(parsedPath, filePath)
+    }
+
+    /// Test BOOT_FILE response round-trip.
+    func test_roundtrip_bootFileResponse() throws {
+        let original = AESPMessage.bootFileResponse(success: true, message: "Loaded XEX executable")
+        let encoded = original.encode()
+        let (decoded, _) = try AESPMessage.decode(from: encoded)
+
+        guard let (success, message) = decoded.parseBootFileResponse() else {
+            XCTFail("Failed to parse boot file response")
+            return
+        }
+        XCTAssertTrue(success)
+        XCTAssertEqual(message, "Loaded XEX executable")
+    }
+
+    /// Test BOOT_FILE message properties.
+    func test_bootFile_properties() {
+        XCTAssertEqual(AESPMessageType.bootFile.rawValue, 0x07)
+        XCTAssertEqual(AESPMessageType.bootFile.category, .control)
+        XCTAssertTrue(AESPMessageType.bootFile.isRequest)
+        XCTAssertFalse(AESPMessageType.bootFile.isResponse)
+        XCTAssertEqual(AESPMessageType.bootFile.name, "BOOT_FILE")
+    }
+
+    // =========================================================================
     // MARK: - REGISTERS Tests
     // =========================================================================
 
@@ -745,6 +870,7 @@ final class AESPProtocolConformanceTests: XCTestCase {
         XCTAssertEqual(AESPMessageType.reset.rawValue, 0x04)
         XCTAssertEqual(AESPMessageType.status.rawValue, 0x05)
         XCTAssertEqual(AESPMessageType.info.rawValue, 0x06)
+        XCTAssertEqual(AESPMessageType.bootFile.rawValue, 0x07)
         XCTAssertEqual(AESPMessageType.ack.rawValue, 0x0F)
         XCTAssertEqual(AESPMessageType.memoryRead.rawValue, 0x10)
         XCTAssertEqual(AESPMessageType.memoryWrite.rawValue, 0x11)

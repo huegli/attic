@@ -172,6 +172,7 @@ final class AESPMessageTypeTests: XCTestCase {
         XCTAssertEqual(AESPMessageType.audioPCM.rawValue, 0x80)
         XCTAssertEqual(AESPMessageType.audioSubscribe.rawValue, 0x83)
         XCTAssertEqual(AESPMessageType.error.rawValue, 0x3F)
+        XCTAssertEqual(AESPMessageType.bootFile.rawValue, 0x07)
     }
 }
 

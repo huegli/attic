@@ -624,6 +624,51 @@ final class CLISocketIntegrationTests: XCTestCase {
         XCTAssertTrue(data.contains("D1:"))
     }
 
+    func testClientSendsBoot() async throws {
+        try await server.start()
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        serverDelegate.responseToReturn = .ok("booted /path/to/game.atr")
+        try await client.connect(to: testSocketPath)
+
+        let response = try await client.send(.boot(path: "/path/to/game.atr"))
+
+        guard case .ok(let data) = response else {
+            XCTFail("Expected ok response")
+            return
+        }
+        XCTAssertTrue(data.contains("booted"))
+
+        // Verify server received boot command with correct path
+        try await Task.sleep(nanoseconds: 50_000_000)
+        let bootCommands = serverDelegate.receivedCommands.filter {
+            if case .boot(let path) = $0.command {
+                return path == "/path/to/game.atr"
+            }
+            return false
+        }
+        XCTAssertGreaterThan(bootCommands.count, 0)
+    }
+
+    func testClientSendsBootError() async throws {
+        try await server.start()
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        serverDelegate.responseToReturn = .error("File not found: /nonexistent.atr")
+        try await client.connect(to: testSocketPath)
+
+        // Reset response after connect's ping
+        serverDelegate.responseToReturn = .error("File not found: /nonexistent.atr")
+
+        let response = try await client.send(.boot(path: "/nonexistent.atr"))
+
+        guard case .error(let message) = response else {
+            XCTFail("Expected error response")
+            return
+        }
+        XCTAssertTrue(message.contains("File not found"))
+    }
+
     func testClientSendsStateSave() async throws {
         try await server.start()
         try await Task.sleep(nanoseconds: 100_000_000)
