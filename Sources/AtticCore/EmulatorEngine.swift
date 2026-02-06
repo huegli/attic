@@ -196,6 +196,10 @@ public actor EmulatorEngine {
     /// - Parameter cold: If true, performs a cold reset (power cycle).
     ///                   If false, performs a warm reset (RESET key).
     public func reset(cold: Bool) async {
+        // Preserve the running state - reset should not pause emulation
+        // (matches real Atari behavior where RESET continues running)
+        let wasRunning = state == .running
+
         if cold {
             // Cold reset - reboot and run boot sequence
             wrapper.reboot(with: nil)
@@ -214,7 +218,9 @@ public actor EmulatorEngine {
             // Warm reset - just reboot without clearing BASIC memory.
             wrapper.reboot(with: nil)
         }
-        state = .paused
+
+        // Restore previous state - if emulator was running, keep it running
+        state = wasRunning ? .running : .paused
     }
 
     /// Clears the BASIC program from memory by resetting pointers.
