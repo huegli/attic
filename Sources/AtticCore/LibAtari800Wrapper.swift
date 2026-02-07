@@ -212,6 +212,7 @@ public final class LibAtari800Wrapper: @unchecked Sendable {
         currentInput.start = input.start ? 1 : 0
         currentInput.select = input.select ? 1 : 0
         currentInput.option = input.option ? 1 : 0
+        currentInput.special = input.special
         currentInput.joy0 = input.joystick0
         currentInput.trig0 = input.trigger0 ? 0 : 1  // 0 = pressed, 1 = released
         currentInput.joy1 = input.joystick1
@@ -277,10 +278,18 @@ public final class LibAtari800Wrapper: @unchecked Sendable {
     ///
     /// This resets the CPU and restarts execution from the RESET vector,
     /// but preserves RAM contents (unlike a cold reboot).
+    ///
+    /// The warmstart is triggered through the input system by setting
+    /// `special = 2` in the input template. libatari800 negates this value
+    /// to produce `AKEY_WARMSTART` (-2), which the emulator handles as
+    /// a reset key press during the next frame.
     public func warmstart() {
         guard isInitialized else { return }
         stateIsCached = false
-        Atari800_Warmstart()
+        // Send warmstart through the input system: special=2 → -2 = AKEY_WARMSTART
+        var input = InputState()
+        input.special = 2
+        executeFrame(input: &input)
     }
 
     // =========================================================================
@@ -801,6 +810,14 @@ public struct InputState: Sendable {
 
     /// OPTION console key.
     public var option: Bool = false
+
+    /// Special input code for system actions (e.g., warm/cold reset).
+    ///
+    /// This maps to the `special` field of `input_template_t`. The value
+    /// is negated by libatari800 to produce an AKEY_* code:
+    /// - 2 = AKEY_WARMSTART (-2): Warm reset (like pressing RESET key)
+    /// - 3 = AKEY_COLDSTART (-3): Cold reset (power cycle)
+    public var special: UInt8 = 0
 
     /// Joystick 0 direction (4-bit, RLDU).
     public var joystick0: UInt8 = 0x0F  // Centered
