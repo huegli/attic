@@ -702,6 +702,108 @@ class AtticViewModel: ObservableObject {
         }
     }
 
+    // =========================================================================
+    // MARK: - State Save/Load
+    // =========================================================================
+
+    /// Saves the emulator state to a file.
+    ///
+    /// In client mode, sends a `state save` command via the CLI socket to
+    /// the server, which handles metadata collection and file writing.
+    /// In embedded mode, creates metadata and saves directly via EmulatorEngine.
+    ///
+    /// - Parameter url: URL of the .attic file to save to.
+    func saveState(to url: URL) async {
+        let path = url.path
+
+        switch mode {
+        case .client:
+            guard let socketPath = cliSocketPath else {
+                statusMessage = "No server connection for save"
+                return
+            }
+            let cliClient = CLISocketClient()
+            do {
+                try await cliClient.connect(to: socketPath)
+                let response = try await cliClient.send(.stateSave(path: path))
+                await cliClient.disconnect()
+                switch response {
+                case .ok:
+                    statusMessage = "State saved"
+                case .error(let msg):
+                    statusMessage = "Save failed: \(msg)"
+                }
+            } catch {
+                statusMessage = "Save failed: \(error.localizedDescription)"
+            }
+
+        case .embedded:
+            guard let emulator = emulator else { return }
+            do {
+                let metadata = StateMetadata.create(
+                    replMode: .basic(variant: .atari),
+                    mountedDisks: []
+                )
+                try await emulator.saveState(to: url, metadata: metadata)
+                statusMessage = "State saved"
+            } catch {
+                statusMessage = "Save failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    /// Loads emulator state from a file.
+    ///
+    /// In client mode, sends a `state load` command via the CLI socket to
+    /// the server, which handles file reading and state restoration.
+    /// In embedded mode, loads directly via EmulatorEngine.
+    ///
+    /// - Parameter url: URL of the .attic file to load from.
+    func loadState(from url: URL) async {
+        let path = url.path
+
+        switch mode {
+        case .client:
+            guard let socketPath = cliSocketPath else {
+                statusMessage = "No server connection for load"
+                return
+            }
+            let cliClient = CLISocketClient()
+            do {
+                try await cliClient.connect(to: socketPath)
+                let response = try await cliClient.send(.stateLoad(path: path))
+                await cliClient.disconnect()
+                switch response {
+                case .ok:
+                    audioEngine.clearBuffer()
+                    keyboardHandler.reset()
+                    isRunning = true
+                    statusMessage = "State loaded"
+                case .error(let msg):
+                    statusMessage = "Load failed: \(msg)"
+                }
+            } catch {
+                statusMessage = "Load failed: \(error.localizedDescription)"
+            }
+
+        case .embedded:
+            guard let emulator = emulator else { return }
+            do {
+                let _ = try await emulator.loadState(from: url)
+                audioEngine.clearBuffer()
+                keyboardHandler.reset()
+                isRunning = true
+                statusMessage = "State loaded"
+            } catch {
+                statusMessage = "Load failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    // =========================================================================
+    // MARK: - Boot File
+    // =========================================================================
+
     /// Boots the emulator with a file (disk image, executable, BASIC program, etc.).
     ///
     /// Opens the file via `libatari800_reboot_with_file` which loads it and
@@ -1200,12 +1302,36 @@ struct AtticCommands: Commands {
             Divider()
 
             Button("Save State...") {
-                // TODO: Save state dialog
+                // Present NSSavePanel for choosing where to save the .attic state file.
+                // NSSavePanel is used directly because SwiftUI's fileExporter
+                // doesn't easily support the Commands context.
+                let panel = NSSavePanel()
+                panel.title = "Save Emulator State"
+                panel.allowedContentTypes = [UTType(filenameExtension: "attic")].compactMap { $0 }
+                panel.nameFieldStringValue = "Untitled.attic"
+                panel.canCreateDirectories = true
+
+                if panel.runModal() == .OK, let url = panel.url {
+                    Task {
+                        await viewModel.saveState(to: url)
+                    }
+                }
             }
             .keyboardShortcut("S")
 
             Button("Load State...") {
-                // TODO: Load state dialog
+                // Present NSOpenPanel filtered to .attic state files.
+                let panel = NSOpenPanel()
+                panel.title = "Load Emulator State"
+                panel.allowedContentTypes = [UTType(filenameExtension: "attic")].compactMap { $0 }
+                panel.allowsMultipleSelection = false
+                panel.canChooseDirectories = false
+
+                if panel.runModal() == .OK, let url = panel.url {
+                    Task {
+                        await viewModel.loadState(from: url)
+                    }
+                }
             }
             .keyboardShortcut("L")
         }
