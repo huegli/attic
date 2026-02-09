@@ -10,7 +10,7 @@
 // 1. BASIC Program Pipeline - Tokenizer → Detokenizer Round-Trip
 // 2. State Persistence Cycle - Save → Modify → Load → Verify
 // 3. Assembler + Disassembler Integration
-// 4. REPL → EmulatorEngine Integration
+// 4. Expression Evaluator Integration
 //
 // These tests use mocked or minimal emulator state where possible to
 // avoid requiring ROM files.
@@ -520,122 +520,6 @@ final class AssemblerDisassemblerIntegrationTests: XCTestCase {
 
         _ = try assembler.assembleLine("RTS")  // 1 byte
         XCTAssertEqual(assembler.currentPC, 0x0607)
-    }
-}
-
-// =============================================================================
-// MARK: - REPL Engine Integration Tests
-// =============================================================================
-
-/// Integration tests for REPL engine command processing.
-///
-/// These tests verify that REPL commands are correctly:
-/// - Parsed
-/// - Executed against the emulator
-/// - Formatted for output
-final class REPLEngineIntegrationTests: XCTestCase {
-    var engine: EmulatorEngine!
-    var repl: REPLEngine!
-
-    override func setUp() async throws {
-        try await super.setUp()
-        engine = EmulatorEngine()
-        repl = REPLEngine(emulator: engine, initialMode: .monitor)
-    }
-
-    // =========================================================================
-    // MARK: - Mode Switching Tests
-    // =========================================================================
-
-    /// Test switching between all modes.
-    func test_modeSwitching() async {
-        // Start in monitor mode
-        var mode = await repl.mode
-        XCTAssertEqual(mode, .monitor)
-
-        // Switch to BASIC
-        let output1 = await repl.execute(".basic")
-        XCTAssertNotNil(output1)
-        mode = await repl.mode
-        if case .basic = mode { } else { XCTFail("Should be in BASIC mode") }
-
-        // Switch to DOS
-        let output2 = await repl.execute(".dos")
-        XCTAssertNotNil(output2)
-        mode = await repl.mode
-        XCTAssertEqual(mode, .dos)
-
-        // Switch back to monitor
-        let output3 = await repl.execute(".monitor")
-        XCTAssertNotNil(output3)
-        mode = await repl.mode
-        XCTAssertEqual(mode, .monitor)
-    }
-
-    /// Test prompt changes with mode.
-    func test_promptChangesWithMode() async {
-        // Monitor prompt includes PC
-        let monitorPrompt = await repl.prompt
-        XCTAssertTrue(monitorPrompt.contains("[monitor]"))
-        XCTAssertTrue(monitorPrompt.contains("$"))
-
-        // Switch to BASIC
-        _ = await repl.execute(".basic")
-        let basicPrompt = await repl.prompt
-        XCTAssertTrue(basicPrompt.contains("[basic]"))
-
-        // Switch to DOS
-        _ = await repl.execute(".dos")
-        let dosPrompt = await repl.prompt
-        XCTAssertTrue(dosPrompt.contains("[dos]"))
-        XCTAssertTrue(dosPrompt.contains("D"))
-    }
-
-    // =========================================================================
-    // MARK: - Monitor Command Tests
-    // =========================================================================
-
-    /// Test registers command.
-    func test_monitor_registersCommand() async {
-        let output = await repl.execute("r")
-
-        XCTAssertNotNil(output)
-        XCTAssertTrue(output?.contains("A=") ?? false)
-        XCTAssertTrue(output?.contains("X=") ?? false)
-        XCTAssertTrue(output?.contains("Y=") ?? false)
-        XCTAssertTrue(output?.contains("PC=") ?? false)
-    }
-
-    /// Test help command.
-    func test_helpCommand() async {
-        let output = await repl.execute("help")
-
-        XCTAssertNotNil(output)
-        XCTAssertTrue(output?.contains("Commands") ?? false ||
-                      output?.contains("commands") ?? false ||
-                      output?.contains("help") ?? false)
-    }
-
-    /// Test status command.
-    func test_statusCommand() async {
-        let output = await repl.execute("status")
-
-        XCTAssertNotNil(output)
-        // Should contain emulator state info
-        XCTAssertTrue((output?.count ?? 0) > 0)
-    }
-
-    // =========================================================================
-    // MARK: - Error Handling Tests
-    // =========================================================================
-
-    /// Test invalid command produces error.
-    func test_invalidCommand_producesError() async {
-        let output = await repl.execute("xyzzy")
-
-        XCTAssertNotNil(output)
-        XCTAssertTrue(output?.lowercased().contains("error") ??
-                      output?.lowercased().contains("unknown") ?? false)
     }
 }
 

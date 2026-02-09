@@ -9,9 +9,8 @@
 // - Assembler: For interactive assembly
 // - Disassembler interface (implemented in Phase 10)
 //
-// The MonitorController is used by both:
-// - REPLEngine: For interactive monitor commands in the REPL
-// - CLISocketServer: For monitor commands via the CLI protocol
+// The MonitorController is used by:
+// - AtticServer: For monitor commands via the CLI protocol
 //
 // This actor ensures thread-safe access to all monitor components and
 // provides high-level methods for common debugging operations.
