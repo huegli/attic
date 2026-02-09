@@ -2,6 +2,7 @@ states/
 .build
 UserInterfaceState.xcuserstate
 .swiftpm/
-
+.vscode/
+*.code-workspace
 # bv (beads viewer) local config and caches
 .bv/
