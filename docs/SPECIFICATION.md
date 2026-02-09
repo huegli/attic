@@ -114,10 +114,6 @@ Emulator
     ...
 
 View
-  Actual Size                       ⌘1
-  Double Size                       ⌘2
-  Triple Size                       ⌘3
-  ───────────────────────────────────
   Enter Full Screen                 ⌘⌃F
 ```
 

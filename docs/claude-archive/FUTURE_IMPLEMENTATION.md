@@ -95,11 +95,6 @@ The following features were deferred during Phases 1-16 to maintain focus on cor
 - **Status:** Menu item has no action
 - **Required:** Present NSOpenPanel filtered for .attic files
 
-#### Window Scaling
-- **File:** `Sources/AtticGUI/AtticApp.swift:860-872`
-- **Status:** Three menu items (1x, 2x, 3x) have no action
-- **Required:** Resize window to 384×240 multiplied by scale factor
-
 ### REPL Engine
 
 #### Screenshot Capture
@@ -168,7 +163,7 @@ The following features were deferred during Phases 1-16 to maintain focus on cor
 - Implement all menu item actions:
   - File menu: Open Disk, Save/Load State, Screenshot
   - Emulator menu: Run, Pause, Reset, Drive submenus
-  - View menu: Window scaling (1x, 2x, 3x), Full Screen
+  - View menu: Full Screen
 - Add keyboard shortcuts for all actions
 - Implement Recent Files submenu
 

@@ -26,6 +26,23 @@ import UniformTypeIdentifiers
 import AtticCore
 import AtticProtocol
 
+// MARK: - Custom UTType for Attic State Files
+
+/// Custom UTType for .attic state files.
+///
+/// Because .attic is not a system-registered file type, UTType(filenameExtension:)
+/// returns nil for it. We create a dynamic UTType from the file extension using
+/// UTType(tag:tagClass:conformingTo:), which works without requiring an Info.plist
+/// UTExportedTypeDeclarations entry. This is appropriate for SPM executables that
+/// don't have a proper app bundle with plist registration.
+extension UTType {
+    static let atticState = UTType(
+        tag: "attic",
+        tagClass: .filenameExtension,
+        conformingTo: .data
+    )!
+}
+
 // MARK: - Operation Mode
 
 /// The operation mode for the GUI application.
@@ -501,6 +518,18 @@ class AtticViewModel: ObservableObject {
             // Start receiving frames and audio
             startFrameReceiver()
             startAudioReceiver()
+
+            // Discover the CLI socket path if we don't already have one.
+            // This is needed when connecting to a pre-existing AtticServer
+            // that wasn't launched by this GUI instance. Without the CLI
+            // socket path, save/load state commands can't reach the server.
+            if cliSocketPath == nil {
+                let cliClient = CLISocketClient()
+                if let discoveredPath = cliClient.discoverSocket() {
+                    cliSocketPath = discoveredPath
+                    print("[AtticGUI] Discovered CLI socket: \(discoveredPath)")
+                }
+            }
 
             isInitialized = true
             isRunning = true
@@ -1305,9 +1334,11 @@ struct AtticCommands: Commands {
                 // Present NSSavePanel for choosing where to save the .attic state file.
                 // NSSavePanel is used directly because SwiftUI's fileExporter
                 // doesn't easily support the Commands context.
+                // We use the custom UTType.atticState because .attic is not a
+                // system-registered type and UTType(filenameExtension:) returns nil.
                 let panel = NSSavePanel()
                 panel.title = "Save Emulator State"
-                panel.allowedContentTypes = [UTType(filenameExtension: "attic")].compactMap { $0 }
+                panel.allowedContentTypes = [.atticState]
                 panel.nameFieldStringValue = "Untitled.attic"
                 panel.canCreateDirectories = true
 
@@ -1321,9 +1352,11 @@ struct AtticCommands: Commands {
 
             Button("Load State...") {
                 // Present NSOpenPanel filtered to .attic state files.
+                // Uses the custom UTType.atticState since .attic is not a
+                // system-registered type (UTType(filenameExtension:) returns nil).
                 let panel = NSOpenPanel()
                 panel.title = "Load Emulator State"
-                panel.allowedContentTypes = [UTType(filenameExtension: "attic")].compactMap { $0 }
+                panel.allowedContentTypes = [.atticState]
                 panel.allowsMultipleSelection = false
                 panel.canChooseDirectories = false
 
@@ -1375,25 +1408,6 @@ struct AtticCommands: Commands {
                 .foregroundColor(.secondary)
         }
 
-        // View menu additions
-        CommandGroup(after: .windowSize) {
-            Divider()
-
-            Button("Actual Size (1x)") {
-                // TODO: Resize window
-            }
-            .keyboardShortcut("1")
-
-            Button("Double Size (2x)") {
-                // TODO: Resize window
-            }
-            .keyboardShortcut("2")
-
-            Button("Triple Size (3x)") {
-                // TODO: Resize window
-            }
-            .keyboardShortcut("3")
-        }
 
         // Hide the standard Close menu item (we handle it in app termination)
         CommandGroup(replacing: .saveItem) {
