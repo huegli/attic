@@ -3,8 +3,10 @@
 // =============================================================================
 //
 // This is the main entry point for the Attic command-line interface.
-// The CLI provides a REPL (Read-Eval-Print Loop) for interacting with the
-// Atari 800 XL emulator from the terminal or Emacs comint mode.
+// The CLI is a pure protocol client that connects to AtticServer via a Unix
+// socket using the CLI text protocol. It provides a REPL (Read-Eval-Print Loop)
+// for interacting with the Atari 800 XL emulator from the terminal or Emacs
+// comint mode.
 //
 // Usage:
 //   attic                    Connect to running AtticServer (or launch one)
@@ -12,9 +14,6 @@
 //   attic --headless --silent  Headless without audio
 //   attic --socket <path>    Connect to specific socket
 //   attic --help             Show help
-//
-// The CLI communicates with AtticServer via a Unix socket using the CLI
-// text protocol. If no server is running, the CLI can launch one.
 //
 // The CLI supports three modes:
 // - Monitor: 6502 debugging (disassembly, breakpoints, memory inspection)
@@ -44,9 +43,6 @@ struct AtticCLI {
 
     /// Parsed command-line arguments.
     struct Arguments {
-        /// Start in REPL mode (default).
-        var repl: Bool = true
-
         /// Run without launching GUI.
         var headless: Bool = false
 
@@ -73,9 +69,6 @@ struct AtticCLI {
 
         while let arg = arguments.popFirst() {
             switch arg {
-            case "--repl":
-                args.repl = true
-
             case "--headless":
                 args.headless = true
 
@@ -116,7 +109,6 @@ struct AtticCLI {
         USAGE: attic [options]
 
         OPTIONS:
-          --repl              Start in REPL mode (default)
           --headless          Run without launching GUI
           --silent            Disable audio output (headless mode only)
           --socket <path>     Connect to GUI at specific socket path
@@ -149,54 +141,6 @@ struct AtticCLI {
     /// Prints an error message to stderr.
     static func printError(_ message: String) {
         FileHandle.standardError.write("Error: \(message)\n".data(using: .utf8)!)
-    }
-
-    // =========================================================================
-    // MARK: - REPL Loop (Local)
-    // =========================================================================
-
-    /// Runs the REPL loop with a local emulator engine.
-    ///
-    /// This function reads commands from stdin, executes them, and writes
-    /// output to stdout. It continues until the user types .quit or .shutdown.
-    ///
-    /// - Parameters:
-    ///   - repl: The REPL engine to use.
-    @MainActor
-    static func runLocalREPL(repl: REPLEngine) async {
-        // Print welcome banner
-        print(AtticCore.welcomeBanner)
-
-        // Print initial prompt
-        print(await repl.prompt, terminator: "")
-        fflush(stdout)
-
-        // Read lines from stdin
-        while await repl.shouldContinue {
-            guard let line = readLine() else {
-                // EOF (Ctrl-D)
-                print("\nGoodbye")
-                break
-            }
-
-            // Skip empty lines
-            guard !line.isEmpty else {
-                print(await repl.prompt, terminator: "")
-                fflush(stdout)
-                continue
-            }
-
-            // Execute command
-            if let output = await repl.execute(line) {
-                print(output)
-            }
-
-            // Print prompt for next command
-            if await repl.shouldContinue {
-                print(await repl.prompt, terminator: "")
-                fflush(stdout)
-            }
-        }
     }
 
     // =========================================================================

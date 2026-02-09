@@ -249,12 +249,12 @@ The CLI communicates with the GUI via Unix domain socket using a text-based prot
 ### Socket Architecture
 
 ```
-CLI Process                          GUI Process
+CLI Process (attic)                 AtticServer Process
 ┌──────────────┐                    ┌──────────────┐
 │   stdin ─────┼──► CommandParser   │              │
 │              │         │          │  Socket      │
-│   REPLEngine │         ▼          │  Listener    │
-│       │      │    SocketClient ──►│      │       │
+│  SocketClient│         ▼          │  Listener    │
+│       │      │  CommandTranslator │      │       │
 │       ▼      │         │          │      ▼       │
 │   stdout ◄───┼── ResponseHandler◄─┼─ CommandProc │
 └──────────────┘                    │      │       │
@@ -267,9 +267,9 @@ CLI Process                          GUI Process
 
 1. User types command in Emacs
 2. Emacs sends to CLI via stdin
-3. CLI parses command and sends to GUI via socket
-4. GUI executes command against EmulatorEngine
-5. GUI sends response via socket
+3. CLI translates command and sends to AtticServer via socket
+4. AtticServer executes command against EmulatorEngine
+5. AtticServer sends response via socket
 6. CLI formats response and writes to stdout
 7. Emacs displays in comint buffer
 
