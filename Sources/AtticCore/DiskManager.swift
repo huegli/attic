@@ -10,20 +10,25 @@
 // Key Features:
 // - Thread-safe disk operations via Swift actor isolation
 // - Support for 8 virtual drives (matching Atari's drive numbering)
-// - Direct ATR file parsing (independent of emulator's disk handling)
+// - Coordinated mount/unmount with EmulatorEngine (libatari800)
+// - Direct ATR file parsing for REPL file operations
 // - File system operations on mounted disks
 //
 // Architecture Notes:
-// - DiskManager provides direct host access to ATR contents
-// - This is separate from the emulator's disk I/O (which goes through libatari800)
-// - Use DiskManager for REPL disk operations (dir, type, export, etc.)
-// - Use EmulatorEngine.mountDisk for emulator disk access (BASIC OPEN, etc.)
+// - DiskManager is the SINGLE API for all disk mount/unmount operations.
+// - When an EmulatorEngine is provided, mount() calls EmulatorEngine.mountDisk()
+//   first (so libatari800 can access the disk), then parses the ATR for
+//   Swift-side file operations. unmount() removes tracking then calls
+//   EmulatorEngine.unmountDisk().
+// - AtticServer and other callers should NEVER call EmulatorEngine.mountDisk()
+//   or unmountDisk() directly — always go through DiskManager.
+// - Without an emulator (standalone mode), only Swift-side parsing is done.
 //
 // Usage:
 //
-//     let manager = DiskManager()
+//     let manager = DiskManager(emulator: engine)
 //
-//     // Mount a disk
+//     // Mount a disk (also mounts in the emulator)
 //     try await manager.mount(drive: 1, path: "/path/to/disk.atr")
 //
 //     // List files
@@ -35,8 +40,8 @@
 //     // Write a file
 //     try await manager.writeFile(drive: 1, name: "HELLO.TXT", data: data)
 //
-//     // Unmount
-//     await manager.unmount(drive: 1)
+//     // Unmount (also unmounts from the emulator)
+//     try await manager.unmount(drive: 1)
 //
 // =============================================================================
 
@@ -169,9 +174,16 @@ public struct DriveStatus: Sendable {
 /// disk drives. It handles mounting/unmounting disks and provides file system
 /// operations on the mounted disks.
 ///
-/// This is separate from the emulator's disk handling - DiskManager provides
-/// direct host-side access to ATR file contents for REPL commands, while the
-/// emulator handles its own disk I/O through libatari800.
+/// DiskManager is the single API for all disk operations. When an EmulatorEngine
+/// is provided, mount/unmount operations are coordinated with the emulator's
+/// C library (libatari800) so that both the emulator and the Swift-side file
+/// system view stay in sync.
+///
+/// Usage:
+///   - For server/CLI use: `DiskManager(emulator: engine)` — mount/unmount
+///     calls are forwarded to the emulator automatically.
+///   - For standalone ATR inspection (no emulator): `DiskManager()` — only
+///     Swift-side parsing is performed.
 public actor DiskManager {
     // =========================================================================
     // MARK: - Constants
@@ -190,6 +202,12 @@ public actor DiskManager {
     /// The current drive for DOS mode operations.
     private(set) public var currentDrive: Int = 1
 
+    /// Optional reference to the emulator engine.
+    /// When set, mount/unmount operations are forwarded to the emulator
+    /// so that libatari800's disk I/O stays in sync with DiskManager's
+    /// file system view.
+    private let emulator: EmulatorEngine?
+
     // =========================================================================
     // MARK: - Internal Types
     // =========================================================================
@@ -207,13 +225,26 @@ public actor DiskManager {
     // =========================================================================
 
     /// Creates a new disk manager with no mounted disks.
-    public init() {}
+    ///
+    /// - Parameter emulator: Optional emulator engine. When provided,
+    ///   mount/unmount operations are coordinated with the emulator's
+    ///   C library so that disk I/O works from both the REPL and the
+    ///   emulated Atari OS.
+    public init(emulator: EmulatorEngine? = nil) {
+        self.emulator = emulator
+    }
 
     // =========================================================================
     // MARK: - Drive Operations
     // =========================================================================
 
     /// Mounts an ATR disk image in the specified drive.
+    ///
+    /// When an emulator is attached, the disk is first mounted in the emulator's
+    /// C library (libatari800) so that the emulated Atari OS can access it. If
+    /// the emulator mount fails, the operation is aborted. If the emulator mount
+    /// succeeds but ATR parsing fails, the disk is unmounted from the emulator
+    /// before the error is propagated.
     ///
     /// - Parameters:
     ///   - drive: The drive number (1-8).
@@ -222,7 +253,7 @@ public actor DiskManager {
     /// - Returns: Information about the mounted disk.
     /// - Throws: DiskManagerError or ATRError.
     @discardableResult
-    public func mount(drive: Int, path: String, readOnly: Bool = false) throws -> MountedDiskInfo {
+    public func mount(drive: Int, path: String, readOnly: Bool = false) async throws -> MountedDiskInfo {
         // Validate drive number
         guard drive >= 1 && drive <= DiskManager.maxDrives else {
             throw DiskManagerError.invalidDrive(drive)
@@ -241,16 +272,37 @@ public actor DiskManager {
             throw DiskManagerError.pathNotFound(path)
         }
 
-        // Load the ATR image
+        // Step 1: Mount in the emulator (if attached) so libatari800 can access the disk.
+        // This must succeed before we invest effort in ATR parsing.
+        if let emulator = emulator {
+            let ok = await emulator.mountDisk(drive: drive, path: expandedPath, readOnly: readOnly)
+            guard ok else {
+                throw DiskManagerError.mountFailed("Emulator rejected disk image at \(path)")
+            }
+        }
+
+        // Step 2: Parse the ATR image on the Swift side for REPL file operations.
         let image: ATRImage
         do {
             image = try ATRImage(url: url, readOnly: readOnly)
         } catch {
+            // ATR parse failed — roll back the emulator mount so drives stay in sync.
+            if let emulator = emulator {
+                await emulator.unmountDisk(drive: drive)
+            }
             throw DiskManagerError.mountFailed(error.localizedDescription)
         }
 
-        // Create file system interface
-        let fileSystem = try ATRFileSystem(disk: image)
+        // Step 3: Create file system interface.
+        let fileSystem: ATRFileSystem
+        do {
+            fileSystem = try ATRFileSystem(disk: image)
+        } catch {
+            if let emulator = emulator {
+                await emulator.unmountDisk(drive: drive)
+            }
+            throw DiskManagerError.mountFailed(error.localizedDescription)
+        }
 
         // Store the mounted disk
         mountedDisks[drive] = MountedDisk(
@@ -266,10 +318,13 @@ public actor DiskManager {
 
     /// Unmounts the disk in the specified drive.
     ///
+    /// Removes Swift-side tracking first, then unmounts from the emulator
+    /// (if attached) so that libatari800 stops accessing the disk image.
+    ///
     /// - Parameter drive: The drive number (1-8).
     /// - Parameter save: Whether to save changes before unmounting (default: true).
     /// - Throws: DiskManagerError if drive is invalid or empty.
-    public func unmount(drive: Int, save: Bool = true) throws {
+    public func unmount(drive: Int, save: Bool = true) async throws {
         guard drive >= 1 && drive <= DiskManager.maxDrives else {
             throw DiskManagerError.invalidDrive(drive)
         }
@@ -283,8 +338,13 @@ public actor DiskManager {
             try mounted.image.save()
         }
 
-        // Remove from mounted disks
+        // Remove from mounted disks (Swift-side tracking)
         mountedDisks.removeValue(forKey: drive)
+
+        // Unmount from the emulator so libatari800 stops accessing the file
+        if let emulator = emulator {
+            await emulator.unmountDisk(drive: drive)
+        }
 
         // If current drive was unmounted, switch to drive 1
         if currentDrive == drive {

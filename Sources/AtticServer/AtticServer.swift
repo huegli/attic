@@ -304,9 +304,19 @@ final class ServerDelegate: AESPServerDelegate, @unchecked Sendable {
 ///
 /// This delegate implements the text-based CLI protocol, translating CLI commands
 /// into emulator operations and returning formatted responses.
+///
+/// Disk operations (mount, unmount, drives) go through DiskManager, which
+/// coordinates with both the emulator's C library and Swift-side ATR parsing.
+/// This ensures that disk state is always consistent between libatari800 and
+/// the REPL file system view.
 final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
     /// Reference to the emulator engine.
     private let emulator: EmulatorEngine
+
+    /// Disk manager — the single API for all disk mount/unmount operations.
+    /// Coordinates with EmulatorEngine so that libatari800 and Swift-side
+    /// file system state stay in sync.
+    private let diskManager: DiskManager
 
     /// BASIC line handler for tokenization and memory injection.
     private let basicHandler: BASICLineHandler
@@ -323,6 +333,7 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
 
     init(emulator: EmulatorEngine) {
         self.emulator = emulator
+        self.diskManager = DiskManager(emulator: emulator)
         self.basicHandler = BASICLineHandler(emulator: emulator)
     }
 
@@ -448,25 +459,32 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
             let bpStrs = bps.map { "$\(String(format: "%04X", $0))" }.joined(separator: ",")
             return .ok("breakpoints \(bpStrs)")
 
-        // Disk operations
+        // Disk operations — all go through DiskManager which coordinates
+        // with EmulatorEngine so libatari800 and Swift-side state stay in sync.
         case .mount(let drive, let path):
-            // Check if file exists
-            guard FileManager.default.fileExists(atPath: path) else {
-                return .error("File not found '\(path)'")
-            }
-            if await emulator.mountDisk(drive: drive, path: path, readOnly: false) {
-                return .ok("mounted \(drive) \(path)")
-            } else {
-                return .error("Failed to mount '\(path)'")
+            do {
+                let info = try await diskManager.mount(drive: drive, path: path)
+                return .ok("mounted \(drive) \(info.filename) (\(info.diskType.shortName), \(info.fileCount) files, \(info.freeSectors) free)")
+            } catch {
+                return .error(error.localizedDescription)
             }
 
         case .unmount(let drive):
-            await emulator.unmountDisk(drive: drive)
-            return .ok("unmounted \(drive)")
+            do {
+                try await diskManager.unmount(drive: drive)
+                return .ok("unmounted \(drive)")
+            } catch {
+                return .error(error.localizedDescription)
+            }
 
         case .drives:
-            // TODO: Get mounted drives from emulator
-            return .ok("drives (none)")
+            let drives = await diskManager.listDrives()
+            let mountedDrives = drives.filter { $0.mounted }
+            if mountedDrives.isEmpty {
+                return .ok("drives (none)")
+            }
+            let lines = mountedDrives.map { $0.displayString }
+            return .okMultiLine(lines)
 
         // State management
         case .stateSave(let path):
@@ -878,6 +896,7 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
         let state = await emulator.state
         let regs = await emulator.getRegisters()
         let bps = await emulator.getBreakpoints()
+        let drives = await diskManager.listDrives()
 
         var status = ""
         switch state {
@@ -893,8 +912,16 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
 
         status += " PC=$\(String(format: "%04X", regs.pc))"
 
-        // TODO: Add disk mount status (D1=..., D2=..., etc.)
-        status += " D1=(none) D2=(none)"
+        // Show disk mount status for drives 1-8
+        for driveStatus in drives {
+            let d = driveStatus.drive
+            if driveStatus.mounted {
+                let filename = driveStatus.path.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "?"
+                status += " D\(d)=\(filename)"
+            } else {
+                status += " D\(d)=(none)"
+            }
+        }
 
         if bps.isEmpty {
             status += " BP=(none)"
