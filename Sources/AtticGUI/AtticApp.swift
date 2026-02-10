@@ -781,6 +781,45 @@ class AtticViewModel: ObservableObject {
         }
     }
 
+    // =========================================================================
+    // MARK: - Screenshot
+    // =========================================================================
+
+    /// Takes a screenshot of the current Atari display.
+    ///
+    /// In client mode, sends a `screenshot` command via the CLI socket to
+    /// the server, which captures the current frame and writes it as a PNG.
+    /// In embedded mode, this is not yet supported.
+    ///
+    /// - Parameter url: Optional URL to save the screenshot to. If nil, the
+    ///   server uses its default path (Desktop with timestamp).
+    func takeScreenshot(to url: URL? = nil) async {
+        switch mode {
+        case .client:
+            guard let socketPath = cliSocketPath else {
+                statusMessage = "No server connection for screenshot"
+                return
+            }
+            let cliClient = CLISocketClient()
+            do {
+                try await cliClient.connect(to: socketPath)
+                let response = try await cliClient.send(.screenshot(path: url?.path))
+                await cliClient.disconnect()
+                switch response {
+                case .ok(let msg):
+                    statusMessage = msg
+                case .error(let msg):
+                    statusMessage = "Screenshot failed: \(msg)"
+                }
+            } catch {
+                statusMessage = "Screenshot failed: \(error.localizedDescription)"
+            }
+
+        case .embedded:
+            statusMessage = "Screenshot not supported in embedded mode"
+        }
+    }
+
     /// Loads emulator state from a file.
     ///
     /// In client mode, sends a `state load` command via the CLI socket to
@@ -1400,6 +1439,35 @@ struct AtticCommands: Commands {
             // and spacebar to fire (port 0). Renders as a checkmark menu item.
             Toggle("Joystick Emulation", isOn: $viewModel.isJoystickEmulationEnabled)
                 .keyboardShortcut("J")
+
+            Divider()
+
+            // Screenshot: quick capture to Desktop using server default path
+            Button("Screenshot") {
+                Task {
+                    await viewModel.takeScreenshot()
+                }
+            }
+            .keyboardShortcut("P")
+
+            // Screenshot As: opens save panel for choosing location
+            Button("Screenshot As...") {
+                let panel = NSSavePanel()
+                panel.title = "Save Screenshot"
+                panel.allowedContentTypes = [.png]
+                // Default filename with timestamp (e.g. "Attic-2026-02-09-143052.png")
+                let formatter = DateFormatter()
+                formatter.dateFormat = "yyyy-MM-dd-HHmmss"
+                panel.nameFieldStringValue = "Attic-\(formatter.string(from: Date())).png"
+                panel.canCreateDirectories = true
+
+                if panel.runModal() == .OK, let url = panel.url {
+                    Task {
+                        await viewModel.takeScreenshot(to: url)
+                    }
+                }
+            }
+            .keyboardShortcut("P", modifiers: [.command, .shift])
 
             Divider()
 
