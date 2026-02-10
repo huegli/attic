@@ -299,6 +299,11 @@ class AtticViewModel: ObservableObject {
     /// Updated when the AESP status response includes disk information.
     @Published var mountedDiskNames: String = ""
 
+    /// Structured per-drive mount info for the Drive submenus.
+    /// Each entry maps a drive number (1-based) to its mounted filename.
+    /// Empty when no disks are mounted.
+    @Published var mountedDrives: [(drive: Int, filename: String)] = []
+
     /// Whether audio is enabled.
     @Published var isAudioEnabled: Bool = true {
         didSet {
@@ -945,12 +950,91 @@ class AtticViewModel: ObservableObject {
     func refreshDiskStatus() async {
         guard mode == .client, let client = client else { return }
         let status = await client.requestStatusWithDisks()
+
+        // Update structured drive data for Drive submenus
+        mountedDrives = status.mountedDrives
+
+        // Update display string for status bar
         if status.mountedDrives.isEmpty {
             mountedDiskNames = ""
         } else {
             mountedDiskNames = status.mountedDrives
                 .map { "D\($0.drive):\($0.filename)" }
                 .joined(separator: "  ")
+        }
+    }
+
+    // =========================================================================
+    // MARK: - Disk Operations
+    // =========================================================================
+
+    /// Mounts a disk image into a drive slot.
+    ///
+    /// In client mode, sends a `mount` command via the CLI socket to the server.
+    /// After mounting, refreshes disk status so the Drive submenus reflect the change.
+    ///
+    /// - Parameters:
+    ///   - drive: Drive number (1 or 2).
+    ///   - path: Absolute path to the disk image file.
+    func mountDisk(drive: Int, path: String) async {
+        switch mode {
+        case .client:
+            guard let socketPath = cliSocketPath else {
+                statusMessage = "No server connection for mount"
+                return
+            }
+            let cliClient = CLISocketClient()
+            do {
+                try await cliClient.connect(to: socketPath)
+                let response = try await cliClient.send(.mount(drive: drive, path: path))
+                await cliClient.disconnect()
+                switch response {
+                case .ok(let msg):
+                    statusMessage = msg
+                case .error(let msg):
+                    statusMessage = "Mount failed: \(msg)"
+                }
+            } catch {
+                statusMessage = "Mount failed: \(error.localizedDescription)"
+            }
+            await refreshDiskStatus()
+
+        case .embedded:
+            statusMessage = "Mount not supported in embedded mode"
+        }
+    }
+
+    /// Unmounts (ejects) the disk image from a drive slot.
+    ///
+    /// In client mode, sends an `unmount` command via the CLI socket to the server.
+    /// After unmounting, refreshes disk status so the Drive submenus reflect the change.
+    ///
+    /// - Parameter drive: Drive number (1 or 2).
+    func unmountDisk(drive: Int) async {
+        switch mode {
+        case .client:
+            guard let socketPath = cliSocketPath else {
+                statusMessage = "No server connection for unmount"
+                return
+            }
+            let cliClient = CLISocketClient()
+            do {
+                try await cliClient.connect(to: socketPath)
+                let response = try await cliClient.send(.unmount(drive: drive))
+                await cliClient.disconnect()
+                switch response {
+                case .ok(let msg):
+                    statusMessage = msg
+                case .error(let msg):
+                    statusMessage = "Eject failed: \(msg)"
+                }
+            } catch {
+                statusMessage = "Eject failed: \(error.localizedDescription)"
+            }
+            await refreshDiskStatus()
+
+        case .embedded:
+            statusMessage = "Eject not supported in embedded mode"
         }
     }
 
@@ -1525,19 +1609,56 @@ struct AtticCommands: Commands {
 
             Divider()
 
+            // Drive 1 submenu: insert/eject disk images for drive slot 1.
+            // Shows current disk name if mounted, or "Empty" if not.
+            driveMenu(drive: 1)
+
+            // Drive 2 submenu: insert/eject disk images for drive slot 2.
+            driveMenu(drive: 2)
+
+            Divider()
+
             // Show current mode
             Text("Mode: \(viewModel.mode == .client ? "Client" : "Embedded")")
                 .foregroundColor(.secondary)
         }
 
+        // About dialog: replaces the standard "About" menu item in the app menu
+        // with a customized version showing the Attic application info.
+        CommandGroup(replacing: .appInfo) {
+            Button("About Attic") {
+                NSApplication.shared.orderFrontStandardAboutPanel(options: [
+                    .applicationName: "Attic",
+                    .applicationVersion: "1.0",
+                    .version: "1",
+                    .credits: NSAttributedString(
+                        string: "Atari 800 XL Emulator\nPowered by libatari800",
+                        attributes: [
+                            .font: NSFont.systemFont(ofSize: 11),
+                            .foregroundColor: NSColor.secondaryLabelColor
+                        ]
+                    )
+                ])
+            }
+        }
+
+        // Full Screen toggle in the View menu.
+        // macOS provides a built-in full screen button in the title bar, but since
+        // we use .hiddenTitleBar window style, users need a menu/keyboard shortcut.
+        CommandGroup(after: .toolbar) {
+            Button("Toggle Full Screen") {
+                NSApp.keyWindow?.toggleFullScreen(nil)
+            }
+            .keyboardShortcut("F", modifiers: [.command, .control])
+        }
 
         // Hide the standard Close menu item (we handle it in app termination)
         CommandGroup(replacing: .saveItem) {
             // Empty - removes Save/Save As which we don't need
         }
 
-        // App termination options
-        // Replace the default Quit command with our shutdown options
+        // App termination options.
+        // Replace the default Quit command with our shutdown options.
         CommandGroup(replacing: .appTermination) {
             // Close window / disconnect from server but leave it running
             Button("Close") {
@@ -1559,6 +1680,53 @@ struct AtticCommands: Commands {
                 }
             }
             .keyboardShortcut("Q")
+        }
+    }
+
+    // MARK: - Drive Submenu Builder
+
+    /// Builds a Drive submenu for a specific drive slot.
+    ///
+    /// Each drive submenu contains:
+    /// - "Insert Disk..." — opens a file picker filtered to disk image types
+    /// - "Eject" — unmounts the current disk (disabled when drive is empty)
+    /// - A label showing the current disk filename or "Empty"
+    ///
+    /// - Parameter drive: The drive number (1 or 2).
+    @ViewBuilder
+    private func driveMenu(drive: Int) -> some View {
+        let mountedFilename = viewModel.mountedDrives
+            .first(where: { $0.drive == drive })?.filename
+
+        Menu("Drive \(drive)") {
+            Button("Insert Disk...") {
+                let panel = NSOpenPanel()
+                panel.title = "Insert Disk into Drive \(drive)"
+                panel.allowedContentTypes = [
+                    "atr", "xfd", "atx", "dcm", "pro",
+                ].compactMap { UTType(filenameExtension: $0) }
+                panel.allowsMultipleSelection = false
+                panel.canChooseDirectories = false
+
+                if panel.runModal() == .OK, let url = panel.url {
+                    Task {
+                        await viewModel.mountDisk(drive: drive, path: url.path)
+                    }
+                }
+            }
+
+            Button("Eject") {
+                Task {
+                    await viewModel.unmountDisk(drive: drive)
+                }
+            }
+            .disabled(mountedFilename == nil)
+
+            Divider()
+
+            // Show current disk name or "Empty" as a disabled label
+            Text(mountedFilename ?? "Empty")
+                .foregroundColor(.secondary)
         }
     }
 }
