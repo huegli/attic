@@ -231,6 +231,12 @@ final class ServerDelegate: AESPServerDelegate, @unchecked Sendable {
             if let filePath = message.parseBootFileRequest() {
                 print("[Server] Boot file: \(filePath) (requested by \(clientId))")
                 let result = await emulator.bootFile(filePath)
+                if result.success, let dm = diskManager {
+                    // libatari800_reboot_with_file() mounts disk images on D1.
+                    // Tell DiskManager so listDrives() reports the booted disk.
+                    // For non-disk files (XEX, BAS, etc.) this silently does nothing.
+                    await dm.trackBootedDisk(drive: 1, path: filePath)
+                }
                 let response = AESPMessage.bootFileResponse(
                     success: result.success,
                     message: result.success ? "Booted \(filePath)" : (result.errorMessage ?? "Unknown error")
@@ -413,6 +419,9 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
             }
             let result = await emulator.bootFile(path)
             if result.success {
+                // libatari800_reboot_with_file() mounts disk images on D1.
+                // Tell DiskManager so listDrives() reports the booted disk.
+                await diskManager.trackBootedDisk(drive: 1, path: path)
                 return .ok("booted \(path)")
             } else {
                 return .error(result.errorMessage ?? "Boot failed for '\(path)'")

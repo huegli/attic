@@ -316,6 +316,45 @@ public actor DiskManager {
         return try getInfo(drive: drive)
     }
 
+    /// Registers a disk that was mounted externally (e.g. via `bootFile()`).
+    ///
+    /// When `libatari800_reboot_with_file()` boots a disk image, the C library
+    /// mounts it on D1 internally. DiskManager doesn't know about this mount
+    /// because it bypassed `mount()`. This method updates Swift-side tracking
+    /// so `listDrives()` reports the booted disk correctly.
+    ///
+    /// Unlike `mount()`, this does NOT call `emulator.mountDisk()` since the
+    /// C library already has the disk mounted.
+    ///
+    /// If ATR parsing fails (e.g. the file isn't a valid disk image), the
+    /// tracking is silently skipped — the disk still works in the emulator,
+    /// it just won't appear in `listDrives()`.
+    ///
+    /// - Parameters:
+    ///   - drive: The drive number the file was mounted on (typically 1).
+    ///   - path: The full path to the disk image file.
+    public func trackBootedDisk(drive: Int, path: String) {
+        guard drive >= 1 && drive <= DiskManager.maxDrives else { return }
+
+        let expandedPath = NSString(string: path).expandingTildeInPath
+        let url = URL(fileURLWithPath: expandedPath)
+
+        // Clear any previous tracking for this drive
+        mountedDisks.removeValue(forKey: drive)
+
+        // Try to parse the ATR image — if it fails, the file isn't a valid
+        // disk image (could be an XEX, BAS, etc.) so we just skip tracking.
+        guard let image = try? ATRImage(url: url, readOnly: false) else { return }
+        guard let fileSystem = try? ATRFileSystem(disk: image) else { return }
+
+        mountedDisks[drive] = MountedDisk(
+            image: image,
+            fileSystem: fileSystem,
+            path: expandedPath,
+            isReadOnly: false
+        )
+    }
+
     /// Unmounts the disk in the specified drive.
     ///
     /// Removes Swift-side tracking first, then unmounts from the emulator
