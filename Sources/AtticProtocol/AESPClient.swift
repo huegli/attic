@@ -226,6 +226,11 @@ public actor AESPClient {
     /// The audio sample stream.
     private var _audioStream: AsyncStream<Data>?
 
+    /// Pending continuation for a status request-response.
+    /// Set by `requestStatusWithDisks()` and resumed by `handleControlMessage()`
+    /// when a `.status` response arrives.
+    private var pendingStatusContinuation: CheckedContinuation<AESPMessage.StatusPayload, Never>?
+
     // =========================================================================
     // MARK: - Initialization
     // =========================================================================
@@ -571,6 +576,18 @@ public actor AESPClient {
             // Ping response received
             break
 
+        case .status:
+            // If a requestStatusWithDisks() call is waiting, fulfil its continuation
+            if let continuation = pendingStatusContinuation {
+                pendingStatusContinuation = nil
+                let payload = message.parseStatusWithDisks()
+                    ?? AESPMessage.StatusPayload(isRunning: false, mountedDrives: [])
+                continuation.resume(returning: payload)
+            } else {
+                // No pending request — forward to delegate
+                await delegate?.client(self, didReceiveMessage: message)
+            }
+
         case .error:
             if let (code, errorMessage) = message.parseErrorPayload() {
                 let error = AESPError.serverError(code: code, message: errorMessage)
@@ -711,9 +728,26 @@ public actor AESPClient {
         await sendMessage(.reset(cold: cold))
     }
 
-    /// Requests emulator status.
+    /// Requests emulator status (fire-and-forget).
     public func requestStatus() async {
         await sendMessage(.status())
+    }
+
+    /// Requests emulator status and waits for the response with disk information.
+    ///
+    /// Sends a STATUS request and awaits the server's response, which includes
+    /// the running state and any mounted drive filenames. This is a request-response
+    /// pattern: the next `.status` message received on the control channel will
+    /// fulfil this call.
+    ///
+    /// - Returns: A `StatusPayload` containing running state and mounted drives.
+    public func requestStatusWithDisks() async -> AESPMessage.StatusPayload {
+        return await withCheckedContinuation { continuation in
+            pendingStatusContinuation = continuation
+            Task {
+                await sendMessage(.status())
+            }
+        }
     }
 
     /// Boots the emulator with a file (disk image, executable, BASIC program, etc.).

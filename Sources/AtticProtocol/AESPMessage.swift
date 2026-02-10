@@ -360,11 +360,45 @@ extension AESPMessage {
         return AESPMessage(type: .info)
     }
 
-    /// Creates a STATUS response message.
+    /// Creates a STATUS response message (basic, no disk info).
     ///
     /// - Parameter isRunning: Whether the emulator is running.
     public static func statusResponse(isRunning: Bool) -> AESPMessage {
         return AESPMessage(type: .status, payload: [isRunning ? 0x01 : 0x00])
+    }
+
+    /// Creates a STATUS response message with mounted drive information.
+    ///
+    /// The payload format is backwards-compatible with the basic status response:
+    /// - Byte 0: isRunning flag (0x00 = paused, 0x01 = running)
+    /// - Byte 1: number of mounted drives (N)
+    /// - For each mounted drive:
+    ///   - 1 byte: drive number (1-8)
+    ///   - 1 byte: filename length (L)
+    ///   - L bytes: filename as UTF-8 string
+    ///
+    /// Clients that only read byte 0 (the old format) will still work correctly.
+    ///
+    /// - Parameters:
+    ///   - isRunning: Whether the emulator is running.
+    ///   - mountedDrives: Array of (drive number, filename) tuples for mounted drives.
+    public static func statusResponse(
+        isRunning: Bool,
+        mountedDrives: [(drive: Int, filename: String)]
+    ) -> AESPMessage {
+        var payload = Data()
+        // Byte 0: running flag
+        payload.append(isRunning ? 0x01 : 0x00)
+        // Byte 1: number of mounted drives
+        payload.append(UInt8(min(mountedDrives.count, 255)))
+        // Drive records
+        for (drive, filename) in mountedDrives {
+            payload.append(UInt8(drive & 0xFF))
+            let filenameBytes = Array(filename.utf8)
+            payload.append(UInt8(min(filenameBytes.count, 255)))
+            payload.append(contentsOf: filenameBytes.prefix(255))
+        }
+        return AESPMessage(type: .status, payload: payload)
     }
 
     /// Creates an INFO response message.
@@ -856,12 +890,60 @@ extension AESPMessage {
         return b0 | b1 | b2 | b3 | b4 | b5 | b6 | b7
     }
 
-    /// Parses the payload as a status response.
+    /// Parses the payload as a status response (basic, running flag only).
     ///
     /// - Returns: Whether the emulator is running, or nil if invalid.
     public func parseStatusPayload() -> Bool? {
         guard type == .status, payload.count >= 1 else { return nil }
         return payload[0] != 0
+    }
+
+    /// Enhanced status payload containing running state and mounted drive info.
+    public struct StatusPayload: Sendable {
+        /// Whether the emulator is currently running.
+        public let isRunning: Bool
+        /// Array of mounted drives with their drive number and filename.
+        public let mountedDrives: [(drive: Int, filename: String)]
+    }
+
+    /// Parses the payload as an enhanced status response with disk information.
+    ///
+    /// This parser is backwards-compatible: if the payload only has the single
+    /// running-flag byte (old format), it returns an empty mountedDrives array.
+    /// If the payload includes drive records (new format), those are parsed too.
+    ///
+    /// - Returns: A `StatusPayload` with running state and mounted drives,
+    ///   or nil if the payload is invalid.
+    public func parseStatusWithDisks() -> StatusPayload? {
+        guard type == .status, payload.count >= 1 else { return nil }
+        let isRunning = payload[0] != 0
+
+        // Old format: single byte payload, no disk info
+        guard payload.count >= 2 else {
+            return StatusPayload(isRunning: isRunning, mountedDrives: [])
+        }
+
+        let driveCount = Int(payload[1])
+        var drives: [(drive: Int, filename: String)] = []
+        var offset = 2
+
+        for _ in 0..<driveCount {
+            // Need at least 2 bytes (drive number + filename length)
+            guard offset + 2 <= payload.count else { break }
+            let driveNumber = Int(payload[offset])
+            let filenameLength = Int(payload[offset + 1])
+            offset += 2
+
+            // Read filename bytes
+            guard offset + filenameLength <= payload.count else { break }
+            let filenameData = payload[offset..<(offset + filenameLength)]
+            let filename = String(decoding: filenameData, as: UTF8.self)
+            offset += filenameLength
+
+            drives.append((drive: driveNumber, filename: filename))
+        }
+
+        return StatusPayload(isRunning: isRunning, mountedDrives: drives)
     }
 
     /// Parses the payload as an info response.

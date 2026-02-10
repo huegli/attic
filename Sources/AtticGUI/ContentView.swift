@@ -279,6 +279,15 @@ struct ControlPanelView: View {
 
             // Status display
             HStack(spacing: 16) {
+                // Mounted disk names (shown only when disks are mounted)
+                if !viewModel.mountedDiskNames.isEmpty {
+                    Text(viewModel.mountedDiskNames)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.6))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+
                 // Running state
                 HStack(spacing: 6) {
                     Circle()

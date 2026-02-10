@@ -290,6 +290,10 @@ class AtticViewModel: ObservableObject {
     /// FPS counter.
     @Published var fps: Int = 0
 
+    /// Mounted disk names for display in the status bar (e.g. "D1:GAME.ATR").
+    /// Updated when the AESP status response includes disk information.
+    @Published var mountedDiskNames: String = ""
+
     /// Whether audio is enabled.
     @Published var isAudioEnabled: Bool = true {
         didSet {
@@ -535,6 +539,9 @@ class AtticViewModel: ObservableObject {
             isRunning = true
             statusMessage = "Connected"
             audioEngine.resume()
+
+            // Fetch initial disk status from the server
+            await refreshDiskStatus()
 
             print("[AtticGUI] Connected to server")
             return true
@@ -888,6 +895,8 @@ class AtticViewModel: ObservableObject {
             keyboardHandler.reset()
             isRunning = true
             statusMessage = "Booting \(url.lastPathComponent)..."
+            // Refresh disk status after boot so the status bar shows the new disk
+            await refreshDiskStatus()
 
         case .embedded:
             guard let emulator = emulator else { return }
@@ -900,6 +909,27 @@ class AtticViewModel: ObservableObject {
             } else {
                 statusMessage = "Boot failed: \(result.errorMessage ?? "Unknown error")"
             }
+        }
+    }
+
+    // =========================================================================
+    // MARK: - Disk Status
+    // =========================================================================
+
+    /// Requests the current status (including mounted disks) from the server
+    /// and updates the `mountedDiskNames` published property.
+    ///
+    /// In client mode, sends an AESP status request and parses the enhanced
+    /// response. In embedded mode, this is a no-op (no disk info available).
+    func refreshDiskStatus() async {
+        guard mode == .client, let client = client else { return }
+        let status = await client.requestStatusWithDisks()
+        if status.mountedDrives.isEmpty {
+            mountedDiskNames = ""
+        } else {
+            mountedDiskNames = status.mountedDrives
+                .map { "D\($0.drive):\($0.filename)" }
+                .joined(separator: "  ")
         }
     }
 

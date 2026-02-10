@@ -193,6 +193,11 @@ final class ServerDelegate: AESPServerDelegate, @unchecked Sendable {
     /// Reference to the emulator engine.
     private let emulator: EmulatorEngine
 
+    /// Disk manager for querying mounted drives.
+    /// Shared with CLIServerDelegate so both AESP and CLI handlers see
+    /// the same disk state.
+    var diskManager: DiskManager?
+
     /// Lock for thread-safe access.
     private let lock = NSLock()
 
@@ -241,9 +246,21 @@ final class ServerDelegate: AESPServerDelegate, @unchecked Sendable {
         case .status:
             let state = await emulator.state
             let isRunning = state == .running
-            var payload = Data()
-            payload.append(isRunning ? 0x01 : 0x00)
-            let response = AESPMessage(type: .status, payload: payload)
+            // Build mounted drives list from disk manager (if available)
+            var mountedDrives: [(drive: Int, filename: String)] = []
+            if let dm = diskManager {
+                let drives = await dm.listDrives()
+                for driveStatus in drives where driveStatus.mounted {
+                    let filename = driveStatus.path.map {
+                        URL(fileURLWithPath: $0).lastPathComponent
+                    } ?? "?"
+                    mountedDrives.append((drive: driveStatus.drive, filename: filename))
+                }
+            }
+            let response = AESPMessage.statusResponse(
+                isRunning: isRunning,
+                mountedDrives: mountedDrives
+            )
             await server.sendMessage(response, to: clientId, channel: .control)
 
         // Memory access
@@ -315,8 +332,9 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
 
     /// Disk manager — the single API for all disk mount/unmount operations.
     /// Coordinates with EmulatorEngine so that libatari800 and Swift-side
-    /// file system state stay in sync.
-    private let diskManager: DiskManager
+    /// file system state stay in sync. Exposed as internal so the AESP
+    /// ServerDelegate can share the same instance.
+    let diskManager: DiskManager
 
     /// BASIC line handler for tokenization and memory injection.
     private let basicHandler: BASICLineHandler
@@ -1003,6 +1021,10 @@ struct AtticServer {
             return
         }
 
+        // Create a DiskManager for AESP status responses.
+        // If CLI socket is enabled, this will be replaced by the shared one.
+        delegate.diskManager = DiskManager(emulator: emulator)
+
         // Create and start CLI socket server (if enabled)
         var cliServer: CLISocketServer?
         var cliDelegate: CLIServerDelegate?
@@ -1014,6 +1036,9 @@ struct AtticServer {
 
             if let server = cliServer, let del = cliDelegate {
                 del.setServer(server)
+                // Share the CLI delegate's DiskManager with the AESP delegate
+                // so status responses include mounted disk information.
+                delegate.diskManager = del.diskManager
                 // Set shutdown callback to stop the main loop
                 del.onShutdown = { [delegate] in
                     delegate.shouldRun = false
