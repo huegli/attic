@@ -299,11 +299,6 @@ class AtticViewModel: ObservableObject {
     /// Updated when the AESP status response includes disk information.
     @Published var mountedDiskNames: String = ""
 
-    /// Structured per-drive mount info for the Drive submenus.
-    /// Each entry maps a drive number (1-based) to its mounted filename.
-    /// Empty when no disks are mounted.
-    @Published var mountedDrives: [(drive: Int, filename: String)] = []
-
     /// Whether audio is enabled.
     @Published var isAudioEnabled: Bool = true {
         didSet {
@@ -951,16 +946,21 @@ class AtticViewModel: ObservableObject {
         guard mode == .client, let client = client else { return }
         let status = await client.requestStatusWithDisks()
 
-        // Update structured drive data for Drive submenus
-        mountedDrives = status.mountedDrives
-
-        // Update display string for status bar
+        // Build the new display string for the status bar
+        let newDiskNames: String
         if status.mountedDrives.isEmpty {
-            mountedDiskNames = ""
+            newDiskNames = ""
         } else {
-            mountedDiskNames = status.mountedDrives
+            newDiskNames = status.mountedDrives
                 .map { "D\($0.drive):\($0.filename)" }
                 .joined(separator: "  ")
+        }
+
+        // Only update @Published property when the value actually changes.
+        // Unconditional assignment fires objectWillChange every poll cycle,
+        // which causes SwiftUI to rebuild menus unnecessarily.
+        if newDiskNames != mountedDiskNames {
+            mountedDiskNames = newDiskNames
         }
     }
 
@@ -1609,12 +1609,27 @@ struct AtticCommands: Commands {
 
             Divider()
 
-            // Drive 1 submenu: insert/eject disk images for drive slot 1.
-            // Shows current disk name if mounted, or "Empty" if not.
-            driveMenu(drive: 1)
+            // Drive insert/eject actions as flat menu items.
+            // These are NOT nested in a submenu because SwiftUI rebuilds the
+            // entire Commands body whenever any @Published property changes
+            // (including fps ~1/sec), which dismisses open submenus instantly.
+            Button("Insert Disk 1...") {
+                openDiskPanel(drive: 1)
+            }
+            .keyboardShortcut("1", modifiers: [.command, .shift])
 
-            // Drive 2 submenu: insert/eject disk images for drive slot 2.
-            driveMenu(drive: 2)
+            Button("Insert Disk 2...") {
+                openDiskPanel(drive: 2)
+            }
+            .keyboardShortcut("2", modifiers: [.command, .shift])
+
+            Button("Eject Disk 1") {
+                Task { await viewModel.unmountDisk(drive: 1) }
+            }
+
+            Button("Eject Disk 2") {
+                Task { await viewModel.unmountDisk(drive: 2) }
+            }
 
             Divider()
 
@@ -1683,50 +1698,25 @@ struct AtticCommands: Commands {
         }
     }
 
-    // MARK: - Drive Submenu Builder
+    // MARK: - Disk Panel Helper
 
-    /// Builds a Drive submenu for a specific drive slot.
-    ///
-    /// Each drive submenu contains:
-    /// - "Insert Disk..." — opens a file picker filtered to disk image types
-    /// - "Eject" — unmounts the current disk (disabled when drive is empty)
-    /// - A label showing the current disk filename or "Empty"
+    /// Opens an NSOpenPanel filtered to disk image types, then mounts the
+    /// selected file into the given drive slot.
     ///
     /// - Parameter drive: The drive number (1 or 2).
-    @ViewBuilder
-    private func driveMenu(drive: Int) -> some View {
-        let mountedFilename = viewModel.mountedDrives
-            .first(where: { $0.drive == drive })?.filename
+    private func openDiskPanel(drive: Int) {
+        let panel = NSOpenPanel()
+        panel.title = "Insert Disk into Drive \(drive)"
+        panel.allowedContentTypes = [
+            "atr", "xfd", "atx", "dcm", "pro",
+        ].compactMap { UTType(filenameExtension: $0) }
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
 
-        Menu("Drive \(drive)") {
-            Button("Insert Disk...") {
-                let panel = NSOpenPanel()
-                panel.title = "Insert Disk into Drive \(drive)"
-                panel.allowedContentTypes = [
-                    "atr", "xfd", "atx", "dcm", "pro",
-                ].compactMap { UTType(filenameExtension: $0) }
-                panel.allowsMultipleSelection = false
-                panel.canChooseDirectories = false
-
-                if panel.runModal() == .OK, let url = panel.url {
-                    Task {
-                        await viewModel.mountDisk(drive: drive, path: url.path)
-                    }
-                }
+        if panel.runModal() == .OK, let url = panel.url {
+            Task {
+                await viewModel.mountDisk(drive: drive, path: url.path)
             }
-
-            Button("Eject") {
-                Task {
-                    await viewModel.unmountDisk(drive: drive)
-                }
-            }
-            .disabled(mountedFilename == nil)
-
-            Divider()
-
-            // Show current disk name or "Empty" as a disabled label
-            Text(mountedFilename ?? "Empty")
-                .foregroundColor(.secondary)
         }
     }
 }
