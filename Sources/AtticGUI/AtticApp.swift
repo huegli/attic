@@ -253,6 +253,11 @@ class AtticViewModel: ObservableObject {
     /// Task for receiving audio samples.
     private var audioReceiverTask: Task<Void, Never>?
 
+    /// Task for periodic status polling (disk mounts, running state).
+    /// Polls the server every few seconds so the GUI reflects changes made
+    /// by other clients (e.g. CLI mount/unmount operations).
+    private var statusPollingTask: Task<Void, Never>?
+
     /// PID of the AtticServer process if we launched it.
     /// Used for shutdown functionality.
     private var serverPID: Int32?
@@ -519,9 +524,10 @@ class AtticViewModel: ObservableObject {
                 }
             }
 
-            // Start receiving frames and audio
+            // Start receiving frames, audio, and periodic status polling
             startFrameReceiver()
             startAudioReceiver()
+            startStatusPolling()
 
             // Discover the CLI socket path if we don't already have one.
             // This is needed when connecting to a pre-existing AtticServer
@@ -577,6 +583,21 @@ class AtticViewModel: ObservableObject {
             for await samples in await client.audioStream {
                 // Feed samples to audio engine using Data directly (avoids Array copy)
                 self.audioEngine.enqueueSamplesFromEmulator(data: samples)
+            }
+        }
+    }
+
+    /// Starts periodic status polling to detect changes made by other clients.
+    ///
+    /// Polls the server every 3 seconds for the current status including
+    /// mounted disk information. This ensures the GUI reflects CLI-initiated
+    /// mount/unmount operations without requiring a push notification mechanism.
+    private func startStatusPolling() {
+        statusPollingTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)  // 3 seconds
+                guard !Task.isCancelled else { break }
+                await self?.refreshDiskStatus()
             }
         }
     }
@@ -1338,8 +1359,10 @@ class AtticViewModel: ObservableObject {
         // Cancel receiver tasks
         frameReceiverTask?.cancel()
         audioReceiverTask?.cancel()
+        statusPollingTask?.cancel()
         frameReceiverTask = nil
         audioReceiverTask = nil
+        statusPollingTask = nil
 
         // Disconnect client
         await client?.disconnect()
@@ -1358,6 +1381,7 @@ class AtticViewModel: ObservableObject {
         // Cancel tasks synchronously
         frameReceiverTask?.cancel()
         audioReceiverTask?.cancel()
+        statusPollingTask?.cancel()
         emulationTask?.cancel()
     }
 }
