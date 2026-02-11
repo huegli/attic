@@ -20,23 +20,6 @@ import UniformTypeIdentifiers
 import AtticCore
 import AtticProtocol
 
-// MARK: - Custom UTType for Attic State Files
-
-/// Custom UTType for .attic state files.
-///
-/// Because .attic is not a system-registered file type, UTType(filenameExtension:)
-/// returns nil for it. We create a dynamic UTType from the file extension using
-/// UTType(tag:tagClass:conformingTo:), which works without requiring an Info.plist
-/// UTExportedTypeDeclarations entry. This is appropriate for SPM executables that
-/// don't have a proper app bundle with plist registration.
-extension UTType {
-    static let atticState = UTType(
-        tag: "attic",
-        tagClass: .filenameExtension,
-        conformingTo: .data
-    )!
-}
-
 /// The main SwiftUI application for Attic.
 ///
 /// This struct conforms to the App protocol, which is the entry point
@@ -213,7 +196,7 @@ class AtticViewModel: ObservableObject {
     /// Used for shutdown functionality.
     private var serverPID: Int32?
 
-    /// Path to the CLI socket for sending shutdown commands.
+    /// Path to the CLI socket for sending the shutdown command to AtticServer.
     private var cliSocketPath: String?
 
     // =========================================================================
@@ -457,7 +440,7 @@ class AtticViewModel: ObservableObject {
             // Discover the CLI socket path if we don't already have one.
             // This is needed when connecting to a pre-existing AtticServer
             // that wasn't launched by this GUI instance. Without the CLI
-            // socket path, save/load state commands can't reach the server.
+            // socket path, the shutdown command can't reach the server.
             if cliSocketPath == nil {
                 let cliClient = CLISocketClient()
                 if let discoveredPath = cliClient.discoverSocket() {
@@ -599,103 +582,6 @@ class AtticViewModel: ObservableObject {
     }
 
     // =========================================================================
-    // MARK: - State Save/Load
-    // =========================================================================
-
-    /// Saves the emulator state to a file.
-    ///
-    /// Sends a `state save` command via the CLI socket to the server,
-    /// which handles metadata collection and file writing.
-    ///
-    /// - Parameter url: URL of the .attic file to save to.
-    func saveState(to url: URL) async {
-        let path = url.path
-
-        guard let socketPath = cliSocketPath else {
-            statusMessage = "No server connection for save"
-            return
-        }
-        let cliClient = CLISocketClient()
-        do {
-            try await cliClient.connect(to: socketPath)
-            let response = try await cliClient.send(.stateSave(path: path))
-            await cliClient.disconnect()
-            switch response {
-            case .ok:
-                statusMessage = "State saved"
-            case .error(let msg):
-                statusMessage = "Save failed: \(msg)"
-            }
-        } catch {
-            statusMessage = "Save failed: \(error.localizedDescription)"
-        }
-    }
-
-    // =========================================================================
-    // MARK: - Screenshot
-    // =========================================================================
-
-    /// Takes a screenshot of the current Atari display.
-    ///
-    /// Sends a `screenshot` command via the CLI socket to the server,
-    /// which captures the current frame and writes it as a PNG.
-    ///
-    /// - Parameter url: Optional URL to save the screenshot to. If nil, the
-    ///   server uses its default path (Desktop with timestamp).
-    func takeScreenshot(to url: URL? = nil) async {
-        guard let socketPath = cliSocketPath else {
-            statusMessage = "No server connection for screenshot"
-            return
-        }
-        let cliClient = CLISocketClient()
-        do {
-            try await cliClient.connect(to: socketPath)
-            let response = try await cliClient.send(.screenshot(path: url?.path))
-            await cliClient.disconnect()
-            switch response {
-            case .ok(let msg):
-                statusMessage = msg
-            case .error(let msg):
-                statusMessage = "Screenshot failed: \(msg)"
-            }
-        } catch {
-            statusMessage = "Screenshot failed: \(error.localizedDescription)"
-        }
-    }
-
-    /// Loads emulator state from a file.
-    ///
-    /// Sends a `state load` command via the CLI socket to the server,
-    /// which handles file reading and state restoration.
-    ///
-    /// - Parameter url: URL of the .attic file to load from.
-    func loadState(from url: URL) async {
-        let path = url.path
-
-        guard let socketPath = cliSocketPath else {
-            statusMessage = "No server connection for load"
-            return
-        }
-        let cliClient = CLISocketClient()
-        do {
-            try await cliClient.connect(to: socketPath)
-            let response = try await cliClient.send(.stateLoad(path: path))
-            await cliClient.disconnect()
-            switch response {
-            case .ok:
-                audioEngine.clearBuffer()
-                keyboardHandler.reset()
-                isRunning = true
-                statusMessage = "State loaded"
-            case .error(let msg):
-                statusMessage = "Load failed: \(msg)"
-            }
-        } catch {
-            statusMessage = "Load failed: \(error.localizedDescription)"
-        }
-    }
-
-    // =========================================================================
     // MARK: - Boot File
     // =========================================================================
 
@@ -745,68 +631,6 @@ class AtticViewModel: ObservableObject {
         if newDiskNames != mountedDiskNames {
             mountedDiskNames = newDiskNames
         }
-    }
-
-    // =========================================================================
-    // MARK: - Disk Operations
-    // =========================================================================
-
-    /// Mounts a disk image into a drive slot.
-    ///
-    /// Sends a `mount` command via the CLI socket to the server.
-    /// After mounting, refreshes disk status so the Drive submenus reflect the change.
-    ///
-    /// - Parameters:
-    ///   - drive: Drive number (1 or 2).
-    ///   - path: Absolute path to the disk image file.
-    func mountDisk(drive: Int, path: String) async {
-        guard let socketPath = cliSocketPath else {
-            statusMessage = "No server connection for mount"
-            return
-        }
-        let cliClient = CLISocketClient()
-        do {
-            try await cliClient.connect(to: socketPath)
-            let response = try await cliClient.send(.mount(drive: drive, path: path))
-            await cliClient.disconnect()
-            switch response {
-            case .ok(let msg):
-                statusMessage = msg
-            case .error(let msg):
-                statusMessage = "Mount failed: \(msg)"
-            }
-        } catch {
-            statusMessage = "Mount failed: \(error.localizedDescription)"
-        }
-        await refreshDiskStatus()
-    }
-
-    /// Unmounts (ejects) the disk image from a drive slot.
-    ///
-    /// Sends an `unmount` command via the CLI socket to the server.
-    /// After unmounting, refreshes disk status so the Drive submenus reflect the change.
-    ///
-    /// - Parameter drive: Drive number (1 or 2).
-    func unmountDisk(drive: Int) async {
-        guard let socketPath = cliSocketPath else {
-            statusMessage = "No server connection for unmount"
-            return
-        }
-        let cliClient = CLISocketClient()
-        do {
-            try await cliClient.connect(to: socketPath)
-            let response = try await cliClient.send(.unmount(drive: drive))
-            await cliClient.disconnect()
-            switch response {
-            case .ok(let msg):
-                statusMessage = msg
-            case .error(let msg):
-                statusMessage = "Eject failed: \(msg)"
-            }
-        } catch {
-            statusMessage = "Eject failed: \(error.localizedDescription)"
-        }
-        await refreshDiskStatus()
     }
 
     // =========================================================================
@@ -1134,46 +958,6 @@ struct AtticCommands: Commands {
                 }
             }
             .keyboardShortcut("O")
-
-            Divider()
-
-            Button("Save State...") {
-                // Present NSSavePanel for choosing where to save the .attic state file.
-                // NSSavePanel is used directly because SwiftUI's fileExporter
-                // doesn't easily support the Commands context.
-                // We use the custom UTType.atticState because .attic is not a
-                // system-registered type and UTType(filenameExtension:) returns nil.
-                let panel = NSSavePanel()
-                panel.title = "Save Emulator State"
-                panel.allowedContentTypes = [.atticState]
-                panel.nameFieldStringValue = "Untitled.attic"
-                panel.canCreateDirectories = true
-
-                if panel.runModal() == .OK, let url = panel.url {
-                    Task {
-                        await viewModel.saveState(to: url)
-                    }
-                }
-            }
-            .keyboardShortcut("S")
-
-            Button("Load State...") {
-                // Present NSOpenPanel filtered to .attic state files.
-                // Uses the custom UTType.atticState since .attic is not a
-                // system-registered type (UTType(filenameExtension:) returns nil).
-                let panel = NSOpenPanel()
-                panel.title = "Load Emulator State"
-                panel.allowedContentTypes = [.atticState]
-                panel.allowsMultipleSelection = false
-                panel.canChooseDirectories = false
-
-                if panel.runModal() == .OK, let url = panel.url {
-                    Task {
-                        await viewModel.loadState(from: url)
-                    }
-                }
-            }
-            .keyboardShortcut("L")
         }
 
         // Emulator menu
@@ -1207,60 +991,6 @@ struct AtticCommands: Commands {
             // and spacebar to fire (port 0). Renders as a checkmark menu item.
             Toggle("Joystick Emulation", isOn: $viewModel.isJoystickEmulationEnabled)
                 .keyboardShortcut("J")
-
-            Divider()
-
-            // Screenshot: quick capture to Desktop using server default path
-            Button("Screenshot") {
-                Task {
-                    await viewModel.takeScreenshot()
-                }
-            }
-            .keyboardShortcut("P")
-
-            // Screenshot As: opens save panel for choosing location
-            Button("Screenshot As...") {
-                let panel = NSSavePanel()
-                panel.title = "Save Screenshot"
-                panel.allowedContentTypes = [.png]
-                // Default filename with timestamp (e.g. "Attic-2026-02-09-143052.png")
-                let formatter = DateFormatter()
-                formatter.dateFormat = "yyyy-MM-dd-HHmmss"
-                panel.nameFieldStringValue = "Attic-\(formatter.string(from: Date())).png"
-                panel.canCreateDirectories = true
-
-                if panel.runModal() == .OK, let url = panel.url {
-                    Task {
-                        await viewModel.takeScreenshot(to: url)
-                    }
-                }
-            }
-            .keyboardShortcut("P", modifiers: [.command, .shift])
-
-            Divider()
-
-            // Drive insert/eject actions as flat menu items.
-            // These are NOT nested in a submenu because SwiftUI rebuilds the
-            // entire Commands body whenever any @Published property changes
-            // (including fps ~1/sec), which dismisses open submenus instantly.
-            Button("Insert Disk 1...") {
-                openDiskPanel(drive: 1)
-            }
-            .keyboardShortcut("1", modifiers: [.command, .shift])
-
-            Button("Insert Disk 2...") {
-                openDiskPanel(drive: 2)
-            }
-            .keyboardShortcut("2", modifiers: [.command, .shift])
-
-            Button("Eject Disk 1") {
-                Task { await viewModel.unmountDisk(drive: 1) }
-            }
-
-            Button("Eject Disk 2") {
-                Task { await viewModel.unmountDisk(drive: 2) }
-            }
-
         }
 
         // About dialog: replaces the standard "About" menu item in the app menu
@@ -1323,26 +1053,5 @@ struct AtticCommands: Commands {
         }
     }
 
-    // MARK: - Disk Panel Helper
-
-    /// Opens an NSOpenPanel filtered to disk image types, then mounts the
-    /// selected file into the given drive slot.
-    ///
-    /// - Parameter drive: The drive number (1 or 2).
-    private func openDiskPanel(drive: Int) {
-        let panel = NSOpenPanel()
-        panel.title = "Insert Disk into Drive \(drive)"
-        panel.allowedContentTypes = [
-            "atr", "xfd", "atx", "dcm", "pro",
-        ].compactMap { UTType(filenameExtension: $0) }
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-
-        if panel.runModal() == .OK, let url = panel.url {
-            Task {
-                await viewModel.mountDisk(drive: drive, path: url.path)
-            }
-        }
-    }
 }
 
