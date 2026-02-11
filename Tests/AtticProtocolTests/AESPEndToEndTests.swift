@@ -14,12 +14,14 @@
 //   PCM integrity
 // - Error handling: Invalid magic, invalid version, unknown message type,
 //   oversized payload, server ERROR message
+// - Message types: INFO, BOOT_FILE, RESET, PADDLE, FRAME_CONFIG, AUDIO_CONFIG
 //
-// Port Allocation (49000-49399, avoids conflicts with existing tests):
+// Port Allocation (49000-49499, avoids conflicts with existing tests):
 // - Control tests: 49000-49099
 // - Video tests: 49100-49199
 // - Audio tests: 49200-49299
 // - Error tests: 49300-49399
+// - Message type tests: 49400-49499
 //
 // =============================================================================
 
@@ -68,6 +70,9 @@ private actor RespondingDelegateStorage {
 /// - PAUSE → ACK(PAUSE)
 /// - RESUME → ACK(RESUME)
 /// - STATUS → StatusResponse with disk info
+/// - INFO → InfoResponse with JSON capabilities
+/// - BOOT_FILE → BootFileResponse (success for .atr files, failure otherwise)
+/// - RESET → StatusResponse (running, no drives)
 ///
 /// PING/PONG is handled automatically by AESPServer (not the delegate),
 /// so it doesn't appear here.
@@ -91,6 +96,36 @@ private final class RespondingMockDelegate: AESPServerDelegate, @unchecked Senda
             let response = AESPMessage.statusResponse(
                 isRunning: true,
                 mountedDrives: [(drive: 1, filename: "GAME.ATR")]
+            )
+            await server.sendMessage(response, to: clientId, channel: .control)
+
+        case .info:
+            // Respond with emulator capabilities as JSON
+            let json = """
+            {"version":"1.0","name":"Attic","platform":"macOS"}
+            """
+            await server.sendMessage(.infoResponse(json: json), to: clientId, channel: .control)
+
+        case .bootFile:
+            // Simulate boot: succeed for .atr files, fail otherwise
+            let filePath = message.parseBootFileRequest() ?? ""
+            if filePath.hasSuffix(".atr") {
+                await server.sendMessage(
+                    .bootFileResponse(success: true, message: "Disk image loaded"),
+                    to: clientId, channel: .control
+                )
+            } else {
+                await server.sendMessage(
+                    .bootFileResponse(success: false, message: "Unsupported file type"),
+                    to: clientId, channel: .control
+                )
+            }
+
+        case .reset:
+            // Respond with status after reset (running, no mounted drives)
+            let response = AESPMessage.statusResponse(
+                isRunning: true,
+                mountedDrives: []
             )
             await server.sendMessage(response, to: clientId, channel: .control)
 
@@ -1090,6 +1125,467 @@ final class AESPErrorHandlingE2ETests: XCTestCase {
 
         badConnection.cancel()
         goodConnection.cancel()
+        await server.stop()
+    }
+}
+
+// =============================================================================
+// MARK: - Message Type End-to-End Tests (attic-33a)
+// =============================================================================
+
+/// End-to-end tests for AESP message types that previously only had
+/// encode/decode unit tests: INFO, BOOT_FILE, RESET, PADDLE, FRAME_CONFIG,
+/// AUDIO_CONFIG.
+///
+/// These tests verify that each message type travels correctly through real
+/// TCP connections between AESPServer and AESPClient. Port range: 49400-49499.
+///
+/// Test strategies by message type:
+/// - INFO, BOOT_FILE, RESET: Client sends request → delegate responds → client
+///   receives response (same pattern as PAUSE/RESUME/STATUS tests).
+/// - PADDLE: Client sends input → delegate records it → verify payload integrity.
+/// - FRAME_CONFIG, AUDIO_CONFIG: Server sends config to client → client delegate
+///   receives it → verify field values parsed correctly.
+final class AESPMessageTypeE2ETests: XCTestCase {
+
+    override func setUp() {
+        super.setUp()
+        AESPTestProcessGuard.ensureClean()
+    }
+
+    // =========================================================================
+    // MARK: - INFO Tests
+    // =========================================================================
+
+    /// Test INFO request → response flow.
+    ///
+    /// Client sends an INFO request (empty payload). The server delegate
+    /// responds with a JSON string containing emulator capabilities. The
+    /// client delegate receives the INFO response and can parse the JSON.
+    func test_infoRequestResponse() async throws {
+        #if !canImport(Network)
+        throw XCTSkip("Network framework not available")
+        #endif
+
+        let delegate = RespondingMockDelegate()
+        let clientDelegate = MockClientDelegate()
+
+        let (server, client) = try await createServerAndClient(
+            controlPort: 49400,
+            delegate: delegate,
+            clientDelegate: clientDelegate
+        )
+
+        // Send INFO request
+        await client.sendMessage(.info())
+
+        // Wait for round-trip
+        try await Task.sleep(nanoseconds: messagePropagationDelay)
+
+        // Verify server received INFO
+        let serverMessages = await delegate.storage.receivedMessages
+        XCTAssertTrue(serverMessages.contains { $0.type == .info },
+                      "Server should have received INFO request")
+
+        // Verify client received INFO response with JSON payload
+        let clientMessages = await clientDelegate.storage.receivedMessages
+        let infoMessages = clientMessages.filter { $0.type == .info }
+        XCTAssertFalse(infoMessages.isEmpty, "Client should have received INFO response")
+
+        if let infoMsg = infoMessages.first {
+            let json = infoMsg.parseInfoPayload()
+            XCTAssertNotNil(json, "INFO response should contain JSON")
+            XCTAssertTrue(json!.contains("\"version\""), "JSON should contain version field")
+            XCTAssertTrue(json!.contains("\"Attic\""), "JSON should contain product name")
+            XCTAssertTrue(json!.contains("\"macOS\""), "JSON should contain platform")
+        }
+
+        await client.disconnect()
+        await server.stop()
+    }
+
+    // =========================================================================
+    // MARK: - BOOT_FILE Tests
+    // =========================================================================
+
+    /// Test BOOT_FILE with a supported file type (success path).
+    ///
+    /// Client sends a BOOT_FILE request with an .atr file path. The server
+    /// delegate validates the extension and responds with success=true.
+    func test_bootFileSuccess() async throws {
+        #if !canImport(Network)
+        throw XCTSkip("Network framework not available")
+        #endif
+
+        let delegate = RespondingMockDelegate()
+        let clientDelegate = MockClientDelegate()
+
+        let (server, client) = try await createServerAndClient(
+            controlPort: 49403,
+            delegate: delegate,
+            clientDelegate: clientDelegate
+        )
+
+        // Send BOOT_FILE request with a .atr path
+        await client.bootFile(filePath: "/path/to/game.atr")
+
+        try await Task.sleep(nanoseconds: messagePropagationDelay)
+
+        // Verify server received BOOT_FILE with correct path
+        let serverMessages = await delegate.storage.receivedMessages
+        let bootMessages = serverMessages.filter { $0.type == .bootFile }
+        XCTAssertFalse(bootMessages.isEmpty, "Server should have received BOOT_FILE")
+
+        if let bootMsg = bootMessages.first {
+            let path = bootMsg.parseBootFileRequest()
+            XCTAssertEqual(path, "/path/to/game.atr", "File path should match")
+        }
+
+        // Verify client received success response
+        let clientMessages = await clientDelegate.storage.receivedMessages
+        let responseMessages = clientMessages.filter { $0.type == .bootFile }
+        XCTAssertFalse(responseMessages.isEmpty, "Client should have received BOOT_FILE response")
+
+        if let response = responseMessages.first {
+            let parsed = response.parseBootFileResponse()
+            XCTAssertNotNil(parsed, "Response should be parseable")
+            XCTAssertTrue(parsed!.success, "Boot should have succeeded for .atr file")
+            XCTAssertEqual(parsed!.message, "Disk image loaded")
+        }
+
+        await client.disconnect()
+        await server.stop()
+    }
+
+    /// Test BOOT_FILE with an unsupported file type (failure path).
+    ///
+    /// Client sends a BOOT_FILE request with an unsupported extension. The
+    /// server delegate responds with success=false and an error message.
+    func test_bootFileFailure() async throws {
+        #if !canImport(Network)
+        throw XCTSkip("Network framework not available")
+        #endif
+
+        let delegate = RespondingMockDelegate()
+        let clientDelegate = MockClientDelegate()
+
+        let (server, client) = try await createServerAndClient(
+            controlPort: 49406,
+            delegate: delegate,
+            clientDelegate: clientDelegate
+        )
+
+        // Send BOOT_FILE with unsupported extension
+        await client.bootFile(filePath: "/path/to/file.xyz")
+
+        try await Task.sleep(nanoseconds: messagePropagationDelay)
+
+        // Verify client received failure response
+        let clientMessages = await clientDelegate.storage.receivedMessages
+        let responseMessages = clientMessages.filter { $0.type == .bootFile }
+        XCTAssertFalse(responseMessages.isEmpty, "Client should have received BOOT_FILE response")
+
+        if let response = responseMessages.first {
+            let parsed = response.parseBootFileResponse()
+            XCTAssertNotNil(parsed, "Response should be parseable")
+            XCTAssertFalse(parsed!.success, "Boot should have failed for unsupported file")
+            XCTAssertEqual(parsed!.message, "Unsupported file type")
+        }
+
+        await client.disconnect()
+        await server.stop()
+    }
+
+    // =========================================================================
+    // MARK: - RESET Tests
+    // =========================================================================
+
+    /// Test cold reset request → status response.
+    ///
+    /// Client sends RESET with cold=true. The server delegate responds
+    /// with a STATUS message. Verifies both the request payload (cold flag)
+    /// and the response are correct.
+    func test_resetCold() async throws {
+        #if !canImport(Network)
+        throw XCTSkip("Network framework not available")
+        #endif
+
+        let delegate = RespondingMockDelegate()
+        let clientDelegate = MockClientDelegate()
+
+        let (server, client) = try await createServerAndClient(
+            controlPort: 49409,
+            delegate: delegate,
+            clientDelegate: clientDelegate
+        )
+
+        // Send cold reset
+        await client.reset(cold: true)
+
+        try await Task.sleep(nanoseconds: messagePropagationDelay)
+
+        // Verify server received RESET with cold flag
+        let serverMessages = await delegate.storage.receivedMessages
+        let resetMessages = serverMessages.filter { $0.type == .reset }
+        XCTAssertFalse(resetMessages.isEmpty, "Server should have received RESET")
+
+        if let resetMsg = resetMessages.first {
+            XCTAssertEqual(resetMsg.payload.count, 1, "RESET payload should be 1 byte")
+            XCTAssertEqual(resetMsg.payload[0], 0x01, "Cold reset flag should be 0x01")
+        }
+
+        // Verify client received STATUS response
+        let clientMessages = await clientDelegate.storage.receivedMessages
+        let statusMessages = clientMessages.filter { $0.type == .status }
+        XCTAssertFalse(statusMessages.isEmpty, "Client should have received STATUS after reset")
+
+        if let statusMsg = statusMessages.first {
+            let status = statusMsg.parseStatusWithDisks()
+            XCTAssertNotNil(status, "Status should be parseable")
+            XCTAssertTrue(status!.isRunning, "Emulator should be running after reset")
+            XCTAssertTrue(status!.mountedDrives.isEmpty,
+                         "No drives should be mounted after cold reset")
+        }
+
+        await client.disconnect()
+        await server.stop()
+    }
+
+    /// Test warm reset request → status response.
+    ///
+    /// Same as cold reset but with cold=false. Verifies the warm reset
+    /// flag (0x00) is correctly transmitted.
+    func test_resetWarm() async throws {
+        #if !canImport(Network)
+        throw XCTSkip("Network framework not available")
+        #endif
+
+        let delegate = RespondingMockDelegate()
+        let clientDelegate = MockClientDelegate()
+
+        let (server, client) = try await createServerAndClient(
+            controlPort: 49412,
+            delegate: delegate,
+            clientDelegate: clientDelegate
+        )
+
+        // Send warm reset
+        await client.reset(cold: false)
+
+        try await Task.sleep(nanoseconds: messagePropagationDelay)
+
+        // Verify server received RESET with warm flag
+        let serverMessages = await delegate.storage.receivedMessages
+        let resetMessages = serverMessages.filter { $0.type == .reset }
+        XCTAssertFalse(resetMessages.isEmpty, "Server should have received RESET")
+
+        if let resetMsg = resetMessages.first {
+            XCTAssertEqual(resetMsg.payload[0], 0x00, "Warm reset flag should be 0x00")
+        }
+
+        await client.disconnect()
+        await server.stop()
+    }
+
+    // =========================================================================
+    // MARK: - PADDLE Tests
+    // =========================================================================
+
+    /// Test paddle input message delivery.
+    ///
+    /// Client sends a PADDLE message with a specific paddle number and
+    /// position. Verifies the server receives the message with the correct
+    /// payload fields intact after traversing the network.
+    func test_paddleInput() async throws {
+        #if !canImport(Network)
+        throw XCTSkip("Network framework not available")
+        #endif
+
+        let delegate = RespondingMockDelegate()
+
+        let (server, client) = try await createServerAndClient(
+            controlPort: 49415,
+            delegate: delegate
+        )
+
+        // Send paddle 2 at position 114 (mid-range of 0-228)
+        await client.sendMessage(.paddle(number: 2, position: 114))
+
+        try await Task.sleep(nanoseconds: messagePropagationDelay)
+
+        // Verify server received PADDLE with correct values
+        let serverMessages = await delegate.storage.receivedMessages
+        let paddleMessages = serverMessages.filter { $0.type == .paddle }
+        XCTAssertFalse(paddleMessages.isEmpty, "Server should have received PADDLE")
+
+        if let paddleMsg = paddleMessages.first {
+            let parsed = paddleMsg.parsePaddlePayload()
+            XCTAssertNotNil(parsed, "PADDLE payload should be parseable")
+            XCTAssertEqual(parsed!.number, 2, "Paddle number should be 2")
+            XCTAssertEqual(parsed!.position, 114, "Paddle position should be 114")
+        }
+
+        await client.disconnect()
+        await server.stop()
+    }
+
+    /// Test paddle input at boundary values.
+    ///
+    /// Verifies that the minimum (0) and maximum (228) paddle positions
+    /// are transmitted correctly without clipping or overflow.
+    func test_paddleBoundaryValues() async throws {
+        #if !canImport(Network)
+        throw XCTSkip("Network framework not available")
+        #endif
+
+        let delegate = RespondingMockDelegate()
+
+        let (server, client) = try await createServerAndClient(
+            controlPort: 49418,
+            delegate: delegate
+        )
+
+        // Send paddle at minimum position
+        await client.sendMessage(.paddle(number: 0, position: 0))
+        try await Task.sleep(nanoseconds: messagePropagationDelay)
+
+        // Send paddle at maximum position
+        await client.sendMessage(.paddle(number: 3, position: 228))
+        try await Task.sleep(nanoseconds: messagePropagationDelay)
+
+        // Verify both messages received
+        let serverMessages = await delegate.storage.receivedMessages
+        let paddleMessages = serverMessages.filter { $0.type == .paddle }
+        XCTAssertEqual(paddleMessages.count, 2, "Server should have received 2 PADDLE messages")
+
+        // Verify min values
+        let minPaddle = paddleMessages[0].parsePaddlePayload()
+        XCTAssertEqual(minPaddle?.number, 0, "Min paddle number should be 0")
+        XCTAssertEqual(minPaddle?.position, 0, "Min paddle position should be 0")
+
+        // Verify max values
+        let maxPaddle = paddleMessages[1].parsePaddlePayload()
+        XCTAssertEqual(maxPaddle?.number, 3, "Max paddle number should be 3")
+        XCTAssertEqual(maxPaddle?.position, 228, "Max paddle position should be 228")
+
+        await client.disconnect()
+        await server.stop()
+    }
+
+    // =========================================================================
+    // MARK: - FRAME_CONFIG Tests
+    // =========================================================================
+
+    /// Test FRAME_CONFIG delivery from server to client.
+    ///
+    /// The server sends a FRAME_CONFIG message with the standard Atari 800 XL
+    /// video parameters. Verifies the client receives and can parse all fields
+    /// (width, height, bytes per pixel, FPS) correctly.
+    func test_frameConfigDelivery() async throws {
+        #if !canImport(Network)
+        throw XCTSkip("Network framework not available")
+        #endif
+
+        let delegate = RespondingMockDelegate()
+        let clientDelegate = MockClientDelegate()
+
+        let (server, client) = try await createServerAndClient(
+            controlPort: 49421,
+            delegate: delegate,
+            clientDelegate: clientDelegate
+        )
+
+        // Get the connected client ID from the delegate's storage
+        let connectedClients = await delegate.storage.connectedClients
+        guard let (clientId, _) = connectedClients.first else {
+            XCTFail("No client connected to server")
+            return
+        }
+
+        // Server sends FRAME_CONFIG with Atari 800 XL video params
+        let configMsg = AESPMessage.frameConfig(
+            width: 384,
+            height: 240,
+            bytesPerPixel: 4,
+            fps: 60
+        )
+        await server.sendMessage(configMsg, to: clientId, channel: .control)
+
+        try await Task.sleep(nanoseconds: messagePropagationDelay)
+
+        // Verify client received FRAME_CONFIG
+        let clientMessages = await clientDelegate.storage.receivedMessages
+        let configMessages = clientMessages.filter { $0.type == .frameConfig }
+        XCTAssertFalse(configMessages.isEmpty, "Client should have received FRAME_CONFIG")
+
+        if let received = configMessages.first {
+            let config = received.parseFrameConfigPayload()
+            XCTAssertNotNil(config, "FRAME_CONFIG should be parseable")
+            XCTAssertEqual(config!.width, 384, "Width should be 384")
+            XCTAssertEqual(config!.height, 240, "Height should be 240")
+            XCTAssertEqual(config!.bytesPerPixel, 4, "Bytes per pixel should be 4 (BGRA)")
+            XCTAssertEqual(config!.fps, 60, "FPS should be 60")
+        }
+
+        await client.disconnect()
+        await server.stop()
+    }
+
+    // =========================================================================
+    // MARK: - AUDIO_CONFIG Tests
+    // =========================================================================
+
+    /// Test AUDIO_CONFIG delivery from server to client.
+    ///
+    /// The server sends an AUDIO_CONFIG message with the standard Atari 800 XL
+    /// audio parameters (44100 Hz, 16-bit, mono). Verifies the client receives
+    /// and can parse all fields correctly, including the 4-byte big-endian
+    /// sample rate.
+    func test_audioConfigDelivery() async throws {
+        #if !canImport(Network)
+        throw XCTSkip("Network framework not available")
+        #endif
+
+        let delegate = RespondingMockDelegate()
+        let clientDelegate = MockClientDelegate()
+
+        let (server, client) = try await createServerAndClient(
+            controlPort: 49424,
+            delegate: delegate,
+            clientDelegate: clientDelegate
+        )
+
+        // Get the connected client ID
+        let connectedClients = await delegate.storage.connectedClients
+        guard let (clientId, _) = connectedClients.first else {
+            XCTFail("No client connected to server")
+            return
+        }
+
+        // Server sends AUDIO_CONFIG with standard Atari audio params
+        let configMsg = AESPMessage.audioConfig(
+            sampleRate: 44100,
+            bitsPerSample: 16,
+            channels: 1
+        )
+        await server.sendMessage(configMsg, to: clientId, channel: .control)
+
+        try await Task.sleep(nanoseconds: messagePropagationDelay)
+
+        // Verify client received AUDIO_CONFIG
+        let clientMessages = await clientDelegate.storage.receivedMessages
+        let configMessages = clientMessages.filter { $0.type == .audioConfig }
+        XCTAssertFalse(configMessages.isEmpty, "Client should have received AUDIO_CONFIG")
+
+        if let received = configMessages.first {
+            let config = received.parseAudioConfigPayload()
+            XCTAssertNotNil(config, "AUDIO_CONFIG should be parseable")
+            XCTAssertEqual(config!.sampleRate, 44100, "Sample rate should be 44100 Hz")
+            XCTAssertEqual(config!.bitsPerSample, 16, "Bits per sample should be 16")
+            XCTAssertEqual(config!.channels, 1, "Channels should be 1 (mono)")
+        }
+
+        await client.disconnect()
         await server.stop()
     }
 }
