@@ -45,7 +45,7 @@ AESP is a binary protocol for high-performance communication between the emulato
 
 | Port  | Channel   | Data Rate  | Purpose                              |
 |-------|-----------|------------|--------------------------------------|
-| 47800 | Control   | Low        | Commands, status, memory access      |
+| 47800 | Control   | Low        | Commands, status, input               |
 | 47801 | Video     | ~21 MB/s   | Raw BGRA frames (384×240×4 @ 60fps)  |
 | 47802 | Audio     | ~88 KB/s   | 16-bit PCM (44.1kHz mono)            |
 | 47803 | WebSocket | Variable   | Bridges all channels for web clients |
@@ -96,7 +96,7 @@ Message types are organized by category based on their numeric range:
 
 | Range     | Category | Description                           |
 |-----------|----------|---------------------------------------|
-| 0x00-0x3F | Control  | Commands, status, memory access       |
+| 0x00-0x3F | Control  | Commands, status, errors              |
 | 0x40-0x5F | Input    | Keyboard, joystick, console keys      |
 | 0x60-0x7F | Video    | Frame data, configuration             |
 | 0x80-0x9F | Audio    | PCM samples, sync                     |
@@ -198,126 +198,7 @@ Offset 0: Acknowledged message type (1 byte)
 
 **Test Case**: Send PAUSE, verify ACK received with payload 0x02.
 
-#### MEMORY_READ (0x10)
-Read memory from emulator.
-
-| Direction | Payload                          |
-|-----------|----------------------------------|
-| Request   | 4 bytes (address + count)        |
-| Response  | MEMORY_READ with requested bytes |
-
-**Request Payload Format**:
-```
-Offset 0-1: Address (2 bytes, big-endian)
-Offset 2-3: Count (2 bytes, big-endian, max 65535)
-```
-
-**Response Payload Format**:
-```
-Offset 0-N: Requested memory bytes
-```
-
-**Test Cases**:
-- Read single byte: MEMORY_READ($0600, 1), verify 1 byte returned
-- Read block: MEMORY_READ($0000, 256), verify 256 bytes returned
-- Read high memory: MEMORY_READ($E000, 16), verify ROM bytes returned
-- Maximum read: MEMORY_READ($0000, 65535), verify 65535 bytes returned
-
-#### MEMORY_WRITE (0x11)
-Write memory to emulator.
-
-| Direction | Payload                    |
-|-----------|----------------------------|
-| Request   | 2 bytes address + N bytes data |
-| Response  | ACK(0x11)                  |
-
-**Request Payload Format**:
-```
-Offset 0-1: Address (2 bytes, big-endian)
-Offset 2-N: Data bytes to write
-```
-
-**Test Cases**:
-- Write single byte: MEMORY_WRITE($0600, [0xA9]), read back to verify
-- Write block: MEMORY_WRITE($0600, [0xA9, 0x00, 0x60]), read back to verify
-- Write to page zero: MEMORY_WRITE($00, [0xFF]), read back to verify
-
-#### REGISTERS_READ (0x12)
-Read CPU registers.
-
-| Direction | Payload                  |
-|-----------|--------------------------|
-| Request   | Empty                    |
-| Response  | REGISTERS_READ (8 bytes) |
-
-**Response Payload Format**:
-```
-Offset 0: A register (1 byte)
-Offset 1: X register (1 byte)
-Offset 2: Y register (1 byte)
-Offset 3: S register (stack pointer, 1 byte)
-Offset 4: P register (processor status, 1 byte)
-Offset 5-6: PC register (program counter, 2 bytes big-endian)
-Offset 7: Reserved (1 byte, always 0x00)
-```
-
-**Test Case**: Send REGISTERS_READ, verify 8-byte response with valid values.
-
-#### REGISTERS_WRITE (0x13)
-Write CPU registers.
-
-| Direction | Payload      |
-|-----------|--------------|
-| Request   | 8 bytes (same format as REGISTERS_READ response) |
-| Response  | ACK(0x13)    |
-
-**Test Case**: Write A=$50, read back, verify A=$50.
-
-#### BREAKPOINT_SET (0x20)
-Set a breakpoint.
-
-| Direction | Payload                        |
-|-----------|--------------------------------|
-| Request   | 2 bytes address (big-endian)   |
-| Response  | ACK(0x20)                      |
-
-**Test Case**: Set breakpoint at $0600, run code to $0600, verify BREAKPOINT_HIT received.
-
-#### BREAKPOINT_CLEAR (0x21)
-Clear a breakpoint.
-
-| Direction | Payload                        |
-|-----------|--------------------------------|
-| Request   | 2 bytes address (big-endian)   |
-| Response  | ACK(0x21)                      |
-
-**Test Case**: Set breakpoint, clear it, verify execution continues past that address.
-
-#### BREAKPOINT_LIST (0x22)
-List all breakpoints.
-
-| Direction | Payload                        |
-|-----------|--------------------------------|
-| Request   | Empty                          |
-| Response  | Array of 2-byte addresses      |
-
-**Response Payload Format**:
-```
-Offset 0-1: First breakpoint address (big-endian)
-Offset 2-3: Second breakpoint address (big-endian)
-...
-```
-
-**Test Case**: Set 3 breakpoints, list, verify 6 bytes returned (3 × 2).
-
-#### BREAKPOINT_HIT (0x23)
-Notification that a breakpoint was hit (server → client).
-
-| Direction | Payload                        |
-|-----------|--------------------------------|
-| Notification | 2 bytes address (big-endian) |
-
-**Test Case**: Set breakpoint, run to it, verify BREAKPOINT_HIT received with correct address.
+**Note**: Memory access, register access, and breakpoint management are available through the CLI socket protocol (Part 2), not the AESP binary protocol. AESP focuses on streaming (video/audio) and real-time input.
 
 #### ERROR (0x3F)
 Error response from server.
@@ -618,7 +499,7 @@ The server should respond with ERROR (0x3F) for:
 3. **Unknown Type**: Send message with type 0xFE, verify ERROR response
 4. **Oversized Payload**: Send message with length > 16MB, verify ERROR response
 5. **Truncated Message**: Send header only, verify server waits for more data
-6. **Invalid Address**: MEMORY_READ from $FFFF+1, verify ERROR response
+6. **Empty Payload**: Send RESET with empty payload, verify ERROR response
 
 ## AESP Example Sessions
 
@@ -626,15 +507,6 @@ The server should respond with ERROR (0x3F) for:
 ```
 Client → Server: [0xAE, 0x50, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00]  // PING
 Server → Client: [0xAE, 0x50, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00]  // PONG
-```
-
-### Memory Read
-```
-Client → Server: [0xAE, 0x50, 0x01, 0x10, 0x00, 0x00, 0x00, 0x04, 0x06, 0x00, 0x00, 0x10]
-                 // MEMORY_READ, address=$0600, count=16
-
-Server → Client: [0xAE, 0x50, 0x01, 0x10, 0x00, 0x00, 0x00, 0x10, <16 bytes of memory>]
-                 // MEMORY_READ response with 16 bytes
 ```
 
 ### Video Subscription
@@ -1190,14 +1062,6 @@ class SocketHandler {
 | Control  | STATUS       | ✓      | ✓      | ✓          | -           |
 | Control  | INFO         | ✓      | ✓      | ✓          | -           |
 | Control  | ACK          | ✓      | ✓      | ✓          | -           |
-| Control  | MEMORY_READ  | ✓      | ✓      | ✓          | Invalid addr, Invalid count |
-| Control  | MEMORY_WRITE | ✓      | ✓      | ✓          | Invalid addr |
-| Control  | REGISTERS_READ | ✓    | ✓      | ✓          | -           |
-| Control  | REGISTERS_WRITE | ✓   | ✓      | ✓          | Invalid format |
-| Control  | BREAKPOINT_SET | ✓    | ✓      | ✓          | Duplicate   |
-| Control  | BREAKPOINT_CLEAR | ✓  | ✓      | ✓          | Not found   |
-| Control  | BREAKPOINT_LIST | ✓   | ✓      | ✓          | -           |
-| Control  | BREAKPOINT_HIT | ✓    | ✓      | ✓          | -           |
 | Control  | ERROR        | ✓      | ✓      | ✓          | -           |
 | Input    | KEY_DOWN     | ✓      | ✓      | ✓          | Invalid format |
 | Input    | KEY_UP       | ✓      | ✓      | ✓          | -           |
