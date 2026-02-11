@@ -55,6 +55,21 @@ enum MCPToolDefinitions {
 
             // BASIC (read-only tools only - injection tools disabled per attic-ahl)
             emulatorListBasic,
+
+            // Disk Operations
+            emulatorMountDisk,
+            emulatorUnmountDisk,
+            emulatorListDrives,
+
+            // Advanced Debugging
+            emulatorStepOver,
+            emulatorRunUntil,
+            emulatorAssemble,
+            emulatorFillMemory,
+
+            // State Management
+            emulatorSaveState,
+            emulatorLoadState,
         ]
     }
 
@@ -359,5 +374,167 @@ enum MCPToolDefinitions {
         name: "emulator_new_basic",
         description: "Clear the BASIC program memory (equivalent to BASIC NEW command).",
         inputSchema: JSONSchema(type: "object")
+    )
+
+    // MARK: - Disk Operation Tools
+
+    /// Mounts an ATR disk image to a drive slot (1-8).
+    static let emulatorMountDisk = ToolDefinition(
+        name: "emulator_mount_disk",
+        description: "Mount an ATR disk image to a drive (1-8). The file must be an ATR format disk image.",
+        inputSchema: JSONSchema(
+            type: "object",
+            properties: [
+                "drive": PropertySchema(
+                    type: "integer",
+                    description: "Drive number (1-8)",
+                    minimum: 1,
+                    maximum: 8
+                ),
+                "path": PropertySchema(
+                    type: "string",
+                    description: "Absolute path to the ATR disk image file"
+                )
+            ],
+            required: ["drive", "path"]
+        )
+    )
+
+    /// Unmounts a disk image from a drive slot.
+    static let emulatorUnmountDisk = ToolDefinition(
+        name: "emulator_unmount_disk",
+        description: "Unmount a disk image from a drive (1-8).",
+        inputSchema: JSONSchema(
+            type: "object",
+            properties: [
+                "drive": PropertySchema(
+                    type: "integer",
+                    description: "Drive number to unmount (1-8)",
+                    minimum: 1,
+                    maximum: 8
+                )
+            ],
+            required: ["drive"]
+        )
+    )
+
+    /// Lists all drive slots and their mounted disk images.
+    static let emulatorListDrives = ToolDefinition(
+        name: "emulator_list_drives",
+        description: "List all drives (1-8) and their currently mounted disk images.",
+        inputSchema: JSONSchema(type: "object")
+    )
+
+    // MARK: - Advanced Debugging Tools
+
+    /// Steps over a JSR instruction, executing the subroutine as a single step.
+    static let emulatorStepOver = ToolDefinition(
+        name: "emulator_step_over",
+        description: "Step over a JSR subroutine call. If the current instruction is JSR, executes the entire subroutine and stops after it returns. Otherwise behaves like a single step.",
+        inputSchema: JSONSchema(type: "object")
+    )
+
+    /// Runs execution until PC reaches a specific address.
+    static let emulatorRunUntil = ToolDefinition(
+        name: "emulator_run_until",
+        description: "Run the emulator until the program counter reaches the specified address. Similar to a temporary breakpoint.",
+        inputSchema: JSONSchema(
+            type: "object",
+            properties: [
+                "address": PropertySchema(
+                    type: "integer",
+                    description: "Target address to run until (0-65535)",
+                    minimum: 0,
+                    maximum: 65535
+                )
+            ],
+            required: ["address"]
+        )
+    )
+
+    /// Assembles a single 6502 instruction and writes it to memory.
+    static let emulatorAssemble = ToolDefinition(
+        name: "emulator_assemble",
+        description: "Assemble a single 6502 instruction and write the resulting bytes to memory. Example: 'LDA #$00' or 'JMP $E459'.",
+        inputSchema: JSONSchema(
+            type: "object",
+            properties: [
+                "address": PropertySchema(
+                    type: "integer",
+                    description: "Address to write the assembled instruction (0-65535)",
+                    minimum: 0,
+                    maximum: 65535
+                ),
+                "instruction": PropertySchema(
+                    type: "string",
+                    description: "6502 assembly instruction to assemble (e.g., 'LDA #$00', 'JMP $E459', 'NOP')"
+                )
+            ],
+            required: ["address", "instruction"]
+        )
+    )
+
+    /// Fills a memory range with a byte value.
+    static let emulatorFillMemory = ToolDefinition(
+        name: "emulator_fill_memory",
+        description: "Fill a range of memory with a single byte value. The emulator must be paused first.",
+        inputSchema: JSONSchema(
+            type: "object",
+            properties: [
+                "start": PropertySchema(
+                    type: "integer",
+                    description: "Start address of the range (0-65535)",
+                    minimum: 0,
+                    maximum: 65535
+                ),
+                "end": PropertySchema(
+                    type: "integer",
+                    description: "End address of the range, inclusive (0-65535)",
+                    minimum: 0,
+                    maximum: 65535
+                ),
+                "value": PropertySchema(
+                    type: "integer",
+                    description: "Byte value to fill with (0-255)",
+                    minimum: 0,
+                    maximum: 255
+                )
+            ],
+            required: ["start", "end", "value"]
+        )
+    )
+
+    // MARK: - State Management Tools
+
+    /// Saves the complete emulator state to a file.
+    static let emulatorSaveState = ToolDefinition(
+        name: "emulator_save_state",
+        description: "Save the complete emulator state to a file. This captures all memory, registers, and hardware state for later restoration.",
+        inputSchema: JSONSchema(
+            type: "object",
+            properties: [
+                "path": PropertySchema(
+                    type: "string",
+                    description: "Absolute path to save the state file"
+                )
+            ],
+            required: ["path"]
+        )
+    )
+
+    /// Loads a previously saved emulator state from a file.
+    static let emulatorLoadState = ToolDefinition(
+        name: "emulator_load_state",
+        description: "Load a previously saved emulator state from a file. This restores all memory, registers, and hardware state.",
+        inputSchema: JSONSchema(
+            type: "object",
+            properties: [
+                "path": PropertySchema(
+                    type: "string",
+                    description: "Absolute path to the state file to load"
+                )
+            ],
+            required: ["path"]
+        )
     )
 }

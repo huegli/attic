@@ -122,6 +122,30 @@ final class MCPToolHandler: Sendable {
         case "emulator_list_basic":
             return await executeListBasic()
 
+        // Disk Operations
+        case "emulator_mount_disk":
+            return await executeMountDisk(arguments: arguments)
+        case "emulator_unmount_disk":
+            return await executeUnmountDisk(arguments: arguments)
+        case "emulator_list_drives":
+            return await executeListDrives()
+
+        // Advanced Debugging
+        case "emulator_step_over":
+            return await executeStepOver()
+        case "emulator_run_until":
+            return await executeRunUntil(arguments: arguments)
+        case "emulator_assemble":
+            return await executeAssemble(arguments: arguments)
+        case "emulator_fill_memory":
+            return await executeFillMemory(arguments: arguments)
+
+        // State Management
+        case "emulator_save_state":
+            return await executeSaveState(arguments: arguments)
+        case "emulator_load_state":
+            return await executeLoadState(arguments: arguments)
+
         default:
             return .error("Unknown tool: \(tool)")
         }
@@ -480,6 +504,202 @@ final class MCPToolHandler: Sendable {
             return formatResponse(response)
         } catch {
             return .error("Failed to clear BASIC: \(error.localizedDescription)")
+        }
+    }
+
+    // =========================================================================
+    // MARK: - Disk Operation Tools
+    // =========================================================================
+
+    /// Executes the mount disk tool.
+    ///
+    /// Sends a `mount <drive> <path>` command to mount an ATR disk image.
+    private func executeMountDisk(arguments: [String: AnyCodable]) async -> ToolCallResult {
+        guard let drive = arguments["drive"]?.intValue else {
+            return .error("Missing required parameter: drive")
+        }
+
+        guard let path = arguments["path"]?.stringValue else {
+            return .error("Missing required parameter: path")
+        }
+
+        guard drive >= 1 && drive <= 8 else {
+            return .error("Drive must be between 1 and 8")
+        }
+
+        do {
+            let response = try await client.send(.mount(drive: drive, path: path))
+            return formatResponse(response)
+        } catch {
+            return .error("Failed to mount disk: \(error.localizedDescription)")
+        }
+    }
+
+    /// Executes the unmount disk tool.
+    ///
+    /// Sends an `unmount <drive>` command to remove a disk from a drive.
+    private func executeUnmountDisk(arguments: [String: AnyCodable]) async -> ToolCallResult {
+        guard let drive = arguments["drive"]?.intValue else {
+            return .error("Missing required parameter: drive")
+        }
+
+        guard drive >= 1 && drive <= 8 else {
+            return .error("Drive must be between 1 and 8")
+        }
+
+        do {
+            let response = try await client.send(.unmount(drive: drive))
+            return formatResponse(response)
+        } catch {
+            return .error("Failed to unmount disk: \(error.localizedDescription)")
+        }
+    }
+
+    /// Executes the list drives tool.
+    ///
+    /// Sends a `drives` command to list all mounted disk images.
+    private func executeListDrives() async -> ToolCallResult {
+        do {
+            let response = try await client.send(.drives)
+            return formatResponse(response)
+        } catch {
+            return .error("Failed to list drives: \(error.localizedDescription)")
+        }
+    }
+
+    // =========================================================================
+    // MARK: - Advanced Debugging Tools
+    // =========================================================================
+
+    /// Executes the step over tool.
+    ///
+    /// Steps over a JSR instruction, running the subroutine to completion.
+    private func executeStepOver() async -> ToolCallResult {
+        do {
+            let response = try await client.send(.stepOver)
+            return formatResponse(response)
+        } catch {
+            return .error("Failed to step over: \(error.localizedDescription)")
+        }
+    }
+
+    /// Executes the run until tool.
+    ///
+    /// Runs the emulator until PC reaches the specified address.
+    private func executeRunUntil(arguments: [String: AnyCodable]) async -> ToolCallResult {
+        guard let address = arguments["address"]?.intValue else {
+            return .error("Missing required parameter: address")
+        }
+
+        guard address >= 0 && address <= 65535 else {
+            return .error("Address must be between 0 and 65535")
+        }
+
+        do {
+            let response = try await client.send(.runUntil(address: UInt16(address)))
+            return formatResponse(response)
+        } catch {
+            return .error("Failed to run until address: \(error.localizedDescription)")
+        }
+    }
+
+    /// Executes the assemble tool.
+    ///
+    /// Assembles a single 6502 instruction and writes it to memory.
+    private func executeAssemble(arguments: [String: AnyCodable]) async -> ToolCallResult {
+        guard let address = arguments["address"]?.intValue else {
+            return .error("Missing required parameter: address")
+        }
+
+        guard let instruction = arguments["instruction"]?.stringValue else {
+            return .error("Missing required parameter: instruction")
+        }
+
+        guard address >= 0 && address <= 65535 else {
+            return .error("Address must be between 0 and 65535")
+        }
+
+        do {
+            let response = try await client.send(.assembleLine(address: UInt16(address), instruction: instruction))
+            return formatResponse(response)
+        } catch {
+            return .error("Failed to assemble: \(error.localizedDescription)")
+        }
+    }
+
+    /// Executes the fill memory tool.
+    ///
+    /// Fills a range of memory with a single byte value.
+    private func executeFillMemory(arguments: [String: AnyCodable]) async -> ToolCallResult {
+        guard let start = arguments["start"]?.intValue else {
+            return .error("Missing required parameter: start")
+        }
+
+        guard let end = arguments["end"]?.intValue else {
+            return .error("Missing required parameter: end")
+        }
+
+        guard let value = arguments["value"]?.intValue else {
+            return .error("Missing required parameter: value")
+        }
+
+        guard start >= 0 && start <= 65535 else {
+            return .error("Start address must be between 0 and 65535")
+        }
+
+        guard end >= 0 && end <= 65535 else {
+            return .error("End address must be between 0 and 65535")
+        }
+
+        guard end >= start else {
+            return .error("End address must be >= start address")
+        }
+
+        guard value >= 0 && value <= 255 else {
+            return .error("Value must be between 0 and 255")
+        }
+
+        do {
+            let response = try await client.send(.memoryFill(start: UInt16(start), end: UInt16(end), value: UInt8(value)))
+            return formatResponse(response)
+        } catch {
+            return .error("Failed to fill memory: \(error.localizedDescription)")
+        }
+    }
+
+    // =========================================================================
+    // MARK: - State Management Tools
+    // =========================================================================
+
+    /// Executes the save state tool.
+    ///
+    /// Saves the complete emulator state to a file.
+    private func executeSaveState(arguments: [String: AnyCodable]) async -> ToolCallResult {
+        guard let path = arguments["path"]?.stringValue else {
+            return .error("Missing required parameter: path")
+        }
+
+        do {
+            let response = try await client.send(.stateSave(path: path))
+            return formatResponse(response)
+        } catch {
+            return .error("Failed to save state: \(error.localizedDescription)")
+        }
+    }
+
+    /// Executes the load state tool.
+    ///
+    /// Loads a previously saved emulator state from a file.
+    private func executeLoadState(arguments: [String: AnyCodable]) async -> ToolCallResult {
+        guard let path = arguments["path"]?.stringValue else {
+            return .error("Missing required parameter: path")
+        }
+
+        do {
+            let response = try await client.send(.stateLoad(path: path))
+            return formatResponse(response)
+        } catch {
+            return .error("Failed to load state: \(error.localizedDescription)")
         }
     }
 

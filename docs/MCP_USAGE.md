@@ -136,6 +136,34 @@ Arguments: { "count": 60 }
 Result: Executed 60 frames, PC=$E459
 ```
 
+### Disk Operations
+
+| Tool | Description |
+|------|-------------|
+| `emulator_mount_disk` | Mount an ATR disk image to a drive (1-8) |
+| `emulator_unmount_disk` | Unmount a disk from a drive |
+| `emulator_list_drives` | List all drives and their mounted disks |
+
+**Example - Mount a Disk:**
+```
+Tool: emulator_mount_disk
+Arguments: { "drive": 1, "path": "/path/to/game.atr" }
+Result: Mounted /path/to/game.atr on D1:
+```
+
+**Example - List Drives:**
+```
+Tool: emulator_list_drives
+Result: D1: game.atr  D2: (empty)  D3: (empty) ...
+```
+
+**Example - Unmount:**
+```
+Tool: emulator_unmount_disk
+Arguments: { "drive": 1 }
+Result: Unmounted D1:
+```
+
 ### Debugging
 
 | Tool | Description |
@@ -144,6 +172,10 @@ Result: Executed 60 frames, PC=$E459
 | `emulator_set_breakpoint` | Set a breakpoint at an address |
 | `emulator_clear_breakpoint` | Clear a breakpoint |
 | `emulator_list_breakpoints` | List all breakpoints |
+| `emulator_step_over` | Step over JSR subroutines |
+| `emulator_run_until` | Run until PC reaches a specific address |
+| `emulator_assemble` | Assemble a single 6502 instruction to memory |
+| `emulator_fill_memory` | Fill a memory range with a byte value |
 
 **Example - Disassemble at PC:**
 ```
@@ -161,6 +193,33 @@ $E45D  D0 F7     BNE $E456
 Tool: emulator_set_breakpoint
 Arguments: { "address": 1536 }
 Result: Breakpoint set at $0600
+```
+
+**Example - Step Over:**
+```
+Tool: emulator_step_over
+Result: A=$00 X=$FF Y=$00 S=$F5 P=$32 PC=$E45B
+```
+
+**Example - Run Until Address:**
+```
+Tool: emulator_run_until
+Arguments: { "address": 58457 }
+Result: Reached $E459
+```
+
+**Example - Assemble Instruction:**
+```
+Tool: emulator_assemble
+Arguments: { "address": 1536, "instruction": "LDA #$00" }
+Result: Assembled 2 bytes at $0600
+```
+
+**Example - Fill Memory:**
+```
+Tool: emulator_fill_memory
+Arguments: { "start": 1536, "end": 1791, "value": 0 }
+Result: Filled $0600-$06FF with $00
 ```
 
 ### Keyboard Input
@@ -230,6 +289,27 @@ Arguments: { "key": "0" }
 
 Tool: emulator_press_key
 Arguments: { "key": "RETURN" }
+```
+
+### State Management
+
+| Tool | Description |
+|------|-------------|
+| `emulator_save_state` | Save complete emulator state to a file |
+| `emulator_load_state` | Load emulator state from a file |
+
+**Example - Save State:**
+```
+Tool: emulator_save_state
+Arguments: { "path": "/tmp/checkpoint.a8s" }
+Result: State saved to /tmp/checkpoint.a8s
+```
+
+**Example - Load State:**
+```
+Tool: emulator_load_state
+Arguments: { "path": "/tmp/checkpoint.a8s" }
+Result: State loaded from /tmp/checkpoint.a8s
 ```
 
 ## Example Workflows
