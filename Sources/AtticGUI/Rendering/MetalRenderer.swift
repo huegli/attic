@@ -83,6 +83,11 @@ public class MetalRenderer: NSObject {
     /// Stored as Data to support both [UInt8] and Data input without extra copies.
     private var pendingFrameBuffer: Data?
 
+    /// Frame rate monitor tracking draw-call timing.
+    /// Records a timestamp on every MTKViewDelegate.draw() call to detect
+    /// GPU-side frame drops independently of emulation frame delivery.
+    public let renderFrameMonitor = FrameRateMonitor()
+
     // =========================================================================
     // MARK: - Initialization
     // =========================================================================
@@ -347,7 +352,11 @@ extension MetalRenderer: MTKViewDelegate {
     /// Called to render a frame.
     ///
     /// This is called 60 times per second by the display link.
+    /// Each call is tracked by the renderFrameMonitor for timing statistics.
     public func draw(in view: MTKView) {
+        // Track draw timing for frame rate monitoring
+        renderFrameMonitor.recordFrame()
+
         // Upload any pending frame data
         uploadPendingFrame()
 

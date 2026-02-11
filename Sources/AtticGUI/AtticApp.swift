@@ -292,7 +292,7 @@ class AtticViewModel: ObservableObject {
     /// Status message for display.
     @Published var statusMessage: String = "Not Initialized"
 
-    /// FPS counter.
+    /// FPS counter (driven by FrameRateMonitor).
     @Published var fps: Int = 0
 
     /// Mounted disk names for display in the status bar (e.g. "D1:GAME.ATR").
@@ -325,11 +325,10 @@ class AtticViewModel: ObservableObject {
     // MARK: - Internal State
     // =========================================================================
 
-    /// Frame counter for FPS calculation.
-    private var frameCounter: Int = 0
-
-    /// Last FPS update time.
-    private var lastFPSUpdate: Date = Date()
+    /// Frame rate monitor for FPS calculation and drop detection.
+    /// Tracks frame timing, detects drops (frames exceeding 1.5× target interval),
+    /// and provides statistics (average/min/max frame time, jitter).
+    private let frameRateMonitor = FrameRateMonitor()
 
     // Joystick emulation key-held tracking.
     // Each boolean tracks whether the corresponding key is currently held down.
@@ -1382,18 +1381,13 @@ class AtticViewModel: ObservableObject {
         }
     }
 
-    /// Updates the FPS counter.
+    /// Updates the FPS counter using the frame rate monitor.
+    ///
+    /// Records a frame timestamp and updates the published `fps` property
+    /// when the monitor recalculates (approximately once per second).
     private func updateFPS() {
-        frameCounter += 1
-
-        let now = Date()
-        let elapsed = now.timeIntervalSince(lastFPSUpdate)
-
-        if elapsed >= 1.0 {
-            fps = Int(Double(frameCounter) / elapsed)
-            frameCounter = 0
-            lastFPSUpdate = now
-        }
+        frameRateMonitor.recordFrame()
+        fps = frameRateMonitor.currentFPS
     }
 
     // =========================================================================
