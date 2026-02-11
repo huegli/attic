@@ -209,10 +209,13 @@ final class CLISocketClientTests: XCTestCase {
     func testDiscoverSockets() {
         let client = CLISocketClient()
 
-        // Create some test socket files
+        // Use current process PID and parent PID so isServerProcessRunning()
+        // validates them as live processes (both are guaranteed to be running).
+        let pid = ProcessInfo.processInfo.processIdentifier
+        let ppid = getppid()
         let testPaths = [
-            "/tmp/attic-test1-\(UUID().uuidString.prefix(8)).sock",
-            "/tmp/attic-test2-\(UUID().uuidString.prefix(8)).sock"
+            "/tmp/attic-\(pid).sock",
+            "/tmp/attic-\(ppid).sock"
         ]
 
         for path in testPaths {
