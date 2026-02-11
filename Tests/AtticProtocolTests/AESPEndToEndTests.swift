@@ -8,8 +8,7 @@
 // these tests prove that messages traverse the network correctly.
 //
 // Test Coverage:
-// - Control channel: PING/PONG, PAUSE→ACK, RESUME→ACK, STATUS, MEMORY_READ,
-//   MEMORY_WRITE
+// - Control channel: PING/PONG, PAUSE→ACK, RESUME→ACK, STATUS
 // - Video channel: Frame delivery, full-size frames, multiple frames, no-video
 // - Audio channel: Audio delivery, sample sizes, multiple buffers, no-audio,
 //   PCM integrity
@@ -69,8 +68,6 @@ private actor RespondingDelegateStorage {
 /// - PAUSE → ACK(PAUSE)
 /// - RESUME → ACK(RESUME)
 /// - STATUS → StatusResponse with disk info
-/// - MEMORY_READ → data response with test pattern
-/// - MEMORY_WRITE → ACK(MEMORY_WRITE)
 ///
 /// PING/PONG is handled automatically by AESPServer (not the delegate),
 /// so it doesn't appear here.
@@ -96,24 +93,6 @@ private final class RespondingMockDelegate: AESPServerDelegate, @unchecked Senda
                 mountedDrives: [(drive: 1, filename: "GAME.ATR")]
             )
             await server.sendMessage(response, to: clientId, channel: .control)
-
-        case .memoryRead:
-            // Parse the request and respond with test data
-            if let (address, count) = message.parseMemoryReadRequest() {
-                // Create test data: bytes starting from low byte of address
-                var responsePayload = Data(capacity: 2 + Int(count))
-                responsePayload.append(UInt8((address >> 8) & 0xFF))
-                responsePayload.append(UInt8(address & 0xFF))
-                for i in 0..<count {
-                    responsePayload.append(UInt8(i & 0xFF))
-                }
-                let response = AESPMessage(type: .memoryRead, payload: responsePayload)
-                await server.sendMessage(response, to: clientId, channel: .control)
-            }
-
-        case .memoryWrite:
-            // Respond with ACK for MEMORY_WRITE
-            await server.sendMessage(.ack(for: .memoryWrite), to: clientId, channel: .control)
 
         default:
             break
@@ -453,95 +432,6 @@ final class AESPControlChannelE2ETests: XCTestCase {
         await server.stop()
     }
 
-    /// Test MEMORY_READ request → data response.
-    ///
-    /// Client sends MEMORY_READ(address, count) → server delegate responds
-    /// with memory data → client delegate receives it.
-    func test_memoryReadResponse() async throws {
-        #if !canImport(Network)
-        throw XCTSkip("Network framework not available")
-        #endif
-
-        let delegate = RespondingMockDelegate()
-        let clientDelegate = MockClientDelegate()
-
-        let (server, client) = try await createServerAndClient(
-            controlPort: 49012,
-            delegate: delegate,
-            clientDelegate: clientDelegate
-        )
-
-        // Send MEMORY_READ for 16 bytes at $0600
-        await client.readMemory(address: 0x0600, count: 16)
-
-        try await Task.sleep(nanoseconds: messagePropagationDelay)
-
-        // Verify server received MEMORY_READ
-        let serverMessages = await delegate.storage.receivedMessages
-        XCTAssertTrue(serverMessages.contains { $0.type == .memoryRead },
-                      "Server should have received MEMORY_READ")
-
-        // Verify client received the response
-        let clientMessages = await clientDelegate.storage.receivedMessages
-        let memResponses = clientMessages.filter { $0.type == .memoryRead }
-        XCTAssertFalse(memResponses.isEmpty, "Client should have received memory data response")
-
-        // Verify response payload: 2 bytes address + 16 bytes data = 18 bytes
-        if let response = memResponses.first {
-            XCTAssertEqual(response.payload.count, 18,
-                           "Response should have 2 address bytes + 16 data bytes")
-        }
-
-        await client.disconnect()
-        await server.stop()
-    }
-
-    /// Test MEMORY_WRITE → ACK response.
-    ///
-    /// Client sends MEMORY_WRITE → server delegate receives it → responds
-    /// with ACK → client delegate receives ACK.
-    func test_memoryWriteAck() async throws {
-        #if !canImport(Network)
-        throw XCTSkip("Network framework not available")
-        #endif
-
-        let delegate = RespondingMockDelegate()
-        let clientDelegate = MockClientDelegate()
-
-        let (server, client) = try await createServerAndClient(
-            controlPort: 49015,
-            delegate: delegate,
-            clientDelegate: clientDelegate
-        )
-
-        // Send MEMORY_WRITE with some 6502 code
-        let code = Data([0xA9, 0x42, 0x60]) // LDA #$42; RTS
-        await client.writeMemory(address: 0x0600, bytes: code)
-
-        try await Task.sleep(nanoseconds: messagePropagationDelay)
-
-        // Verify server received MEMORY_WRITE
-        let serverMessages = await delegate.storage.receivedMessages
-        let writes = serverMessages.filter { $0.type == .memoryWrite }
-        XCTAssertFalse(writes.isEmpty, "Server should have received MEMORY_WRITE")
-
-        // Verify the write payload was correct
-        if let writeMsg = writes.first,
-           let (address, data) = writeMsg.parseMemoryWriteRequest() {
-            XCTAssertEqual(address, 0x0600)
-            XCTAssertEqual(data, code)
-        }
-
-        // Verify client received ACK for MEMORY_WRITE
-        let clientMessages = await clientDelegate.storage.receivedMessages
-        let acks = clientMessages.filter { $0.type == .ack }
-        XCTAssertFalse(acks.isEmpty, "Client should have received ACK")
-        XCTAssertEqual(acks.first?.payload.first, AESPMessageType.memoryWrite.rawValue,
-                       "ACK should reference MEMORY_WRITE")
-
-        await client.disconnect()
-        await server.stop()
-    }
 }
 
 // =============================================================================

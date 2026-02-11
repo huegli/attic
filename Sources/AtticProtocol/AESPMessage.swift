@@ -440,33 +440,6 @@ extension AESPMessage {
         return AESPMessage(type: .ack, payload: [acknowledgedType.rawValue])
     }
 
-    /// Creates a MEMORY_READ request message.
-    ///
-    /// - Parameters:
-    ///   - address: The memory address to read from.
-    ///   - count: The number of bytes to read.
-    public static func memoryRead(address: UInt16, count: UInt16) -> AESPMessage {
-        var payload = Data(capacity: 4)
-        payload.append(UInt8((address >> 8) & 0xFF))
-        payload.append(UInt8(address & 0xFF))
-        payload.append(UInt8((count >> 8) & 0xFF))
-        payload.append(UInt8(count & 0xFF))
-        return AESPMessage(type: .memoryRead, payload: payload)
-    }
-
-    /// Creates a MEMORY_WRITE message.
-    ///
-    /// - Parameters:
-    ///   - address: The memory address to write to.
-    ///   - bytes: The data to write.
-    public static func memoryWrite(address: UInt16, bytes: Data) -> AESPMessage {
-        var payload = Data(capacity: 2 + bytes.count)
-        payload.append(UInt8((address >> 8) & 0xFF))
-        payload.append(UInt8(address & 0xFF))
-        payload.append(bytes)
-        return AESPMessage(type: .memoryWrite, payload: payload)
-    }
-
     /// Creates an ERROR message.
     ///
     /// - Parameters:
@@ -477,106 +450,6 @@ extension AESPMessage {
         payload.append(code)
         payload.append(contentsOf: message.utf8)
         return AESPMessage(type: .error, payload: payload)
-    }
-
-    /// Creates a REGISTERS_READ request message.
-    public static func registersRead() -> AESPMessage {
-        return AESPMessage(type: .registersRead)
-    }
-
-    /// Creates a REGISTERS_READ response message.
-    ///
-    /// - Parameters:
-    ///   - a: Accumulator register.
-    ///   - x: X index register.
-    ///   - y: Y index register.
-    ///   - s: Stack pointer.
-    ///   - p: Processor status.
-    ///   - pc: Program counter.
-    public static func registersResponse(
-        a: UInt8, x: UInt8, y: UInt8, s: UInt8, p: UInt8, pc: UInt16
-    ) -> AESPMessage {
-        var payload = Data(capacity: 8)
-        payload.append(a)
-        payload.append(x)
-        payload.append(y)
-        payload.append(s)
-        payload.append(p)
-        payload.append(UInt8((pc >> 8) & 0xFF))
-        payload.append(UInt8(pc & 0xFF))
-        payload.append(0x00) // Reserved
-        return AESPMessage(type: .registersRead, payload: payload)
-    }
-
-    /// Creates a REGISTERS_WRITE request message.
-    ///
-    /// - Parameters:
-    ///   - a: Accumulator register.
-    ///   - x: X index register.
-    ///   - y: Y index register.
-    ///   - s: Stack pointer.
-    ///   - p: Processor status.
-    ///   - pc: Program counter.
-    public static func registersWrite(
-        a: UInt8, x: UInt8, y: UInt8, s: UInt8, p: UInt8, pc: UInt16
-    ) -> AESPMessage {
-        var payload = Data(capacity: 8)
-        payload.append(a)
-        payload.append(x)
-        payload.append(y)
-        payload.append(s)
-        payload.append(p)
-        payload.append(UInt8((pc >> 8) & 0xFF))
-        payload.append(UInt8(pc & 0xFF))
-        payload.append(0x00) // Reserved
-        return AESPMessage(type: .registersWrite, payload: payload)
-    }
-
-    /// Creates a BREAKPOINT_SET message.
-    ///
-    /// - Parameter address: The address to set a breakpoint at.
-    public static func breakpointSet(address: UInt16) -> AESPMessage {
-        var payload = Data(capacity: 2)
-        payload.append(UInt8((address >> 8) & 0xFF))
-        payload.append(UInt8(address & 0xFF))
-        return AESPMessage(type: .breakpointSet, payload: payload)
-    }
-
-    /// Creates a BREAKPOINT_CLEAR message.
-    ///
-    /// - Parameter address: The address to clear a breakpoint at.
-    public static func breakpointClear(address: UInt16) -> AESPMessage {
-        var payload = Data(capacity: 2)
-        payload.append(UInt8((address >> 8) & 0xFF))
-        payload.append(UInt8(address & 0xFF))
-        return AESPMessage(type: .breakpointClear, payload: payload)
-    }
-
-    /// Creates a BREAKPOINT_LIST request message.
-    public static func breakpointList() -> AESPMessage {
-        return AESPMessage(type: .breakpointList)
-    }
-
-    /// Creates a BREAKPOINT_LIST response message.
-    ///
-    /// - Parameter addresses: The list of breakpoint addresses.
-    public static func breakpointListResponse(addresses: [UInt16]) -> AESPMessage {
-        var payload = Data(capacity: addresses.count * 2)
-        for address in addresses {
-            payload.append(UInt8((address >> 8) & 0xFF))
-            payload.append(UInt8(address & 0xFF))
-        }
-        return AESPMessage(type: .breakpointList, payload: payload)
-    }
-
-    /// Creates a BREAKPOINT_HIT notification message.
-    ///
-    /// - Parameter address: The address where the breakpoint was hit.
-    public static func breakpointHit(address: UInt16) -> AESPMessage {
-        var payload = Data(capacity: 2)
-        payload.append(UInt8((address >> 8) & 0xFF))
-        payload.append(UInt8(address & 0xFF))
-        return AESPMessage(type: .breakpointHit, payload: payload)
     }
 
     // =========================================================================
@@ -815,26 +688,6 @@ extension AESPMessage {
         )
     }
 
-    /// Parses the payload as a memory read request.
-    ///
-    /// - Returns: Tuple of (address, count), or nil if invalid.
-    public func parseMemoryReadRequest() -> (address: UInt16, count: UInt16)? {
-        guard type == .memoryRead, payload.count >= 4 else { return nil }
-        let address = UInt16(payload[0]) << 8 | UInt16(payload[1])
-        let count = UInt16(payload[2]) << 8 | UInt16(payload[3])
-        return (address: address, count: count)
-    }
-
-    /// Parses the payload as a memory write request.
-    ///
-    /// - Returns: Tuple of (address, data), or nil if invalid.
-    public func parseMemoryWriteRequest() -> (address: UInt16, data: Data)? {
-        guard type == .memoryWrite, payload.count >= 2 else { return nil }
-        let address = UInt16(payload[0]) << 8 | UInt16(payload[1])
-        let data = payload.count > 2 ? payload.subdata(in: 2..<payload.count) : Data()
-        return (address: address, data: data)
-    }
-
     /// Parses the payload as a boot file request.
     ///
     /// - Returns: The file path string, or nil if invalid.
@@ -952,56 +805,6 @@ extension AESPMessage {
     public func parseInfoPayload() -> String? {
         guard type == .info, !payload.isEmpty else { return nil }
         return String(decoding: payload, as: UTF8.self)
-    }
-
-    /// CPU register values.
-    public struct CPURegisters {
-        public let a: UInt8
-        public let x: UInt8
-        public let y: UInt8
-        public let s: UInt8
-        public let p: UInt8
-        public let pc: UInt16
-    }
-
-    /// Parses the payload as a registers response.
-    ///
-    /// - Returns: The CPU register values, or nil if invalid.
-    public func parseRegistersPayload() -> CPURegisters? {
-        guard type == .registersRead || type == .registersWrite,
-              payload.count >= 7 else { return nil }
-        let pc = UInt16(payload[5]) << 8 | UInt16(payload[6])
-        return CPURegisters(
-            a: payload[0],
-            x: payload[1],
-            y: payload[2],
-            s: payload[3],
-            p: payload[4],
-            pc: pc
-        )
-    }
-
-    /// Parses the payload as a breakpoint list response.
-    ///
-    /// - Returns: Array of breakpoint addresses, or nil if invalid.
-    public func parseBreakpointListPayload() -> [UInt16]? {
-        guard type == .breakpointList else { return nil }
-        guard payload.count % 2 == 0 else { return nil }
-
-        var addresses: [UInt16] = []
-        for i in stride(from: 0, to: payload.count, by: 2) {
-            let address = UInt16(payload[i]) << 8 | UInt16(payload[i + 1])
-            addresses.append(address)
-        }
-        return addresses
-    }
-
-    /// Parses the payload as a breakpoint hit notification.
-    ///
-    /// - Returns: The address where breakpoint was hit, or nil if invalid.
-    public func parseBreakpointHitPayload() -> UInt16? {
-        guard type == .breakpointHit, payload.count >= 2 else { return nil }
-        return UInt16(payload[0]) << 8 | UInt16(payload[1])
     }
 
     /// Parses the payload as a paddle event.

@@ -828,26 +828,4 @@ public actor AESPClient {
     ) async {
         await sendMessage(.consoleKeys(start: start, select: select, option: option))
     }
-
-    // =========================================================================
-    // MARK: - Memory Access
-    // =========================================================================
-
-    /// Reads memory from the emulator.
-    ///
-    /// - Parameters:
-    ///   - address: The memory address to read from.
-    ///   - count: The number of bytes to read.
-    public func readMemory(address: UInt16, count: UInt16) async {
-        await sendMessage(.memoryRead(address: address, count: count))
-    }
-
-    /// Writes memory to the emulator.
-    ///
-    /// - Parameters:
-    ///   - address: The memory address to write to.
-    ///   - bytes: The data to write.
-    public func writeMemory(address: UInt16, bytes: Data) async {
-        await sendMessage(.memoryWrite(address: address, bytes: bytes))
-    }
 }

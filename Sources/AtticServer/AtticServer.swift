@@ -9,7 +9,7 @@
 // The server provides two protocol interfaces:
 //
 // 1. AESP (Binary Protocol) - For GUI/web clients
-//    - Control (47800): Commands, status, memory access, input events
+//    - Control (47800): Commands, status, input events
 //    - Video (47801): Frame broadcasts to subscribed clients
 //    - Audio (47802): Audio sample broadcasts to subscribed clients
 //
@@ -268,20 +268,6 @@ final class ServerDelegate: AESPServerDelegate, @unchecked Sendable {
                 mountedDrives: mountedDrives
             )
             await server.sendMessage(response, to: clientId, channel: .control)
-
-        // Memory access
-        case .memoryRead:
-            if let (address, count) = message.parseMemoryReadRequest() {
-                let bytes = await emulator.readMemoryBlock(at: address, count: Int(count))
-                let response = AESPMessage(type: .memoryRead, payload: bytes)
-                await server.sendMessage(response, to: clientId, channel: .control)
-            }
-
-        case .memoryWrite:
-            if let (address, data) = message.parseMemoryWriteRequest() {
-                await emulator.writeMemoryBlock(at: address, bytes: Array(data))
-                await server.sendMessage(.ack(for: .memoryWrite), to: clientId, channel: .control)
-            }
 
         // Input messages
         case .keyDown:

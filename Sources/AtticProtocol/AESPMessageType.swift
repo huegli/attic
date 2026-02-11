@@ -7,7 +7,7 @@
 // server and GUI/web clients.
 //
 // Message types are organized into categories by their numeric range:
-// - 0x00-0x3F: Control messages (commands, status, memory access)
+// - 0x00-0x3F: Control messages (commands, status)
 // - 0x40-0x5F: Input messages (keyboard, joystick, console keys)
 // - 0x60-0x7F: Video messages (frame data, configuration)
 // - 0x80-0x9F: Audio messages (PCM samples, sync)
@@ -28,7 +28,7 @@ import Foundation
 ///
 /// ## Message Categories
 ///
-/// - **Control (0x00-0x3F)**: Server control, status queries, memory access
+/// - **Control (0x00-0x3F)**: Server control, status queries
 /// - **Input (0x40-0x5F)**: User input events (keyboard, joystick)
 /// - **Video (0x60-0x7F)**: Video frame data and configuration
 /// - **Audio (0x80-0x9F)**: Audio sample data and synchronization
@@ -90,45 +90,6 @@ public enum AESPMessageType: UInt8, Sendable, CaseIterable {
     /// Acknowledge receipt of a command (generic OK response).
     /// Payload: 1 byte - the message type being acknowledged
     case ack = 0x0F
-
-    /// Read memory from emulator.
-    /// Request payload: 2 bytes address (big-endian) + 2 bytes count
-    /// Response payload: Requested bytes
-    case memoryRead = 0x10
-
-    /// Write memory to emulator.
-    /// Payload: 2 bytes address (big-endian) + N bytes data
-    /// Response: `ack` message
-    case memoryWrite = 0x11
-
-    /// Read CPU registers.
-    /// Request payload: Empty
-    /// Response payload: See `AESPRegistersPayload`
-    case registersRead = 0x12
-
-    /// Write CPU registers.
-    /// Payload: See `AESPRegistersPayload`
-    /// Response: `ack` message
-    case registersWrite = 0x13
-
-    /// Set a breakpoint.
-    /// Payload: 2 bytes address (big-endian)
-    /// Response: `ack` message
-    case breakpointSet = 0x20
-
-    /// Clear a breakpoint.
-    /// Payload: 2 bytes address (big-endian)
-    /// Response: `ack` message
-    case breakpointClear = 0x21
-
-    /// List all breakpoints.
-    /// Request payload: Empty
-    /// Response payload: Array of 2-byte addresses
-    case breakpointList = 0x22
-
-    /// Breakpoint hit notification (server → client).
-    /// Payload: 2 bytes address where breakpoint was hit
-    case breakpointHit = 0x23
 
     /// Error response from server.
     /// Payload: 1 byte error code + UTF-8 error message
@@ -215,7 +176,7 @@ public enum AESPMessageType: UInt8, Sendable, CaseIterable {
 
 /// Categories of AESP messages, based on their numeric range.
 public enum AESPMessageCategory: Sendable {
-    /// Control messages (0x00-0x3F): commands, status, memory access
+    /// Control messages (0x00-0x3F): commands, status
     case control
 
     /// Input messages (0x40-0x5F): keyboard, joystick, console keys
@@ -263,8 +224,6 @@ extension AESPMessageType {
     public var isRequest: Bool {
         switch self {
         case .ping, .pause, .resume, .reset, .status, .info, .bootFile,
-             .memoryRead, .memoryWrite, .registersRead, .registersWrite,
-             .breakpointSet, .breakpointClear, .breakpointList,
              .keyDown, .keyUp, .joystick, .consoleKeys, .paddle,
              .videoSubscribe, .videoUnsubscribe,
              .audioSubscribe, .audioUnsubscribe:
@@ -281,7 +240,6 @@ extension AESPMessageType {
     public var isResponse: Bool {
         switch self {
         case .pong, .ack, .error,
-             .breakpointHit,
              .frameRaw, .frameDelta, .frameConfig,
              .audioPCM, .audioConfig, .audioSync:
             return true
@@ -302,14 +260,6 @@ extension AESPMessageType {
         case .info: return "INFO"
         case .bootFile: return "BOOT_FILE"
         case .ack: return "ACK"
-        case .memoryRead: return "MEMORY_READ"
-        case .memoryWrite: return "MEMORY_WRITE"
-        case .registersRead: return "REGISTERS_READ"
-        case .registersWrite: return "REGISTERS_WRITE"
-        case .breakpointSet: return "BREAKPOINT_SET"
-        case .breakpointClear: return "BREAKPOINT_CLEAR"
-        case .breakpointList: return "BREAKPOINT_LIST"
-        case .breakpointHit: return "BREAKPOINT_HIT"
         case .error: return "ERROR"
         case .keyDown: return "KEY_DOWN"
         case .keyUp: return "KEY_UP"
