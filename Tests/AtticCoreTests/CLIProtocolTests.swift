@@ -759,6 +759,359 @@ final class CLIProtocolTests: XCTestCase {
     }
 
     // =========================================================================
+    // MARK: - CLICommandParser Tests - Step Over
+    // =========================================================================
+
+    func testParseStepOver() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("stepover")
+        guard case .stepOver = command else {
+            XCTFail("Expected .stepOver, got \(command)")
+            return
+        }
+    }
+
+    func testParseStepOverAlias() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("so")
+        guard case .stepOver = command else {
+            XCTFail("Expected .stepOver, got \(command)")
+            return
+        }
+    }
+
+    // =========================================================================
+    // MARK: - CLICommandParser Tests - Run Until
+    // =========================================================================
+
+    func testParseRunUntilHex() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("until $0600")
+        guard case .runUntil(let address) = command else {
+            XCTFail("Expected .runUntil, got \(command)")
+            return
+        }
+        XCTAssertEqual(address, 0x0600)
+    }
+
+    func testParseRunUntilAlias() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("rununtil $E000")
+        guard case .runUntil(let address) = command else {
+            XCTFail("Expected .runUntil, got \(command)")
+            return
+        }
+        XCTAssertEqual(address, 0xE000)
+    }
+
+    func testParseRunUntilMissingAddress() {
+        let parser = CLICommandParser()
+        XCTAssertThrowsError(try parser.parse("until")) { error in
+            guard case CLIProtocolError.missingArgument = error else {
+                XCTFail("Expected missingArgument error, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testParseRunUntilInvalidAddress() {
+        let parser = CLICommandParser()
+        XCTAssertThrowsError(try parser.parse("until xyz")) { error in
+            guard case CLIProtocolError.invalidAddress = error else {
+                XCTFail("Expected invalidAddress error, got \(error)")
+                return
+            }
+        }
+    }
+
+    // =========================================================================
+    // MARK: - CLICommandParser Tests - Memory Fill
+    // =========================================================================
+
+    func testParseFill() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("fill $0600 $0700 FF")
+        guard case .memoryFill(let start, let end, let value) = command else {
+            XCTFail("Expected .memoryFill, got \(command)")
+            return
+        }
+        XCTAssertEqual(start, 0x0600)
+        XCTAssertEqual(end, 0x0700)
+        XCTAssertEqual(value, 0xFF)
+    }
+
+    func testParseFillWithDollarValue() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("fill $2000 $3000 $A5")
+        guard case .memoryFill(let start, let end, let value) = command else {
+            XCTFail("Expected .memoryFill, got \(command)")
+            return
+        }
+        XCTAssertEqual(start, 0x2000)
+        XCTAssertEqual(end, 0x3000)
+        XCTAssertEqual(value, 0xA5)
+    }
+
+    func testParseFillZeroValue() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("fill $0600 $06FF 00")
+        guard case .memoryFill(let start, let end, let value) = command else {
+            XCTFail("Expected .memoryFill, got \(command)")
+            return
+        }
+        XCTAssertEqual(start, 0x0600)
+        XCTAssertEqual(end, 0x06FF)
+        XCTAssertEqual(value, 0x00)
+    }
+
+    func testParseFillMissingArgs() {
+        let parser = CLICommandParser()
+        XCTAssertThrowsError(try parser.parse("fill $0600 $0700")) { error in
+            guard case CLIProtocolError.missingArgument = error else {
+                XCTFail("Expected missingArgument error, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testParseFillInvalidValue() {
+        let parser = CLICommandParser()
+        XCTAssertThrowsError(try parser.parse("fill $0600 $0700 GG")) { error in
+            guard case CLIProtocolError.invalidByte = error else {
+                XCTFail("Expected invalidByte error, got \(error)")
+                return
+            }
+        }
+    }
+
+    // =========================================================================
+    // MARK: - CLICommandParser Tests - Assembly
+    // =========================================================================
+
+    func testParseAssembleInteractive() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("assemble $0600")
+        guard case .assemble(let address) = command else {
+            XCTFail("Expected .assemble, got \(command)")
+            return
+        }
+        XCTAssertEqual(address, 0x0600)
+    }
+
+    func testParseAssembleInteractiveAlias() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("a $0600")
+        guard case .assemble(let address) = command else {
+            XCTFail("Expected .assemble, got \(command)")
+            return
+        }
+        XCTAssertEqual(address, 0x0600)
+    }
+
+    func testParseAssembleInteractiveAsmAlias() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("asm $0600")
+        guard case .assemble(let address) = command else {
+            XCTFail("Expected .assemble, got \(command)")
+            return
+        }
+        XCTAssertEqual(address, 0x0600)
+    }
+
+    func testParseAssembleLine() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("assemble $0600 LDA #$00")
+        guard case .assembleLine(let address, let instruction) = command else {
+            XCTFail("Expected .assembleLine, got \(command)")
+            return
+        }
+        XCTAssertEqual(address, 0x0600)
+        XCTAssertEqual(instruction, "LDA #$00")
+    }
+
+    func testParseAssembleLineComplex() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("a $C000 STA $D40E")
+        guard case .assembleLine(let address, let instruction) = command else {
+            XCTFail("Expected .assembleLine, got \(command)")
+            return
+        }
+        XCTAssertEqual(address, 0xC000)
+        XCTAssertEqual(instruction, "STA $D40E")
+    }
+
+    func testParseAssembleMissingAddress() {
+        let parser = CLICommandParser()
+        XCTAssertThrowsError(try parser.parse("assemble")) { error in
+            guard case CLIProtocolError.missingArgument = error else {
+                XCTFail("Expected missingArgument error, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testParseAssembleInvalidAddress() {
+        let parser = CLICommandParser()
+        XCTAssertThrowsError(try parser.parse("assemble xyz")) { error in
+            guard case CLIProtocolError.invalidAddress = error else {
+                XCTFail("Expected invalidAddress error, got \(error)")
+                return
+            }
+        }
+    }
+
+    // =========================================================================
+    // MARK: - CLICommandParser Tests - Disassembly
+    // =========================================================================
+
+    func testParseDisassembleNoArgs() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("disassemble")
+        guard case .disassemble(let address, let lines) = command else {
+            XCTFail("Expected .disassemble, got \(command)")
+            return
+        }
+        XCTAssertNil(address, "Address should be nil (use PC)")
+        XCTAssertNil(lines, "Lines should be nil (use default)")
+    }
+
+    func testParseDisassembleShortAlias() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("d")
+        guard case .disassemble(let address, let lines) = command else {
+            XCTFail("Expected .disassemble, got \(command)")
+            return
+        }
+        XCTAssertNil(address)
+        XCTAssertNil(lines)
+    }
+
+    func testParseDisasmAlias() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("disasm $0600")
+        guard case .disassemble(let address, let lines) = command else {
+            XCTFail("Expected .disassemble, got \(command)")
+            return
+        }
+        XCTAssertEqual(address, 0x0600)
+        XCTAssertNil(lines)
+    }
+
+    func testParseDisassembleWithAddress() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("d $E000")
+        guard case .disassemble(let address, let lines) = command else {
+            XCTFail("Expected .disassemble, got \(command)")
+            return
+        }
+        XCTAssertEqual(address, 0xE000)
+        XCTAssertNil(lines)
+    }
+
+    func testParseDisassembleWithAddressAndLines() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("d $0600 8")
+        guard case .disassemble(let address, let lines) = command else {
+            XCTFail("Expected .disassemble, got \(command)")
+            return
+        }
+        XCTAssertEqual(address, 0x0600)
+        XCTAssertEqual(lines, 8)
+    }
+
+    func testParseDisassembleInvalidAddress() {
+        let parser = CLICommandParser()
+        XCTAssertThrowsError(try parser.parse("d xyz")) { error in
+            guard case CLIProtocolError.invalidAddress = error else {
+                XCTFail("Expected invalidAddress error, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testParseDisassembleInvalidLineCount() {
+        let parser = CLICommandParser()
+        XCTAssertThrowsError(try parser.parse("d $0600 abc")) { error in
+            guard case CLIProtocolError.invalidCount = error else {
+                XCTFail("Expected invalidCount error, got \(error)")
+                return
+            }
+        }
+    }
+
+    // =========================================================================
+    // MARK: - CLICommandParser Tests - BASIC Commands
+    // =========================================================================
+
+    func testParseBasicNew() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("basic new")
+        guard case .basicNew = command else {
+            XCTFail("Expected .basicNew, got \(command)")
+            return
+        }
+    }
+
+    func testParseBasicRun() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("basic run")
+        guard case .basicRun = command else {
+            XCTFail("Expected .basicRun, got \(command)")
+            return
+        }
+    }
+
+    func testParseBasicList() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("basic list")
+        guard case .basicList = command else {
+            XCTFail("Expected .basicList, got \(command)")
+            return
+        }
+    }
+
+    func testParseBasicLine() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("basic 10 PRINT \"HELLO\"")
+        guard case .basicLine(let line) = command else {
+            XCTFail("Expected .basicLine, got \(command)")
+            return
+        }
+        XCTAssertEqual(line, "10 PRINT \"HELLO\"")
+    }
+
+    func testParseBasicLineCasePreserved() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("basic 20 FOR I=1 TO 10")
+        guard case .basicLine(let line) = command else {
+            XCTFail("Expected .basicLine, got \(command)")
+            return
+        }
+        XCTAssertEqual(line, "20 FOR I=1 TO 10")
+    }
+
+    func testParseBasicCaseInsensitive() throws {
+        let parser = CLICommandParser()
+        // "NEW", "new", "New" should all parse as basicNew
+        let cmd1 = try parser.parse("basic NEW")
+        let cmd2 = try parser.parse("basic new")
+        guard case .basicNew = cmd1, case .basicNew = cmd2 else {
+            XCTFail("Both should be .basicNew")
+            return
+        }
+    }
+
+    func testParseBasicMissingArg() {
+        let parser = CLICommandParser()
+        XCTAssertThrowsError(try parser.parse("basic")) { error in
+            guard case CLIProtocolError.missingArgument = error else {
+                XCTFail("Expected missingArgument error, got \(error)")
+                return
+            }
+        }
+    }
+
+    // =========================================================================
     // MARK: - CLICommandParser Tests - Error Cases
     // =========================================================================
 
