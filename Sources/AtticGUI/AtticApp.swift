@@ -193,11 +193,14 @@ class AtticViewModel: ObservableObject {
     private var heartbeatTask: Task<Void, Never>?
 
     /// PID of the AtticServer process if we launched it.
-    /// Used for shutdown functionality.
+    /// Used for process lifecycle management (SIGTERM shutdown).
     private var serverPID: Int32?
 
-    /// Path to the CLI socket for sending the shutdown command to AtticServer.
-    private var cliSocketPath: String?
+    /// Whether this GUI instance launched the AtticServer process.
+    /// When true, "Shutdown All" is enabled (we own the server lifecycle).
+    /// When false (connected to a pre-existing server), "Shutdown All" is
+    /// greyed out since we shouldn't control a server we didn't start.
+    @Published var launchedByUs: Bool = false
 
     // =========================================================================
     // MARK: - Published State
@@ -342,9 +345,9 @@ class AtticViewModel: ObservableObject {
             switch result {
             case .success(let socketPath, let pid):
                 debugLog("AtticServer started (PID: \(pid)) at \(socketPath)")
-                // Store server info for shutdown functionality
+                // Store server PID for process lifecycle management (SIGTERM shutdown)
                 serverPID = pid
-                cliSocketPath = socketPath
+                launchedByUs = true
                 // Wait a moment for AESP to initialize
                 try? await Task.sleep(nanoseconds: 500_000_000)  // 0.5 seconds
                 // Try connecting again
@@ -436,18 +439,6 @@ class AtticViewModel: ObservableObject {
             startAudioReceiver()
             startStatusPolling()
             startHeartbeat()
-
-            // Discover the CLI socket path if we don't already have one.
-            // This is needed when connecting to a pre-existing AtticServer
-            // that wasn't launched by this GUI instance. Without the CLI
-            // socket path, the shutdown command can't reach the server.
-            if cliSocketPath == nil {
-                let cliClient = CLISocketClient()
-                if let discoveredPath = cliClient.discoverSocket() {
-                    cliSocketPath = discoveredPath
-                    print("[AtticGUI] Discovered CLI socket: \(discoveredPath)")
-                }
-            }
 
             isInitialized = true
             isRunning = true
@@ -860,34 +851,21 @@ class AtticViewModel: ObservableObject {
 
     /// Shuts down the AtticServer if we launched it.
     ///
-    /// Sends the shutdown command via CLI socket, which causes the server
-    /// to gracefully stop. This should be called before quitting the app
-    /// when the user wants to shut down everything.
-    func shutdownServer() async {
-        // If we have a CLI socket path, send shutdown command
-        if let socketPath = cliSocketPath {
-            let cliClient = CLISocketClient()
-            do {
-                try await cliClient.connect(to: socketPath)
-                _ = try await cliClient.send(.shutdown)
-                await cliClient.disconnect()
-                print("[AtticGUI] Sent shutdown to AtticServer")
-            } catch {
-                print("[AtticGUI] Failed to send shutdown: \(error)")
-                // Fall back to terminating by PID if CLI fails
-                if let pid = serverPID {
-                    kill(pid, SIGTERM)
-                    print("[AtticGUI] Sent SIGTERM to AtticServer (PID: \(pid))")
-                }
-            }
-        } else if let pid = serverPID {
-            // No socket path, terminate by PID
-            kill(pid, SIGTERM)
-            print("[AtticGUI] Sent SIGTERM to AtticServer (PID: \(pid))")
-        }
+    /// Uses process lifecycle management (SIGTERM) instead of the CLI protocol.
+    /// AtticServer handles SIGTERM by gracefully stopping its emulation loop,
+    /// closing all protocol servers, and shutting down the emulator.
+    ///
+    /// This should only be called when `launchedByUs` is true — i.e. when
+    /// this GUI instance started the server as a child process.
+    func shutdownServer() {
+        guard let pid = serverPID else { return }
+
+        // Send SIGTERM for graceful shutdown (equivalent to Process.terminate())
+        kill(pid, SIGTERM)
+        print("[AtticGUI] Sent SIGTERM to AtticServer (PID: \(pid))")
 
         serverPID = nil
-        cliSocketPath = nil
+        launchedByUs = false
     }
 
     // =========================================================================
@@ -1038,10 +1016,13 @@ struct AtticCommands: Commands {
 
             Divider()
 
-            // Shutdown server and quit
+            // Shutdown server and quit.
+            // Only enabled when this GUI instance launched the server.
+            // When connected to a pre-existing AtticServer, this item is
+            // greyed out because we shouldn't control a server we didn't start.
             Button("Shutdown All") {
                 Task {
-                    await viewModel.shutdownServer()
+                    viewModel.shutdownServer()
                     // Give server a moment to shut down, then quit
                     try? await Task.sleep(nanoseconds: 200_000_000)
                     await MainActor.run {
@@ -1050,6 +1031,7 @@ struct AtticCommands: Commands {
                 }
             }
             .keyboardShortcut("Q")
+            .disabled(!viewModel.launchedByUs)
         }
     }
 

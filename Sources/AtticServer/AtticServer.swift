@@ -1058,14 +1058,26 @@ struct AtticServer {
         print("Emulation started")
         print("Press Ctrl+C to stop")
 
-        // Set up signal handler for graceful shutdown
+        // Set up signal handlers for graceful shutdown.
+        // SIGINT handles Ctrl+C from the terminal.
+        // SIGTERM handles Process.terminate() / kill(pid, SIGTERM) from parent
+        // processes like AtticGUI, which use process lifecycle management
+        // instead of the CLI protocol for shutdown.
         let sigintSource = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
         signal(SIGINT, SIG_IGN)
         sigintSource.setEventHandler {
-            print("\nShutting down...")
+            print("\nShutting down (SIGINT)...")
             delegate.shouldRun = false
         }
         sigintSource.resume()
+
+        let sigtermSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        signal(SIGTERM, SIG_IGN)
+        sigtermSource.setEventHandler {
+            print("\nShutting down (SIGTERM)...")
+            delegate.shouldRun = false
+        }
+        sigtermSource.resume()
 
         // Main emulation loop with proper frame timing
         // We measure elapsed time and only sleep for the remainder to maintain 60fps
