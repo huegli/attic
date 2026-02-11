@@ -832,15 +832,35 @@ public struct CLIResponseParser: Sendable {
         switch String(eventType).lowercased() {
         case "breakpoint":
             // Format: breakpoint $XXXX A=$XX X=$XX Y=$XX S=$XX P=$XX
-            // Simplified parsing - just extract the address for now
+            var address: UInt16 = 0
+            var a: UInt8 = 0, x: UInt8 = 0, y: UInt8 = 0, s: UInt8 = 0, p: UInt8 = 0
+
+            // Extract the address (first $XXXX after "breakpoint")
             if let addressMatch = data.range(of: #"\$([0-9A-Fa-f]{4})"#, options: .regularExpression) {
                 let addressStr = String(data[addressMatch]).dropFirst()  // Remove $
-                if let address = UInt16(addressStr, radix: 16) {
-                    // TODO: Parse register values from the event
-                    return .breakpoint(address: address, a: 0, x: 0, y: 0, s: 0, p: 0)
+                address = UInt16(addressStr, radix: 16) ?? 0
+            }
+
+            // Extract register values using "REG=$XX" pattern
+            let regPattern = #"([AXYSP])=\$([0-9A-Fa-f]{2})"#
+            if let regex = try? NSRegularExpression(pattern: regPattern) {
+                let nsData = data as NSString
+                let matches = regex.matches(in: data, range: NSRange(location: 0, length: nsData.length))
+                for match in matches {
+                    let regName = nsData.substring(with: match.range(at: 1))
+                    let regValue = UInt8(nsData.substring(with: match.range(at: 2)), radix: 16) ?? 0
+                    switch regName {
+                    case "A": a = regValue
+                    case "X": x = regValue
+                    case "Y": y = regValue
+                    case "S": s = regValue
+                    case "P": p = regValue
+                    default: break
+                    }
                 }
             }
-            return .breakpoint(address: 0, a: 0, x: 0, y: 0, s: 0, p: 0)
+
+            return .breakpoint(address: address, a: a, x: x, y: y, s: s, p: p)
 
         case "stopped":
             if let addressMatch = data.range(of: #"\$([0-9A-Fa-f]{4})"#, options: .regularExpression) {

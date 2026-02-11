@@ -785,21 +785,38 @@ final class CLISocketIntegrationTests: XCTestCase {
         try await server.start()
         try await Task.sleep(nanoseconds: 100_000_000)
 
+        // Wire up the client delegate before connecting so events are captured
+        await client.setDelegate(clientDelegate)
         try await client.connect(to: testSocketPath)
 
-        // Set up client delegate to receive events
-        await MainActor.run {
-            // Client delegate needs to be set on actor
-        }
+        // Wait for connection to stabilize
+        try await Task.sleep(nanoseconds: 100_000_000)
 
-        // Broadcast an event
+        // Broadcast a breakpoint event to all connected clients
         await server.broadcastEvent(.breakpoint(address: 0x0600, a: 0x50, x: 0x10, y: 0x00, s: 0xFF, p: 0x30))
 
-        // Give time for event to be received
-        try await Task.sleep(nanoseconds: 200_000_000)
+        // Give time for the event to arrive
+        try await Task.sleep(nanoseconds: 500_000_000)
 
-        // Note: Verifying event receipt would require the client delegate to be properly wired up
-        // For now, this tests that broadcasting doesn't crash
+        // Check that the client delegate received the event
+        let events = clientDelegate.receivedEvents
+        XCTAssertEqual(events.count, 1, "Client should have received exactly one event")
+        guard let event = events.first else {
+            XCTFail("No events received")
+            return
+        }
+
+        // Verify the received event matches what was broadcast
+        guard case .breakpoint(let address, let a, let x, let y, let s, let p) = event else {
+            XCTFail("Expected breakpoint event, got \(event)")
+            return
+        }
+        XCTAssertEqual(address, 0x0600, "Breakpoint address should match")
+        XCTAssertEqual(a, 0x50, "A register should match")
+        XCTAssertEqual(x, 0x10, "X register should match")
+        XCTAssertEqual(y, 0x00, "Y register should match")
+        XCTAssertEqual(s, 0xFF, "S register should match")
+        XCTAssertEqual(p, 0x30, "P register should match")
     }
 
     func testClientDisconnect() async throws {

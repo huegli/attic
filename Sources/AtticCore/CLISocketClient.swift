@@ -84,6 +84,12 @@ public actor CLISocketClient {
     /// The delegate for receiving async events.
     public weak var delegate: CLISocketClientDelegate?
 
+    /// Sets the delegate for receiving async events from the server.
+    /// This method provides a way to set the delegate from outside the actor.
+    public func setDelegate(_ delegate: CLISocketClientDelegate?) {
+        self.delegate = delegate
+    }
+
     /// The socket file descriptor.
     private var socket: Int32 = -1
 
