@@ -272,6 +272,11 @@ private extension AESPClient {
 /// at the wire level.
 final class AESPControlChannelE2ETests: XCTestCase {
 
+    override func setUp() {
+        super.setUp()
+        AESPTestProcessGuard.ensureClean()
+    }
+
     /// Test PING/PONG using raw TCP connection.
     ///
     /// The server auto-responds to PING with PONG (handled in
@@ -552,6 +557,11 @@ final class AESPControlChannelE2ETests: XCTestCase {
 /// frames. The frameStream yields Data payloads for each .frameRaw message.
 final class AESPVideoChannelE2ETests: XCTestCase {
 
+    override func setUp() {
+        super.setUp()
+        AESPTestProcessGuard.ensureClean()
+    }
+
     /// Test that a single frame broadcast by the server is received by the client.
     func test_frameDelivery() async throws {
         #if !canImport(Network)
@@ -729,6 +739,11 @@ final class AESPVideoChannelE2ETests: XCTestCase {
 /// Key insight: Audio samples are 16-bit signed PCM, mono at 44100 Hz.
 /// A typical buffer is 735 samples × 2 bytes = 1470 bytes per frame.
 final class AESPAudioChannelE2ETests: XCTestCase {
+
+    override func setUp() {
+        super.setUp()
+        AESPTestProcessGuard.ensureClean()
+    }
 
     /// Test that audio samples broadcast by the server are received by the client.
     func test_audioDelivery() async throws {
@@ -922,6 +937,11 @@ final class AESPAudioChannelE2ETests: XCTestCase {
 ///   clears the buffer, and continues. Tests verify recovery by sending valid
 ///   PING after bad data and checking for PONG.
 final class AESPErrorHandlingE2ETests: XCTestCase {
+
+    override func setUp() {
+        super.setUp()
+        AESPTestProcessGuard.ensureClean()
+    }
 
     /// Test server stays operational after receiving invalid magic bytes.
     ///

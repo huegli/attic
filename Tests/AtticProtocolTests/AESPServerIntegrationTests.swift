@@ -101,6 +101,11 @@ final class AESPClientConfigurationTests: XCTestCase {
 /// Tests for server lifecycle management.
 final class AESPServerLifecycleTests: XCTestCase {
 
+    override func setUp() {
+        super.setUp()
+        AESPTestProcessGuard.ensureClean()
+    }
+
     /// Test server starts successfully.
     func test_serverStart() async throws {
         #if !canImport(Network)
@@ -275,6 +280,11 @@ final class AESPClientStateTests: XCTestCase {
 /// Tests for server-client communication.
 final class AESPServerClientTests: XCTestCase {
 
+    override func setUp() {
+        super.setUp()
+        AESPTestProcessGuard.ensureClean()
+    }
+
     /// Test client connection to server.
     func test_clientConnectsToServer() async throws {
         #if !canImport(Network)
@@ -440,6 +450,11 @@ final class AESPServerDelegateTests: XCTestCase {
 /// Tests for video frame broadcasting.
 final class AESPVideoBroadcastTests: XCTestCase {
 
+    override func setUp() {
+        super.setUp()
+        AESPTestProcessGuard.ensureClean()
+    }
+
     /// Test broadcasting increments frame counter.
     func test_broadcastIncrementsFrameCounter() async throws {
         #if !canImport(Network)
@@ -499,6 +514,11 @@ final class AESPVideoBroadcastTests: XCTestCase {
 
 /// Tests for audio sample broadcasting.
 final class AESPAudioBroadcastTests: XCTestCase {
+
+    override func setUp() {
+        super.setUp()
+        AESPTestProcessGuard.ensureClean()
+    }
 
     /// Test broadcasting audio samples.
     func test_broadcastAudio() async throws {
@@ -597,6 +617,11 @@ final class AESPChannelTests: XCTestCase {
 /// Tests for server delegate property.
 final class AESPServerDelegatePropertyTests: XCTestCase {
 
+    override func setUp() {
+        super.setUp()
+        AESPTestProcessGuard.ensureClean()
+    }
+
     /// Test server delegate can be assigned.
     func test_serverDelegateAssignment() async throws {
         #if !canImport(Network)
@@ -622,6 +647,11 @@ final class AESPServerDelegatePropertyTests: XCTestCase {
 
 /// Tests for broadcasting messages on specific channels.
 final class AESPMessageBroadcastTests: XCTestCase {
+
+    override func setUp() {
+        super.setUp()
+        AESPTestProcessGuard.ensureClean()
+    }
 
     /// Test broadcast on control channel.
     func test_broadcastOnControlChannel() async throws {
@@ -697,6 +727,11 @@ final class AESPMessageBroadcastTests: XCTestCase {
 
 /// Tests for client connection options.
 final class AESPClientConnectionOptionsTests: XCTestCase {
+
+    override func setUp() {
+        super.setUp()
+        AESPTestProcessGuard.ensureClean()
+    }
 
     /// Test client can connect without video channel.
     func test_connectWithoutVideo() async throws {
