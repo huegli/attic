@@ -3,8 +3,9 @@
 // =============================================================================
 //
 // This file provides shared utilities used across AESP protocol test files.
-// Currently includes a process guard that ensures no AtticServer or AtticMCP
-// processes are running before tests that open network ports.
+// Currently includes a process guard that ensures no Attic processes
+// (AtticServer, AtticMCP, AtticGUI, attic CLI) are running before tests
+// that open network ports.
 //
 // =============================================================================
 
@@ -15,12 +16,12 @@ import XCTest
 // MARK: - Process Guard
 // =============================================================================
 
-/// Ensures no AtticServer or AtticMCP processes are running before tests.
+/// Ensures no Attic processes are running before tests.
 ///
 /// Networking tests open TCP ports (48xxx, 49xxx). While these don't overlap
-/// with the default AESP ports (47800-47802), a running server could cause
-/// unexpected interference. This guard checks once per test run and kills
-/// any stale server processes.
+/// with the default AESP ports (47800-47802), a running server or client could
+/// cause unexpected interference (e.g. AtticGUI auto-launches AtticServer).
+/// This guard checks once per test run and kills any stale Attic processes.
 ///
 /// Usage: Call `AESPTestProcessGuard.ensureClean()` from `setUp()` of
 /// any test class that opens network ports.
@@ -32,7 +33,9 @@ enum AESPTestProcessGuard {
     nonisolated(unsafe) private static var hasChecked = false
 
     /// Process names to check for and kill.
-    private static let serverProcessNames = ["AtticServer", "AtticMCP"]
+    /// Includes servers (AtticServer, AtticMCP) and clients (AtticGUI, attic CLI)
+    /// because clients may auto-launch servers or hold open AESP connections.
+    private static let serverProcessNames = ["AtticServer", "AtticMCP", "AtticGUI", "attic"]
 
     /// Checks for running server processes and kills them if found.
     ///
