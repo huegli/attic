@@ -179,6 +179,11 @@ public actor AESPClient {
     /// Current connection state.
     public private(set) var state: AESPClientState = .disconnected
 
+    /// Timestamp of the most recent PONG received from the server.
+    /// Used by heartbeat monitors to detect server loss — if this remains
+    /// nil or stale for too long, the server is presumed dead.
+    public private(set) var lastPongReceived: Date?
+
     /// Whether the client is connected.
     public var isConnected: Bool {
         if case .connected = state { return true }
@@ -573,8 +578,8 @@ public actor AESPClient {
     private func handleControlMessage(_ message: AESPMessage) async {
         switch message.type {
         case .pong:
-            // Ping response received
-            break
+            // Ping response received — record the timestamp for heartbeat monitoring
+            lastPongReceived = Date()
 
         case .status:
             // If a requestStatusWithDisks() call is waiting, fulfil its continuation

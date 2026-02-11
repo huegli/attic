@@ -258,6 +258,10 @@ class AtticViewModel: ObservableObject {
     /// by other clients (e.g. CLI mount/unmount operations).
     private var statusPollingTask: Task<Void, Never>?
 
+    /// Task for heartbeat monitoring via PING/PONG.
+    /// Detects server loss and triggers the "Server Connection Lost" alert.
+    private var heartbeatTask: Task<Void, Never>?
+
     /// PID of the AtticServer process if we launched it.
     /// Used for shutdown functionality.
     private var serverPID: Int32?
@@ -298,6 +302,10 @@ class AtticViewModel: ObservableObject {
     /// Mounted disk names for display in the status bar (e.g. "D1:GAME.ATR").
     /// Updated when the AESP status response includes disk information.
     @Published var mountedDiskNames: String = ""
+
+    /// Whether the "Server Connection Lost" alert should be displayed.
+    /// Set to true by the heartbeat monitor when the server stops responding.
+    @Published var showServerLostAlert: Bool = false
 
     /// Whether audio is enabled.
     @Published var isAudioEnabled: Bool = true {
@@ -523,10 +531,11 @@ class AtticViewModel: ObservableObject {
                 }
             }
 
-            // Start receiving frames, audio, and periodic status polling
+            // Start receiving frames, audio, periodic status polling, and heartbeat
             startFrameReceiver()
             startAudioReceiver()
             startStatusPolling()
+            startHeartbeat()
 
             // Discover the CLI socket path if we don't already have one.
             // This is needed when connecting to a pre-existing AtticServer
@@ -597,6 +606,45 @@ class AtticViewModel: ObservableObject {
                 try? await Task.sleep(nanoseconds: 3_000_000_000)  // 3 seconds
                 guard !Task.isCancelled else { break }
                 await self?.refreshDiskStatus()
+            }
+        }
+    }
+
+    /// Starts the heartbeat monitor that detects server loss.
+    ///
+    /// Every 5 seconds, sends a PING to the server and checks whether a PONG
+    /// has been received within the last 10 seconds. If the server stops
+    /// responding, sets `showServerLostAlert` to trigger a user-facing alert.
+    private func startHeartbeat() {
+        heartbeatTask = Task { [weak self] in
+            // Wait 5 seconds before the first check to let the connection settle
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+
+            while !Task.isCancelled {
+                guard let self = self, let client = self.client else { break }
+
+                // Send PING
+                await client.ping()
+
+                // Wait 5 seconds for the PONG to arrive
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                guard !Task.isCancelled else { break }
+
+                // Check if we received a PONG recently (within last 10 seconds)
+                let lastPong = await client.lastPongReceived
+                let stale: Bool
+                if let lastPong = lastPong {
+                    stale = Date().timeIntervalSince(lastPong) > 10.0
+                } else {
+                    // Never received a PONG — server is not responding
+                    stale = true
+                }
+
+                if stale {
+                    print("[AtticGUI] Heartbeat: server not responding, showing alert")
+                    self.showServerLostAlert = true
+                    break
+                }
             }
         }
     }
@@ -1438,9 +1486,11 @@ class AtticViewModel: ObservableObject {
         frameReceiverTask?.cancel()
         audioReceiverTask?.cancel()
         statusPollingTask?.cancel()
+        heartbeatTask?.cancel()
         frameReceiverTask = nil
         audioReceiverTask = nil
         statusPollingTask = nil
+        heartbeatTask = nil
 
         // Disconnect client
         await client?.disconnect()
@@ -1460,6 +1510,7 @@ class AtticViewModel: ObservableObject {
         frameReceiverTask?.cancel()
         audioReceiverTask?.cancel()
         statusPollingTask?.cancel()
+        heartbeatTask?.cancel()
         emulationTask?.cancel()
     }
 }

@@ -58,6 +58,16 @@ struct ContentView: View {
                 await viewModel.initializeEmulator()
             }
         }
+        // Alert shown when the heartbeat monitor detects server loss.
+        // The only option is to quit, since the emulator can't function
+        // without a server connection.
+        .alert("Server Connection Lost", isPresented: $viewModel.showServerLostAlert) {
+            Button("Quit") {
+                NSApplication.shared.terminate(nil)
+            }
+        } message: {
+            Text("The connection to AtticServer was lost.")
+        }
     }
 }
 
