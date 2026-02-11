@@ -18,7 +18,7 @@ Both share a common core library (`AtticCore`) containing the emulator wrapper, 
 Four executables with protocol-based communication:
 
 1. **AtticServer** - Standalone emulator server process ✅ (Phase 7 complete)
-2. **AtticGUI** - Protocol client with Metal rendering ✅ (Phase 8 complete - supports client and embedded modes)
+2. **AtticGUI** - Protocol client with Metal rendering ✅ (Phase 8 complete)
 3. **attic** - Command-line REPL tool (connects via text protocol)
 4. **Web Client** - Browser-based client via WebSocket (Phases 18-19, future)
 

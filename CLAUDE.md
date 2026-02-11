@@ -193,11 +193,8 @@ swift build -c release
 swift run AtticServer
 swift run AtticServer --rom-path ~/ROMs
 
-# Run GUI in client mode (default - launches AtticServer automatically)
+# Run GUI (launches AtticServer automatically)
 swift run AtticGUI
-
-# Run GUI in embedded mode (runs emulator directly, for debugging)
-swift run AtticGUI -- --embedded
 
 # Run CLI
 swift run attic --repl

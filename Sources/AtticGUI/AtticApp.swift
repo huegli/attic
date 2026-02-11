@@ -5,19 +5,13 @@
 // This is the main entry point for the Attic GUI application.
 // It defines the SwiftUI App struct which creates the main window.
 //
-// The GUI application supports two operation modes:
-//
-// 1. **Client Mode (default)**: Connects to AtticServer via AESP protocol.
-//    The server runs as a subprocess and handles all emulation. The GUI
-//    receives video frames and audio samples via the protocol.
-//
-// 2. **Embedded Mode**: Runs the EmulatorEngine directly within the GUI
-//    process. Used for debugging or when server launch fails.
-//    Enabled with --embedded flag.
+// The GUI connects to AtticServer via the AESP protocol. The server runs
+// as a subprocess and handles all emulation. The GUI receives video frames
+// and audio samples via the protocol and sends input back.
 //
 // Architecture:
 // The App struct creates a single main window containing the ContentView.
-// AtticViewModel manages either the protocol client or embedded emulator.
+// AtticViewModel manages the AESP protocol client connection to the server.
 //
 // =============================================================================
 
@@ -43,19 +37,6 @@ extension UTType {
     )!
 }
 
-// MARK: - Operation Mode
-
-/// The operation mode for the GUI application.
-enum OperationMode: Sendable {
-    /// Client mode: connects to AtticServer via AESP protocol.
-    /// This is the default mode for normal operation.
-    case client
-
-    /// Embedded mode: runs EmulatorEngine directly in the GUI process.
-    /// Used for debugging or when server launch fails.
-    case embedded
-}
-
 /// The main SwiftUI application for Attic.
 ///
 /// This struct conforms to the App protocol, which is the entry point
@@ -79,24 +60,7 @@ struct AtticApp: App {
     // =========================================================================
 
     init() {
-        // Parse command-line arguments to determine operation mode
-        let mode = AtticApp.parseOperationMode()
-        _viewModel = StateObject(wrappedValue: AtticViewModel(mode: mode))
-    }
-
-    /// Parses command-line arguments to determine operation mode.
-    private static func parseOperationMode() -> OperationMode {
-        let arguments = CommandLine.arguments
-
-        // Check for --embedded flag
-        if arguments.contains("--embedded") {
-            print("[AtticGUI] Running in embedded mode")
-            return .embedded
-        }
-
-        // Default to client mode
-        print("[AtticGUI] Running in client mode")
-        return .client
+        _viewModel = StateObject(wrappedValue: AtticViewModel())
     }
 
     // =========================================================================
@@ -197,33 +161,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
 /// Main view model for the Attic application.
 ///
-/// This class supports two operation modes:
-/// - **Client mode**: Connects to AtticServer via AESP protocol
-/// - **Embedded mode**: Runs EmulatorEngine directly
-///
-/// In client mode, the view model:
+/// Connects to AtticServer via the AESP protocol. The view model:
 /// 1. Launches AtticServer as a subprocess
 /// 2. Connects via AESPClient
 /// 3. Receives video frames via AsyncStream
 /// 4. Receives audio samples via AsyncStream
 /// 5. Sends input via protocol messages
 ///
-/// In embedded mode, the view model:
-/// 1. Creates and initializes EmulatorEngine directly
-/// 2. Runs an emulation loop that executes frames
-/// 3. Gets frame/audio data directly from the emulator
-/// 4. Sends input directly to the emulator
-///
 /// Note: @MainActor ensures all UI-related updates happen on the main thread.
 @MainActor
 class AtticViewModel: ObservableObject {
-    // =========================================================================
-    // MARK: - Mode Configuration
-    // =========================================================================
-
-    /// The current operation mode.
-    let mode: OperationMode
-
     // =========================================================================
     // MARK: - Shared Components
     // =========================================================================
@@ -268,17 +215,6 @@ class AtticViewModel: ObservableObject {
 
     /// Path to the CLI socket for sending shutdown commands.
     private var cliSocketPath: String?
-
-    // =========================================================================
-    // MARK: - Embedded Mode Components
-    // =========================================================================
-
-    /// The emulator engine (embedded mode only).
-    /// This is the core emulation that wraps libatari800.
-    private var emulator: EmulatorEngine?
-
-    /// The emulation loop task (embedded mode only).
-    private var emulationTask: Task<Void, Never>?
 
     // =========================================================================
     // MARK: - Published State
@@ -351,30 +287,17 @@ class AtticViewModel: ObservableObject {
     // MARK: - Initialization
     // =========================================================================
 
-    /// Creates a new view model with the specified operation mode.
-    ///
-    /// - Parameter mode: The operation mode (client or embedded).
-    init(mode: OperationMode = .client) {
-        self.mode = mode
+    /// Creates a new view model.
+    init() {
         self.audioEngine = AudioEngine()
         self.keyboardHandler = KeyboardInputHandler()
-
-        // Only create emulator in embedded mode
-        if mode == .embedded {
-            self.emulator = EmulatorEngine()
-        }
     }
 
-    /// Initializes the emulator (embedded mode) or connects to server (client mode).
+    /// Connects to the AtticServer via AESP protocol.
     ///
     /// This should be called when the view appears.
     func initializeEmulator() async {
-        switch mode {
-        case .client:
-            await initializeClientMode()
-        case .embedded:
-            await initializeEmbeddedMode()
-        }
+        await initializeClientMode()
 
         // Register file open handler so AppDelegate can forward
         // Finder file-open events (double-click, drag-and-drop) to us
@@ -447,8 +370,8 @@ class AtticViewModel: ObservableObject {
                     initializationError = """
                         AtticServer started but connection failed.
 
-                        Try running in embedded mode:
-                          swift run AtticGUI --embedded
+                        Try starting the server manually:
+                          swift run AtticServer
                         """
                     statusMessage = "Connection Failed"
                     await cleanup()
@@ -461,9 +384,6 @@ class AtticViewModel: ObservableObject {
 
                     Make sure AtticServer is built:
                       swift build
-
-                    Or run in embedded mode:
-                      swift run AtticGUI --embedded
                     """
                 statusMessage = "Server Not Found"
                 await cleanup()
@@ -475,9 +395,6 @@ class AtticViewModel: ObservableObject {
 
                     Try starting it manually:
                       swift run AtticServer
-
-                    Or run in embedded mode:
-                      swift run AtticGUI --embedded
                     """
                 statusMessage = "Launch Failed"
                 await cleanup()
@@ -487,8 +404,8 @@ class AtticViewModel: ObservableObject {
                 initializationError = """
                     AtticServer started but socket not ready.
 
-                    Try running in embedded mode:
-                      swift run AtticGUI --embedded
+                    Try starting the server manually:
+                      swift run AtticServer
                     """
                 statusMessage = "Server Timeout"
                 await cleanup()
@@ -650,160 +567,35 @@ class AtticViewModel: ObservableObject {
     }
 
     // =========================================================================
-    // MARK: - Embedded Mode Initialization
-    // =========================================================================
-
-    /// Initializes embedded mode with direct EmulatorEngine.
-    private func initializeEmbeddedMode() async {
-        guard let emulator = emulator else {
-            initializationError = "Emulator not created"
-            return
-        }
-
-        // Try to find ROM directory
-        let romPath = findROMPath()
-
-        guard let romPath = romPath else {
-            initializationError = "ROM directory not found"
-            return
-        }
-
-        do {
-            // Initialize the emulator
-            try await emulator.initialize(romPath: romPath)
-            isInitialized = true
-            statusMessage = "Ready"
-
-            // Configure audio engine to match emulator's output format
-            let audioConfig = await emulator.getAudioConfiguration()
-            audioEngine.configure(from: audioConfig)
-
-            // Start audio engine
-            do {
-                try audioEngine.start()
-                let bitsPerSample = audioConfig.sampleSize * 8
-                print("[AtticGUI] Audio engine started: \(audioConfig.sampleRate) Hz, \(audioConfig.channels) ch, \(bitsPerSample)-bit")
-            } catch {
-                print("[AtticGUI] Warning: Failed to start audio: \(error.localizedDescription)")
-            }
-
-            // Start the emulation loop
-            startEmulationLoop()
-
-            // Auto-start
-            await start()
-        } catch {
-            initializationError = error.localizedDescription
-            statusMessage = "Error"
-        }
-    }
-
-    // =========================================================================
-    // MARK: - ROM Path Discovery
-    // =========================================================================
-
-    /// Finds the ROM directory.
-    ///
-    /// Searches in standard locations for the ROM files.
-    private func findROMPath() -> URL? {
-        let fileManager = FileManager.default
-
-        // Check various locations
-        let searchPaths: [URL] = [
-            // Current working directory
-            URL(fileURLWithPath: fileManager.currentDirectoryPath)
-                .appendingPathComponent("Resources/ROM"),
-            // Bundle resources (for packaged app)
-            Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/ROM"),
-            // User's home directory
-            fileManager.homeDirectoryForCurrentUser
-                .appendingPathComponent(".attic/ROM"),
-            // Source repo location (for development)
-            URL(fileURLWithPath: #file)
-                .deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .appendingPathComponent("Resources/ROM"),
-        ]
-
-        for path in searchPaths {
-            let osRom = path.appendingPathComponent("ATARIXL.ROM")
-            if fileManager.fileExists(atPath: osRom.path) {
-                print("[AtticGUI] Found ROMs at: \(path.path)")
-                return path
-            }
-        }
-
-        print("[AtticGUI] ROM search paths tried:")
-        for path in searchPaths {
-            print("  - \(path.path)")
-        }
-
-        return nil
-    }
-
-    // =========================================================================
     // MARK: - Control Methods
     // =========================================================================
 
     /// Starts/resumes the emulator.
     func start() async {
         guard isInitialized else { return }
-
-        switch mode {
-        case .client:
-            await client?.resume()
-            audioEngine.resume()
-            isRunning = true
-            statusMessage = "Running"
-
-        case .embedded:
-            guard let emulator = emulator else { return }
-            await emulator.resume()
-            audioEngine.resume()
-            isRunning = true
-            statusMessage = "Running"
-        }
+        await client?.resume()
+        audioEngine.resume()
+        isRunning = true
+        statusMessage = "Running"
     }
 
     /// Pauses the emulator.
     func pause() async {
-        switch mode {
-        case .client:
-            await client?.pause()
-            audioEngine.pause()
-            isRunning = false
-            statusMessage = "Paused"
-
-        case .embedded:
-            guard let emulator = emulator else { return }
-            await emulator.pause()
-            audioEngine.pause()
-            isRunning = false
-            statusMessage = "Paused"
-        }
+        await client?.pause()
+        audioEngine.pause()
+        isRunning = false
+        statusMessage = "Paused"
     }
 
     /// Performs a reset.
     ///
     /// - Parameter cold: If true, performs a cold reset (power cycle).
     func reset(cold: Bool = true) async {
-        switch mode {
-        case .client:
-            await client?.reset(cold: cold)
-            audioEngine.clearBuffer()
-            keyboardHandler.reset()
-            if isJoystickEmulationEnabled { resetJoystickState() }
-            statusMessage = cold ? "Cold Reset" : "Warm Reset"
-
-        case .embedded:
-            guard let emulator = emulator else { return }
-            await emulator.reset(cold: cold)
-            audioEngine.clearBuffer()
-            keyboardHandler.reset()
-            if isJoystickEmulationEnabled { resetJoystickState() }
-            statusMessage = cold ? "Cold Reset" : "Warm Reset"
-        }
+        await client?.reset(cold: cold)
+        audioEngine.clearBuffer()
+        keyboardHandler.reset()
+        if isJoystickEmulationEnabled { resetJoystickState() }
+        statusMessage = cold ? "Cold Reset" : "Warm Reset"
     }
 
     // =========================================================================
@@ -812,47 +604,30 @@ class AtticViewModel: ObservableObject {
 
     /// Saves the emulator state to a file.
     ///
-    /// In client mode, sends a `state save` command via the CLI socket to
-    /// the server, which handles metadata collection and file writing.
-    /// In embedded mode, creates metadata and saves directly via EmulatorEngine.
+    /// Sends a `state save` command via the CLI socket to the server,
+    /// which handles metadata collection and file writing.
     ///
     /// - Parameter url: URL of the .attic file to save to.
     func saveState(to url: URL) async {
         let path = url.path
 
-        switch mode {
-        case .client:
-            guard let socketPath = cliSocketPath else {
-                statusMessage = "No server connection for save"
-                return
-            }
-            let cliClient = CLISocketClient()
-            do {
-                try await cliClient.connect(to: socketPath)
-                let response = try await cliClient.send(.stateSave(path: path))
-                await cliClient.disconnect()
-                switch response {
-                case .ok:
-                    statusMessage = "State saved"
-                case .error(let msg):
-                    statusMessage = "Save failed: \(msg)"
-                }
-            } catch {
-                statusMessage = "Save failed: \(error.localizedDescription)"
-            }
-
-        case .embedded:
-            guard let emulator = emulator else { return }
-            do {
-                let metadata = StateMetadata.create(
-                    replMode: .basic(variant: .atari),
-                    mountedDisks: []
-                )
-                try await emulator.saveState(to: url, metadata: metadata)
+        guard let socketPath = cliSocketPath else {
+            statusMessage = "No server connection for save"
+            return
+        }
+        let cliClient = CLISocketClient()
+        do {
+            try await cliClient.connect(to: socketPath)
+            let response = try await cliClient.send(.stateSave(path: path))
+            await cliClient.disconnect()
+            switch response {
+            case .ok:
                 statusMessage = "State saved"
-            } catch {
-                statusMessage = "Save failed: \(error.localizedDescription)"
+            case .error(let msg):
+                statusMessage = "Save failed: \(msg)"
             }
+        } catch {
+            statusMessage = "Save failed: \(error.localizedDescription)"
         }
     }
 
@@ -862,84 +637,61 @@ class AtticViewModel: ObservableObject {
 
     /// Takes a screenshot of the current Atari display.
     ///
-    /// In client mode, sends a `screenshot` command via the CLI socket to
-    /// the server, which captures the current frame and writes it as a PNG.
-    /// In embedded mode, this is not yet supported.
+    /// Sends a `screenshot` command via the CLI socket to the server,
+    /// which captures the current frame and writes it as a PNG.
     ///
     /// - Parameter url: Optional URL to save the screenshot to. If nil, the
     ///   server uses its default path (Desktop with timestamp).
     func takeScreenshot(to url: URL? = nil) async {
-        switch mode {
-        case .client:
-            guard let socketPath = cliSocketPath else {
-                statusMessage = "No server connection for screenshot"
-                return
+        guard let socketPath = cliSocketPath else {
+            statusMessage = "No server connection for screenshot"
+            return
+        }
+        let cliClient = CLISocketClient()
+        do {
+            try await cliClient.connect(to: socketPath)
+            let response = try await cliClient.send(.screenshot(path: url?.path))
+            await cliClient.disconnect()
+            switch response {
+            case .ok(let msg):
+                statusMessage = msg
+            case .error(let msg):
+                statusMessage = "Screenshot failed: \(msg)"
             }
-            let cliClient = CLISocketClient()
-            do {
-                try await cliClient.connect(to: socketPath)
-                let response = try await cliClient.send(.screenshot(path: url?.path))
-                await cliClient.disconnect()
-                switch response {
-                case .ok(let msg):
-                    statusMessage = msg
-                case .error(let msg):
-                    statusMessage = "Screenshot failed: \(msg)"
-                }
-            } catch {
-                statusMessage = "Screenshot failed: \(error.localizedDescription)"
-            }
-
-        case .embedded:
-            statusMessage = "Screenshot not supported in embedded mode"
+        } catch {
+            statusMessage = "Screenshot failed: \(error.localizedDescription)"
         }
     }
 
     /// Loads emulator state from a file.
     ///
-    /// In client mode, sends a `state load` command via the CLI socket to
-    /// the server, which handles file reading and state restoration.
-    /// In embedded mode, loads directly via EmulatorEngine.
+    /// Sends a `state load` command via the CLI socket to the server,
+    /// which handles file reading and state restoration.
     ///
     /// - Parameter url: URL of the .attic file to load from.
     func loadState(from url: URL) async {
         let path = url.path
 
-        switch mode {
-        case .client:
-            guard let socketPath = cliSocketPath else {
-                statusMessage = "No server connection for load"
-                return
-            }
-            let cliClient = CLISocketClient()
-            do {
-                try await cliClient.connect(to: socketPath)
-                let response = try await cliClient.send(.stateLoad(path: path))
-                await cliClient.disconnect()
-                switch response {
-                case .ok:
-                    audioEngine.clearBuffer()
-                    keyboardHandler.reset()
-                    isRunning = true
-                    statusMessage = "State loaded"
-                case .error(let msg):
-                    statusMessage = "Load failed: \(msg)"
-                }
-            } catch {
-                statusMessage = "Load failed: \(error.localizedDescription)"
-            }
-
-        case .embedded:
-            guard let emulator = emulator else { return }
-            do {
-                let _ = try await emulator.loadState(from: url)
+        guard let socketPath = cliSocketPath else {
+            statusMessage = "No server connection for load"
+            return
+        }
+        let cliClient = CLISocketClient()
+        do {
+            try await cliClient.connect(to: socketPath)
+            let response = try await cliClient.send(.stateLoad(path: path))
+            await cliClient.disconnect()
+            switch response {
+            case .ok:
                 audioEngine.clearBuffer()
                 keyboardHandler.reset()
                 isRunning = true
                 statusMessage = "State loaded"
-            } catch {
-                statusMessage = "Load failed: \(error.localizedDescription)"
+            case .error(let msg):
+                statusMessage = "Load failed: \(msg)"
             }
+        } catch {
+            statusMessage = "Load failed: \(error.localizedDescription)"
         }
     }
 
@@ -949,35 +701,20 @@ class AtticViewModel: ObservableObject {
 
     /// Boots the emulator with a file (disk image, executable, BASIC program, etc.).
     ///
-    /// Opens the file via `libatari800_reboot_with_file` which loads it and
-    /// performs a cold start. Works in both client and embedded modes.
+    /// Sends a boot file command to the server via AESP protocol, which loads
+    /// the file and performs a cold start.
     ///
     /// - Parameter url: URL of the file to boot.
     func bootFile(url: URL) async {
         let path = url.path
 
-        switch mode {
-        case .client:
-            await client?.bootFile(filePath: path)
-            audioEngine.clearBuffer()
-            keyboardHandler.reset()
-            isRunning = true
-            statusMessage = "Booting \(url.lastPathComponent)..."
-            // Refresh disk status after boot so the status bar shows the new disk
-            await refreshDiskStatus()
-
-        case .embedded:
-            guard let emulator = emulator else { return }
-            let result = await emulator.bootFile(path)
-            audioEngine.clearBuffer()
-            keyboardHandler.reset()
-            if result.success {
-                isRunning = true
-                statusMessage = "Loaded \(url.lastPathComponent)"
-            } else {
-                statusMessage = "Boot failed: \(result.errorMessage ?? "Unknown error")"
-            }
-        }
+        await client?.bootFile(filePath: path)
+        audioEngine.clearBuffer()
+        keyboardHandler.reset()
+        isRunning = true
+        statusMessage = "Booting \(url.lastPathComponent)..."
+        // Refresh disk status after boot so the status bar shows the new disk
+        await refreshDiskStatus()
     }
 
     // =========================================================================
@@ -987,10 +724,9 @@ class AtticViewModel: ObservableObject {
     /// Requests the current status (including mounted disks) from the server
     /// and updates the `mountedDiskNames` published property.
     ///
-    /// In client mode, sends an AESP status request and parses the enhanced
-    /// response. In embedded mode, this is a no-op (no disk info available).
+    /// Sends an AESP status request and parses the enhanced response.
     func refreshDiskStatus() async {
-        guard mode == .client, let client = client else { return }
+        guard let client = client else { return }
         let status = await client.requestStatusWithDisks()
 
         // Build the new display string for the status bar
@@ -1017,72 +753,60 @@ class AtticViewModel: ObservableObject {
 
     /// Mounts a disk image into a drive slot.
     ///
-    /// In client mode, sends a `mount` command via the CLI socket to the server.
+    /// Sends a `mount` command via the CLI socket to the server.
     /// After mounting, refreshes disk status so the Drive submenus reflect the change.
     ///
     /// - Parameters:
     ///   - drive: Drive number (1 or 2).
     ///   - path: Absolute path to the disk image file.
     func mountDisk(drive: Int, path: String) async {
-        switch mode {
-        case .client:
-            guard let socketPath = cliSocketPath else {
-                statusMessage = "No server connection for mount"
-                return
-            }
-            let cliClient = CLISocketClient()
-            do {
-                try await cliClient.connect(to: socketPath)
-                let response = try await cliClient.send(.mount(drive: drive, path: path))
-                await cliClient.disconnect()
-                switch response {
-                case .ok(let msg):
-                    statusMessage = msg
-                case .error(let msg):
-                    statusMessage = "Mount failed: \(msg)"
-                }
-            } catch {
-                statusMessage = "Mount failed: \(error.localizedDescription)"
-            }
-            await refreshDiskStatus()
-
-        case .embedded:
-            statusMessage = "Mount not supported in embedded mode"
+        guard let socketPath = cliSocketPath else {
+            statusMessage = "No server connection for mount"
+            return
         }
+        let cliClient = CLISocketClient()
+        do {
+            try await cliClient.connect(to: socketPath)
+            let response = try await cliClient.send(.mount(drive: drive, path: path))
+            await cliClient.disconnect()
+            switch response {
+            case .ok(let msg):
+                statusMessage = msg
+            case .error(let msg):
+                statusMessage = "Mount failed: \(msg)"
+            }
+        } catch {
+            statusMessage = "Mount failed: \(error.localizedDescription)"
+        }
+        await refreshDiskStatus()
     }
 
     /// Unmounts (ejects) the disk image from a drive slot.
     ///
-    /// In client mode, sends an `unmount` command via the CLI socket to the server.
+    /// Sends an `unmount` command via the CLI socket to the server.
     /// After unmounting, refreshes disk status so the Drive submenus reflect the change.
     ///
     /// - Parameter drive: Drive number (1 or 2).
     func unmountDisk(drive: Int) async {
-        switch mode {
-        case .client:
-            guard let socketPath = cliSocketPath else {
-                statusMessage = "No server connection for unmount"
-                return
-            }
-            let cliClient = CLISocketClient()
-            do {
-                try await cliClient.connect(to: socketPath)
-                let response = try await cliClient.send(.unmount(drive: drive))
-                await cliClient.disconnect()
-                switch response {
-                case .ok(let msg):
-                    statusMessage = msg
-                case .error(let msg):
-                    statusMessage = "Eject failed: \(msg)"
-                }
-            } catch {
-                statusMessage = "Eject failed: \(error.localizedDescription)"
-            }
-            await refreshDiskStatus()
-
-        case .embedded:
-            statusMessage = "Eject not supported in embedded mode"
+        guard let socketPath = cliSocketPath else {
+            statusMessage = "No server connection for unmount"
+            return
         }
+        let cliClient = CLISocketClient()
+        do {
+            try await cliClient.connect(to: socketPath)
+            let response = try await cliClient.send(.unmount(drive: drive))
+            await cliClient.disconnect()
+            switch response {
+            case .ok(let msg):
+                statusMessage = msg
+            case .error(let msg):
+                statusMessage = "Eject failed: \(msg)"
+            }
+        } catch {
+            statusMessage = "Eject failed: \(error.localizedDescription)"
+        }
+        await refreshDiskStatus()
     }
 
     // =========================================================================
@@ -1148,24 +872,14 @@ class AtticViewModel: ObservableObject {
             shift: shift,
             control: control
         ) {
-            // Send to emulator/server based on mode
+            // Send to server via AESP protocol
             Task {
-                switch mode {
-                case .client:
-                    await client?.sendKeyDown(
-                        keyChar: keyChar,
-                        keyCode: keyCode,
-                        shift: atariShift,
-                        control: atariControl
-                    )
-                case .embedded:
-                    await emulator?.pressKey(
-                        keyChar: keyChar,
-                        keyCode: keyCode,
-                        shift: atariShift,
-                        control: atariControl
-                    )
-                }
+                await client?.sendKeyDown(
+                    keyChar: keyChar,
+                    keyCode: keyCode,
+                    shift: atariShift,
+                    control: atariControl
+                )
             }
         }
 
@@ -1208,12 +922,7 @@ class AtticViewModel: ObservableObject {
         if keyboardHandler.keyUp(keyCode: event.keyCode) {
             // Release the key
             Task {
-                switch mode {
-                case .client:
-                    await client?.sendKeyUp()
-                case .embedded:
-                    await emulator?.releaseKey()
-                }
+                await client?.sendKeyUp()
             }
         }
 
@@ -1235,74 +944,41 @@ class AtticViewModel: ObservableObject {
     func sendConsoleKeys() {
         let consoleKeys = keyboardHandler.getConsoleKeys()
         Task {
-            switch mode {
-            case .client:
-                await client?.sendConsoleKeys(
-                    start: consoleKeys.start,
-                    select: consoleKeys.select,
-                    option: consoleKeys.option
-                )
-            case .embedded:
-                await emulator?.setConsoleKeys(
-                    start: consoleKeys.start,
-                    select: consoleKeys.select,
-                    option: consoleKeys.option
-                )
-            }
+            await client?.sendConsoleKeys(
+                start: consoleKeys.start,
+                select: consoleKeys.select,
+                option: consoleKeys.option
+            )
         }
     }
 
     /// Sends console key states (for button presses).
     func setConsoleKeys(start: Bool, select: Bool, option: Bool) {
         Task {
-            switch mode {
-            case .client:
-                await client?.sendConsoleKeys(
-                    start: start,
-                    select: select,
-                    option: option
-                )
-            case .embedded:
-                await emulator?.setConsoleKeys(
-                    start: start,
-                    select: select,
-                    option: option
-                )
-            }
+            await client?.sendConsoleKeys(
+                start: start,
+                select: select,
+                option: option
+            )
         }
     }
 
     /// Presses the HELP key (for HELP button).
     func pressHelpKey() {
         Task {
-            switch mode {
-            case .client:
-                await client?.sendKeyDown(
-                    keyChar: 0,
-                    keyCode: AtariKeyCode.help,
-                    shift: false,
-                    control: false
-                )
-            case .embedded:
-                await emulator?.pressKey(
-                    keyChar: 0,
-                    keyCode: AtariKeyCode.help,
-                    shift: false,
-                    control: false
-                )
-            }
+            await client?.sendKeyDown(
+                keyChar: 0,
+                keyCode: AtariKeyCode.help,
+                shift: false,
+                control: false
+            )
         }
     }
 
     /// Releases the HELP key (for HELP button).
     func releaseHelpKey() {
         Task {
-            switch mode {
-            case .client:
-                await client?.sendKeyUp()
-            case .embedded:
-                await emulator?.releaseKey()
-            }
+            await client?.sendKeyUp()
         }
     }
 
@@ -1310,12 +986,9 @@ class AtticViewModel: ObservableObject {
     // MARK: - Joystick Emulation
     // =========================================================================
 
-    /// Sends the current joystick state to the emulator based on held key state.
+    /// Sends the current joystick state to the server based on held key state.
     ///
-    /// Reads the five key-held booleans and dispatches to either the AESP client
-    /// (in client mode) or the embedded EmulatorEngine (in embedded mode).
-    /// For embedded mode, the direction byte uses the same active-high encoding
-    /// as the server: bit0=up, bit1=down, bit2=left, bit3=right.
+    /// Reads the five key-held booleans and dispatches to the AESP client.
     private func sendJoystickState() {
         let up = joystickUpHeld
         let down = joystickDownHeld
@@ -1324,30 +997,14 @@ class AtticViewModel: ObservableObject {
         let trigger = joystickTriggerHeld
 
         Task {
-            switch mode {
-            case .client:
-                await client?.sendJoystick(
-                    port: 0,
-                    up: up,
-                    down: down,
-                    left: left,
-                    right: right,
-                    trigger: trigger
-                )
-            case .embedded:
-                // Build direction byte matching the server's encoding:
-                // bit0=up, bit1=down, bit2=left, bit3=right (active-high)
-                var direction: UInt8 = 0
-                if up { direction |= 0x01 }
-                if down { direction |= 0x02 }
-                if left { direction |= 0x04 }
-                if right { direction |= 0x08 }
-                await emulator?.setJoystick(
-                    port: 0,
-                    direction: direction,
-                    trigger: trigger
-                )
-            }
+            await client?.sendJoystick(
+                port: 0,
+                up: up,
+                down: down,
+                left: left,
+                right: right,
+                trigger: trigger
+            )
         }
     }
 
@@ -1362,71 +1019,6 @@ class AtticViewModel: ObservableObject {
         joystickRightHeld = false
         joystickTriggerHeld = false
         sendJoystickState()
-    }
-
-    // =========================================================================
-    // MARK: - Emulation Loop (Embedded Mode Only)
-    // =========================================================================
-
-    /// Starts the emulation loop (embedded mode only).
-    private func startEmulationLoop() {
-        guard mode == .embedded else { return }
-        emulationTask = Task { [weak self] in
-            await self?.emulationLoop()
-        }
-    }
-
-    /// The main emulation loop (embedded mode only).
-    private func emulationLoop() async {
-        guard let emulator = emulator else { return }
-
-        // Target 60fps = 16.67ms per frame
-        // Use absolute frame scheduling to prevent timing drift
-        let targetFrameTime: UInt64 = 16_666_667  // nanoseconds
-        var nextFrameTime = DispatchTime.now().uptimeNanoseconds + targetFrameTime
-
-        while !Task.isCancelled {
-            if isRunning {
-                // Execute one frame
-                let result = await emulator.executeFrame()
-
-                // Get frame buffer and update renderer
-                let frameBuffer = await emulator.getFrameBuffer()
-
-                // Get audio samples and feed to audio engine
-                let audioSamples = await emulator.getAudioSamples()
-                if !audioSamples.isEmpty {
-                    audioEngine.enqueueSamplesFromEmulator(bytes: audioSamples)
-                }
-
-                // Update UI
-                renderer?.updateTexture(with: frameBuffer)
-                updateFPS()
-
-                // Handle special frame results
-                switch result {
-                case .breakpoint:
-                    isRunning = false
-                    statusMessage = "Breakpoint"
-                    audioEngine.pause()
-                case .cpuCrash:
-                    isRunning = false
-                    statusMessage = "CPU Crash"
-                    audioEngine.pause()
-                default:
-                    break
-                }
-            }
-
-            // Sleep until next scheduled frame time
-            let now = DispatchTime.now().uptimeNanoseconds
-            if now < nextFrameTime {
-                let sleepTime = nextFrameTime - now
-                try? await Task.sleep(nanoseconds: sleepTime)
-            }
-            // Schedule next frame (prevents timing drift)
-            nextFrameTime += targetFrameTime
-        }
     }
 
     /// Updates the FPS counter using the frame rate monitor.
@@ -1448,8 +1040,6 @@ class AtticViewModel: ObservableObject {
     /// to gracefully stop. This should be called before quitting the app
     /// when the user wants to shut down everything.
     func shutdownServer() async {
-        guard mode == .client else { return }
-
         // If we have a CLI socket path, send shutdown command
         if let socketPath = cliSocketPath {
             let cliClient = CLISocketClient()
@@ -1496,10 +1086,6 @@ class AtticViewModel: ObservableObject {
         await client?.disconnect()
         client = nil
 
-        // Cancel emulation task
-        emulationTask?.cancel()
-        emulationTask = nil
-
         // Stop audio
         audioEngine.stop()
     }
@@ -1511,7 +1097,6 @@ class AtticViewModel: ObservableObject {
         audioReceiverTask?.cancel()
         statusPollingTask?.cancel()
         heartbeatTask?.cancel()
-        emulationTask?.cancel()
     }
 }
 
@@ -1676,11 +1261,6 @@ struct AtticCommands: Commands {
                 Task { await viewModel.unmountDisk(drive: 2) }
             }
 
-            Divider()
-
-            // Show current mode
-            Text("Mode: \(viewModel.mode == .client ? "Client" : "Embedded")")
-                .foregroundColor(.secondary)
         }
 
         // About dialog: replaces the standard "About" menu item in the app menu
