@@ -1,4 +1,4 @@
-states/
+*.state
 .build
 UserInterfaceState.xcuserstate
 .swiftpm/
