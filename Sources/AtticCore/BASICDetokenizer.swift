@@ -11,19 +11,25 @@
 // - VARS command (showing variable names)
 // - Export to .BAS text files
 //
-// Token Decoding Overview:
+// Token Decoding is CONTEXT-AWARE:
+//
+// Statement name position (first byte of each statement, after colon):
 // - $00-$36: Statement tokens (REM, PRINT, FOR, etc.)
-// - $37-$5C: Operator tokens (arithmetic, comparison, logical)
-// - $5D-$74: Function tokens (STR$, CHR$, ABS, etc.)
-// - $0D + byte: Small integer constant (0-255)
+//
+// Expression position (all other bytes after the statement name):
 // - $0E + 6 bytes: BCD floating-point constant
 // - $0F + len + chars: String literal
-// - $16: End of line marker
+// - $12-$37: Operator tokens (,  ;  =  TO  +  -  etc.)
+// - $38-$4F: Function tokens (STR$, CHR$, PEEK, etc.)
 // - $80-$FF: Variable reference (index into VNT)
+//
+// Operator byte values $12-$36 OVERLAP with statement tokens. The real
+// Atari BASIC ROM disambiguates by position context, and so do we.
 //
 // Special Cases:
 // - REM ($00): Remaining bytes until EOL are raw comment text
 // - Implied LET ($36): Not output (wasn't in original source)
+// - Colon ($14): Statement separator, followed by next-stmt offset byte
 // - Keywords need trailing space, most operators don't
 //
 // Reference: Atari BASIC Reference Manual, De Re Atari Chapter 8
@@ -210,7 +216,16 @@ public struct BASICDetokenizer: Sendable {
 
     /// Detokenizes the content portion of a line (after header, before EOL).
     ///
-    /// This is the core detokenization logic that converts token bytes to text.
+    /// This is the core detokenization logic. It is CONTEXT-AWARE: the first
+    /// byte of each statement is decoded as a STATEMENT NAME token (using the
+    /// statement token table $00-$36), while all subsequent bytes are decoded
+    /// as EXPRESSION tokens (operators $12-$37, functions $38-$4F, constants,
+    /// and variable references $80-$FF).
+    ///
+    /// This context distinction is necessary because operator byte values
+    /// overlap with statement byte values. For example, $2D means POSITION
+    /// in statement-name position but means = (assignment) in expression
+    /// position. The real Atari BASIC ROM disambiguates the same way.
     ///
     /// - Parameters:
     ///   - bytes: The content bytes (excluding line header and EOL).
@@ -222,165 +237,179 @@ public struct BASICDetokenizer: Sendable {
     ) -> String {
         var result = ""
         var index = 0
-        var isFirstToken = true
-        var afterStatement = false  // Track if we just output a statement keyword
+        var expectStatementName = true  // First byte is always a statement name
+        var afterStatement = false      // Track if we just output a statement keyword
 
         while index < bytes.count {
             let byte = bytes[index]
 
-            // Check for REM statement - rest of line is raw comment text
-            if byte == BASICStatementToken.rem.rawValue {
-                if !isFirstToken && !afterStatement {
-                    result += " "
-                }
-                result += "REM"
+            if expectStatementName {
+                // ── STATEMENT NAME POSITION ──
+                // The first byte of each statement is the statement name token.
 
-                // Read remaining bytes as raw comment text
+                // Check for REM - rest of line is raw comment text
+                if byte == BASICStatementToken.rem.rawValue {
+                    if !result.isEmpty && !result.hasSuffix(" ") && !result.hasSuffix(":") {
+                        result += " "
+                    }
+                    result += "REM"
+                    index += 1
+                    if index < bytes.count {
+                        result += " "
+                        let commentBytes = Array(bytes[index...])
+                        result += decodeRawText(commentBytes)
+                    }
+                    break
+                }
+
+                if let token = BASICStatementToken(rawValue: byte) {
+                    // Implied LET ($36) - don't output the keyword
+                    if token != .impliedLet {
+                        if !result.isEmpty && !result.hasSuffix(" ") && !result.hasSuffix(":") {
+                            result += " "
+                        }
+                        result += token.keyword
+                        result += " "
+                    }
+                } else {
+                    // Unknown statement token
+                    result += String(format: "?$%02X", byte)
+                }
+
                 index += 1
-                if index < bytes.count {
+                expectStatementName = false
+                afterStatement = true
+
+            } else {
+                // ── EXPRESSION POSITION ──
+                // All bytes after the statement name are expression tokens.
+                let (text, consumed, needsLeadingSpace, needsTrailingSpace, isColon) =
+                    decodeExpressionToken(
+                        bytes: bytes,
+                        at: index,
+                        variables: variables,
+                        afterStatement: afterStatement
+                    )
+
+                // Add spacing as needed
+                if needsLeadingSpace && !result.isEmpty && !result.hasSuffix(" ") {
                     result += " "
-                    let commentBytes = Array(bytes[index...])
-                    result += decodeRawText(commentBytes)
                 }
-                break
+
+                result += text
+
+                if needsTrailingSpace {
+                    result += " "
+                }
+
+                index += consumed
+                afterStatement = false
+
+                // If we hit a colon (statement separator), the NEXT byte is
+                // the next-statement offset byte (skip it), then a new statement
+                // name token follows.
+                if isColon {
+                    if index < bytes.count {
+                        index += 1  // Skip the next-statement offset byte
+                    }
+                    expectStatementName = true
+                }
             }
-
-            // Determine token type and decode
-            let (text, consumed, needsLeadingSpace, needsTrailingSpace) = decodeToken(
-                bytes: bytes,
-                at: index,
-                variables: variables,
-                isFirstToken: isFirstToken,
-                afterStatement: afterStatement
-            )
-
-            // Add spacing as needed
-            if needsLeadingSpace && !result.isEmpty && !result.hasSuffix(" ") {
-                result += " "
-            }
-
-            result += text
-
-            if needsTrailingSpace {
-                result += " "
-            }
-
-            index += consumed
-            isFirstToken = false
-
-            // Track if this was a statement keyword for spacing decisions
-            afterStatement = isStatementToken(byte)
         }
 
         return result.trimmingCharacters(in: .whitespaces)
     }
 
-    /// Decodes a single token at the given position.
+    /// Decodes a single expression token at the given position.
+    ///
+    /// Expression tokens use a different byte space than statement name tokens:
+    /// - $0D + byte: Legacy small integer constant (our old format, kept for compat)
+    /// - $0E + 6 bytes: BCD floating-point constant
+    /// - $0F + len + chars: String literal
+    /// - $12-$37: Operator tokens (comma, =, TO, +, -, etc.)
+    /// - $38-$4F: Function tokens (STR$, CHR$, PEEK, etc.)
+    /// - $80-$FF: Variable references
     ///
     /// - Parameters:
     ///   - bytes: The full content bytes.
     ///   - at: The current index.
     ///   - variables: The Variable Name Table.
-    ///   - isFirstToken: Whether this is the first token on the line.
     ///   - afterStatement: Whether we just processed a statement keyword.
-    /// - Returns: Tuple of (text, bytesConsumed, needsLeadingSpace, needsTrailingSpace).
-    private func decodeToken(
+    /// - Returns: Tuple of (text, bytesConsumed, needsLeadingSpace, needsTrailingSpace, isColon).
+    private func decodeExpressionToken(
         bytes: [UInt8],
         at index: Int,
         variables: [BASICVariableName],
-        isFirstToken: Bool,
         afterStatement: Bool
-    ) -> (String, Int, Bool, Bool) {
+    ) -> (String, Int, Bool, Bool, Bool) {
         let byte = bytes[index]
 
         // Variable reference ($80-$FF)
         if byte >= BASICSpecialToken.variableBase {
             let varIndex = Int(byte - BASICSpecialToken.variableBase)
             let varName = variableName(at: varIndex, variables: variables)
-            return (varName, 1, !isFirstToken && !afterStatement, false)
+            return (varName, 1, !afterStatement, false, false)
         }
 
-        // Small integer constant ($0D + byte)
+        // Legacy small integer constant ($0D + byte) - kept for backward compatibility
+        // with our old tokenizer format. Real Atari BASIC does not use $0D.
         if byte == BASICSpecialToken.smallIntPrefix {
             guard index + 1 < bytes.count else {
-                return ("?", 1, false, false)
+                return ("?", 1, false, false, false)
             }
             let value = bytes[index + 1]
-            return (String(value), 2, !afterStatement, false)
+            return (String(value), 2, !afterStatement, false, false)
         }
 
         // BCD floating-point constant ($0E + 6 bytes)
         if byte == BASICSpecialToken.bcdFloatPrefix {
             guard index + 6 < bytes.count else {
-                return ("?", 1, false, false)
+                return ("?", 1, false, false, false)
             }
             let bcdBytes = Array(bytes[(index + 1)...(index + 6)])
             let bcd = BCDFloat(bytes: bcdBytes)
-            return (bcd.decimalString, 7, !afterStatement, false)
+            return (bcd.decimalString, 7, !afterStatement, false, false)
         }
 
         // String literal ($0F + length + chars)
         if byte == BASICSpecialToken.stringPrefix {
             guard index + 1 < bytes.count else {
-                return ("\"\"", 1, false, false)
+                return ("\"\"", 1, false, false, false)
             }
             let length = Int(bytes[index + 1])
             guard index + 1 + length < bytes.count else {
-                return ("\"\"", 2, false, false)
+                return ("\"\"", 2, false, false, false)
             }
             let stringBytes = Array(bytes[(index + 2)..<(index + 2 + length)])
             let content = decodeRawText(stringBytes)
-            return ("\"\(content)\"", 2 + length, !afterStatement, false)
+            return ("\"\(content)\"", 2 + length, !afterStatement, false, false)
         }
 
-        // Statement tokens ($00-$36)
-        if byte <= 0x36 {
-            if let token = BASICStatementToken(rawValue: byte) {
-                let keyword = token.keyword
-
-                // Implied LET ($36) - don't output the keyword
-                if token == .impliedLet {
-                    return ("", 1, false, false)
-                }
-
-                // Other statements need trailing space
-                return (keyword, 1, !isFirstToken, true)
+        // Operator tokens ($12-$37)
+        if let token = BASICOperatorToken(rawValue: byte) {
+            // EOL marker ($16) shouldn't appear in content, but handle gracefully
+            if token == .endOfLine {
+                return ("", 1, false, false, false)
             }
+
+            let symbol = token.symbol
+            let isColon = (token == .colon)
+            let needsSpaces = operatorNeedsSpaces(token)
+            return (symbol, 1, needsSpaces, needsSpaces, isColon)
         }
 
-        // Operator tokens ($37-$5C)
-        if byte >= 0x37 && byte <= 0x5C {
-            if let token = BASICOperatorToken(rawValue: byte) {
-                let symbol = token.symbol
-                let needsSpaces = operatorNeedsSpaces(token)
-                return (symbol, 1, needsSpaces, needsSpaces)
-            }
+        // Function tokens ($38-$4F)
+        if let token = BASICFunctionToken(rawValue: byte) {
+            return (token.keyword, 1, !afterStatement, false, false)
         }
 
-        // Function tokens ($5D-$74)
-        if byte >= 0x5D && byte <= 0x74 {
-            if let token = BASICFunctionToken(rawValue: byte) {
-                return (token.keyword, 1, !afterStatement, false)
-            }
-        }
-
-        // EOL marker ($16) - shouldn't appear in content, but handle it
-        if byte == BASICSpecialToken.endOfLine {
-            return ("", 1, false, false)
-        }
-
-        // Unknown token - output as hex
-        return (String(format: "?$%02X", byte), 1, false, false)
+        // Unknown expression token - output as hex
+        return (String(format: "?$%02X", byte), 1, false, false, false)
     }
 
     // =========================================================================
     // MARK: - Helper Methods
     // =========================================================================
-
-    /// Checks if a byte is a statement token.
-    private func isStatementToken(_ byte: UInt8) -> Bool {
-        byte <= 0x36 && BASICStatementToken(rawValue: byte) != nil
-    }
 
     /// Determines if an operator token needs surrounding spaces.
     ///

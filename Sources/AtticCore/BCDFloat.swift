@@ -8,24 +8,29 @@
 // BCD Format (6 bytes):
 // ```
 // Byte 0: Exponent
-//         - Bits 0-6: Exponent value (excess-64 notation)
+//         - Bits 0-6: Exponent value (excess-64 notation, powers of 100)
 //         - Bit 7: Sign (0 = positive, 1 = negative)
 //
 // Bytes 1-5: Mantissa
-//         - 10 BCD digits (2 per byte, high nibble first)
-//         - Normalized: first digit is always 1-9 (except for zero)
+//         - 5 BCD digit pairs (2 digits per byte, high nibble first)
+//         - Each byte represents a value 00-99
+//         - Byte 1 is the integer part (01-99 for normalized numbers)
+//         - Bytes 2-5 are successive 1/100 fractional parts
+//         - Value = mantissa × 100^exponent
 // ```
 //
-// Range: Approximately ±9.99999999 × 10^62 to ±1.0 × 10^-63
+// Range: Approximately ±9.99999999 × 10^97 to ±1.0 × 10^-98
 // Precision: 10 decimal digits
 //
 // Examples:
 //   0       → 00 00 00 00 00 00
-//   1       → 40 10 00 00 00 00  (exp=0, mantissa=1.0)
-//   10      → 41 10 00 00 00 00  (exp=1, mantissa=1.0)
-//   100     → 42 10 00 00 00 00  (exp=2, mantissa=1.0)
-//   3.14159 → 40 31 41 59 00 00  (exp=0, mantissa=3.14159)
-//   -1      → C0 10 00 00 00 00  (exp=0, mantissa=1.0, negative)
+//   1       → 40 01 00 00 00 00  (exp=0, mantissa=1, 1×100^0)
+//   10      → 40 10 00 00 00 00  (exp=0, mantissa=10, 10×100^0)
+//   37      → 40 37 00 00 00 00  (exp=0, mantissa=37, 37×100^0)
+//   100     → 41 01 00 00 00 00  (exp=1, mantissa=1, 1×100^1)
+//   3.14159 → 40 03 14 15 90 00  (exp=0, mantissa=3.141590)
+//   0.02    → 3F 02 00 00 00 00  (exp=-1, mantissa=2, 2×100^-1)
+//   -1      → C0 01 00 00 00 00  (exp=0, mantissa=1, negative)
 //
 // Reference: Atari BASIC Reference Manual, De Re Atari Chapter 8
 //
@@ -86,13 +91,26 @@ public struct BCDFloat: Sendable, Equatable {
 
     /// Creates a BCD float from a Swift Double.
     ///
+    /// Atari BASIC uses a power-of-100 BCD format where each mantissa byte
+    /// holds a two-digit BCD pair (00-99). The exponent represents powers
+    /// of 100 in excess-64 notation.
+    ///
     /// The conversion process:
     /// 1. Handle special case of zero
     /// 2. Determine sign and work with absolute value
-    /// 3. Calculate exponent (power of 10)
-    /// 4. Normalize mantissa to [1, 10)
-    /// 5. Extract BCD digits
+    /// 3. Normalize mantissa to [1, 100)
+    /// 4. Calculate exponent as power of 100
+    /// 5. Extract BCD digit pairs (2 digits per byte)
     /// 6. Pack into 6-byte format
+    ///
+    /// Examples:
+    ///   1       → [40, 01, 00, 00, 00, 00]  (1 × 100^0)
+    ///   10      → [40, 10, 00, 00, 00, 00]  (10 × 100^0)
+    ///   37      → [40, 37, 00, 00, 00, 00]  (37 × 100^0)
+    ///   100     → [41, 01, 00, 00, 00, 00]  (1 × 100^1)
+    ///   3.14159 → [40, 03, 14, 15, 90, 00]  (3.14159 × 100^0)
+    ///   0.02    → [3F, 02, 00, 00, 00, 00]  (2 × 100^-1)
+    ///   -1      → [C0, 01, 00, 00, 00, 00]  (1 × 100^0, negative)
     ///
     /// - Parameter value: The Double value to convert.
     /// - Returns: A BCDFloat representing the value.
@@ -111,46 +129,27 @@ public struct BCDFloat: Sendable, Equatable {
         let isNegative = value < 0
         var mantissa = abs(value)
 
-        // Calculate the decimal exponent
-        // We normalize mantissa to the range [1, 10) so the first digit is always 1-9
+        // Normalize mantissa to [1, 100) using powers of 100.
+        // Each exponent unit represents one factor of 100.
+        // For example: 460312 → mantissa=46.0312, exponent=2 (46.0312 × 100^2)
         var exponent = 0
 
-        if mantissa >= 10.0 {
-            // Value is >= 10, divide until < 10
-            while mantissa >= 10.0 {
-                mantissa /= 10.0
+        if mantissa >= 100.0 {
+            while mantissa >= 100.0 {
+                mantissa /= 100.0
                 exponent += 1
             }
         } else if mantissa < 1.0 {
-            // Value is < 1, multiply until >= 1
             while mantissa < 1.0 {
-                mantissa *= 10.0
+                mantissa *= 100.0
                 exponent -= 1
             }
         }
 
-        // Now mantissa is in range [1.0, 10.0) and value = mantissa * 10^exponent
-        // The exponent byte uses excess-64 notation
+        // Now mantissa is in [1.0, 100.0) and value = mantissa × 100^exponent
 
         // Clamp exponent to valid range (-64 to 63)
         exponent = max(-64, min(63, exponent))
-
-        // Extract 10 BCD digits from mantissa
-        // The mantissa is in [1, 10), so the first digit is the integer part
-        var digits: [UInt8] = []
-        var m = mantissa
-        for i in 0..<10 {
-            let digit: Int
-            if i == 0 {
-                // First digit: integer part of mantissa (1-9)
-                digit = Int(m)
-            } else {
-                // Subsequent digits: fractional parts
-                m = (m - Double(Int(m))) * 10.0
-                digit = Int(m)
-            }
-            digits.append(UInt8(min(9, max(0, digit))))
-        }
 
         // Build the 6-byte result
         var result: [UInt8] = []
@@ -162,11 +161,16 @@ public struct BCDFloat: Sendable, Equatable {
         }
         result.append(expByte)
 
-        // Bytes 1-5: Packed BCD mantissa (2 digits per byte, high nibble first)
-        for i in stride(from: 0, to: 10, by: 2) {
-            let high = digits[i]
-            let low = i + 1 < digits.count ? digits[i + 1] : 0
-            result.append((high << 4) | low)
+        // Bytes 1-5: BCD digit pairs. Each byte holds a two-digit value (00-99).
+        // Byte 1 is the integer part of the mantissa (01-99 for normalized).
+        // Bytes 2-5 are successive fractional pairs (each ×1/100 of previous).
+        var m = mantissa
+        for _ in 0..<5 {
+            let pair = min(99, max(0, Int(m)))
+            let highDigit = pair / 10
+            let lowDigit = pair % 10
+            result.append(UInt8((highDigit << 4) | lowDigit))
+            m = (m - Double(pair)) * 100.0
         }
 
         return BCDFloat(bytes: result)
@@ -196,9 +200,15 @@ public struct BCDFloat: Sendable, Equatable {
     ///
     /// The conversion process:
     /// 1. Handle zero case
-    /// 2. Extract sign and exponent
-    /// 3. Unpack BCD digits to build mantissa in [1, 10)
-    /// 4. Apply exponent (power of 10) and sign
+    /// 2. Extract sign and exponent (excess-64, powers of 100)
+    /// 3. Unpack BCD digit pairs to build mantissa
+    /// 4. Apply exponent and sign
+    ///
+    /// Each mantissa byte holds a two-digit BCD pair (00-99):
+    /// - Byte 1: integer part of mantissa (01-99 for normalized)
+    /// - Bytes 2-5: fractional pairs, each worth 1/100 of previous
+    ///
+    /// Value = mantissa × 100^exponent
     ///
     /// - Returns: The Double value represented by this BCD float.
     public func decode() -> Double {
@@ -207,29 +217,29 @@ public struct BCDFloat: Sendable, Equatable {
             return 0.0
         }
 
-        // Extract exponent (excess-64 notation)
+        // Extract exponent (excess-64 notation, powers of 100)
         let exp = Int(bytes[0] & 0x7F) - 64
         let negative = isNegative
 
-        // Unpack BCD digits to build mantissa
-        // First digit is in the units place (1-9), subsequent digits are fractional
+        // Unpack BCD digit pairs to build mantissa.
+        // Byte 1 is the integer part, bytes 2-5 are fractional pairs.
+        // mantissa = byte1 + byte2/100 + byte3/10000 + byte4/1000000 + byte5/100000000
         var mantissa = 0.0
-        var place = 1.0  // Start at units place
+        var place = 1.0  // Byte 1 contributes at the ones place
 
         for byteIndex in 1...5 {
             let byte = bytes[byteIndex]
             let highDigit = Int(byte >> 4)
             let lowDigit = Int(byte & 0x0F)
+            let byteValue = Double(highDigit * 10 + lowDigit)
 
-            mantissa += Double(highDigit) * place
-            place /= 10.0
-            mantissa += Double(lowDigit) * place
-            place /= 10.0
+            mantissa += byteValue * place
+            place /= 100.0  // Each byte pair covers 2 decimal places
         }
 
-        // Apply exponent (powers of 10)
-        // Value = mantissa * 10^exp where mantissa is in [1, 10)
-        var result = mantissa * pow(10.0, Double(exp))
+        // Apply exponent (powers of 100)
+        // Value = mantissa × 100^exp where mantissa is in [1, 100)
+        var result = mantissa * pow(100.0, Double(exp))
 
         // Apply sign
         if negative {
@@ -344,30 +354,23 @@ public enum BASICNumericEncoding {
 
     /// Creates the appropriate encoding for a value.
     ///
+    /// Real Atari BASIC always uses $0E + 6-byte BCD for all numeric constants.
+    /// There is no small integer prefix ($0D) in standard Atari BASIC.
+    ///
     /// - Parameter value: The numeric value to encode.
-    /// - Returns: The most efficient encoding.
+    /// - Returns: The BCD encoding for this value.
     public static func forValue(_ value: Double) -> BASICNumericEncoding {
-        // Check if it's a small non-negative integer
-        if value >= 0 && value <= 255 && value == value.rounded() {
-            return .smallInt(UInt8(value))
-        }
-
-        // Use full BCD encoding
         return .bcdFloat(BCDFloat.encode(value))
     }
 
     /// Creates the appropriate encoding from a parsed literal.
     ///
+    /// Always produces BCD encoding to match real Atari BASIC format.
+    ///
     /// - Parameter literal: The source code string.
     /// - Returns: The encoding, or nil if parsing fails.
     public static func parse(_ literal: String) -> BASICNumericEncoding? {
         guard let bcd = BCDFloat.parse(literal) else { return nil }
-
-        // Check if it can use small int encoding
-        if let smallInt = bcd.asSmallInt() {
-            return .smallInt(smallInt)
-        }
-
         return .bcdFloat(bcd)
     }
 
