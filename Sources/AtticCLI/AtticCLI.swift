@@ -411,22 +411,48 @@ struct AtticCLI {
     /// protocol commands. Everything else is sent as injected keystrokes.
     static func translateBASICCommand(_ cmd: String) -> String {
         let upper = cmd.uppercased()
+        let parts = cmd.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+        let keyword = parts.first.map { String($0).uppercased() } ?? ""
+        let args = parts.count > 1 ? String(parts[1]) : ""
 
-        // Handle LIST command - use protocol command to read and display listing
-        if upper == "LIST" || upper.hasPrefix("LIST ") {
+        switch keyword {
+        // Read-only listing via protocol (detokenizer, not screen scrape)
+        case "LIST":
             return "basic list"
+
+        // BASIC editing commands - routed to protocol handlers
+        case "DEL", "DELETE":
+            guard !args.isEmpty else { return "basic del" }  // let server report error
+            return "basic del \(args)"
+        case "STOP":
+            return "basic stop"
+        case "CONT":
+            return "basic cont"
+        case "VARS":
+            return "basic vars"
+        case "VAR":
+            guard !args.isEmpty else { return "basic var" }  // let server report error
+            return "basic var \(args)"
+        case "INFO":
+            return "basic info"
+        case "EXPORT":
+            guard !args.isEmpty else { return "basic export" }  // let server report error
+            return "basic export \(args)"
+        case "IMPORT":
+            guard !args.isEmpty else { return "basic import" }  // let server report error
+            return "basic import \(args)"
+        case "DIR":
+            return args.isEmpty ? "basic dir" : "basic dir \(args)"
+
+        default:
+            // Default: inject keys to type BASIC input via keyboard (natural input)
+            // Escape special characters and add RETURN at the end
+            let escaped = cmd
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: " ", with: "\\s")
+                .replacingOccurrences(of: "\t", with: "\\t")
+            return "inject keys \(escaped)\\n"
         }
-
-        // Handle RUN command - these are disabled on server, fall through to key injection
-        // Handle NEW command - these are disabled on server, fall through to key injection
-
-        // Default: inject keys to type BASIC input via keyboard (natural input)
-        // Escape special characters and add RETURN at the end
-        let escaped = cmd
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: " ", with: "\\s")
-            .replacingOccurrences(of: "\t", with: "\\t")
-        return "inject keys \(escaped)\\n"
     }
 
     /// Translates a DOS mode command.
@@ -488,8 +514,18 @@ struct AtticCLI {
             print("""
 
             BASIC Mode:
-              Enter BASIC lines with line numbers
-              Commands are forwarded to the emulator
+              Enter BASIC lines with line numbers (e.g. 10 PRINT "HELLO")
+              list              List program (via detokenizer)
+              del <line|range>  Delete line or range (e.g. del 30, del 10-50)
+              info              Show program size (lines, bytes, variables)
+              vars              List all variables with values
+              var <name>        Show single variable (e.g. var X, var A$)
+              stop              Send BREAK to stop running program
+              cont              Continue after BREAK
+              export <path>     Export listing to file
+              import <path>     Import listing from file
+              dir [drive]       List disk directory (default: current drive)
+              Other input is typed into the emulator as keystrokes
             """)
 
         case .dos:
