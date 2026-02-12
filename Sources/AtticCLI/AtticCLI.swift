@@ -238,13 +238,20 @@ struct AtticCLI {
                     continue
 
                 case ".shutdown":
-                    // Send shutdown command to server
-                    do {
-                        _ = try await client.send(.shutdown)
-                    } catch {
-                        // Ignore errors on shutdown
+                    if let pid = launchedServerPid {
+                        // We launched the server — shut it down
+                        do {
+                            _ = try await client.send(.shutdown)
+                        } catch {
+                            // Ignore errors on shutdown
+                        }
+                        // Ensure the process is terminated
+                        kill(pid, SIGTERM)
+                        print("Shutting down server (PID: \(pid))")
+                    } else {
+                        // Server was already running — just disconnect
+                        print("Server was not launched by this session, leaving it running.")
                     }
-                    print("Shutting down")
                     shouldContinue = false
                     continue
 
@@ -503,6 +510,11 @@ struct AtticCLI {
     /// The socket client for CLI communication.
     @MainActor static var socketClient: CLISocketClient?
 
+    /// PID of the server process if this CLI session launched it.
+    /// Nil means the server was already running when we connected.
+    /// Access is sequential: set during launch (before REPL), read on shutdown.
+    nonisolated(unsafe) static var launchedServerPid: Int32?
+
     /// Connects to AtticServer via Unix socket.
     ///
     /// - Parameter path: Path to the Unix socket.
@@ -533,6 +545,7 @@ struct AtticCLI {
         switch launcher.launchServer(options: options) {
         case .success(let socketPath, let pid):
             print("AtticServer started (PID: \(pid))")
+            launchedServerPid = pid
             return socketPath
 
         case .executableNotFound:
