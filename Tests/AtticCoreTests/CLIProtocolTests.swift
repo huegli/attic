@@ -1182,6 +1182,16 @@ final class CLIProtocolTests: XCTestCase {
         XCTAssertEqual(name, "X")
     }
 
+    func testParseBasicVarString() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("basic var A$")
+        guard case .basicVar(let name) = command else {
+            XCTFail("Expected .basicVar, got \(command)")
+            return
+        }
+        XCTAssertEqual(name, "A$")
+    }
+
     func testParseBasicVarMissingName() {
         let parser = CLICommandParser()
         XCTAssertThrowsError(try parser.parse("basic var")) { error in
