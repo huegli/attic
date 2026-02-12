@@ -611,23 +611,54 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
         case .basicRun:
             return .error("BASIC RUN injection is disabled. Use keyboard input instead.")
 
-        // BASIC editing commands — stubs, implementation in attic-vb1
-        case .basicDelete:
-            return .error("BASIC DEL not yet implemented")
+        // BASIC editing commands
+        case .basicDelete(let lineOrRange):
+            let result = await basicHandler.deleteLines(lineOrRange: lineOrRange)
+            return result.success ? .ok(result.message) : .error(result.message)
+
         case .basicStop:
             return .error("BASIC STOP not yet implemented")
+
         case .basicCont:
-            return .error("BASIC CONT not yet implemented")
+            let result = await basicHandler.continueProgram()
+            return .ok(result.message)
+
         case .basicVars:
-            return .error("BASIC VARS not yet implemented")
-        case .basicVar:
-            return .error("BASIC VAR not yet implemented")
+            let variables = await basicHandler.listVariablesWithValues()
+            if variables.isEmpty {
+                return .ok("(no variables)")
+            }
+            let lines = variables.map { "\($0.name.fullName) = \($0.value)" }
+            return .okMultiLine(lines)
+
+        case .basicVar(let name):
+            if let value = await basicHandler.readVariableValue(name: name) {
+                let varName = BASICVariableName.parse(name)
+                return .ok("\(varName?.fullName ?? name) = \(value)")
+            } else {
+                return .error("Variable not found: \(name)")
+            }
+
         case .basicInfo:
-            return .error("BASIC INFO not yet implemented")
-        case .basicExport:
-            return .error("BASIC EXPORT not yet implemented")
-        case .basicImport:
-            return .error("BASIC IMPORT not yet implemented")
+            let info = await basicHandler.getProgramInfo()
+            return .ok("\(info.lines) lines, \(info.bytes) bytes, \(info.variables) variables")
+
+        case .basicExport(let path):
+            do {
+                let message = try await basicHandler.exportProgram(to: path)
+                return .ok(message)
+            } catch {
+                return .error(error.localizedDescription)
+            }
+
+        case .basicImport(let path):
+            do {
+                let result = try await basicHandler.importProgram(from: path)
+                return result.success ? .ok(result.message) : .error(result.message)
+            } catch {
+                return .error(error.localizedDescription)
+            }
+
         case .basicDir:
             return .error("BASIC DIR not yet implemented")
 

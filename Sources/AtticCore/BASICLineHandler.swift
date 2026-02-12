@@ -456,6 +456,108 @@ public actor BASICLineHandler {
     }
 
     // =========================================================================
+    // MARK: - Range Deletion
+    // =========================================================================
+
+    /// Parses a line number or range string (e.g., "10" or "10-50").
+    ///
+    /// Supports two formats:
+    /// - Single line: "10" → deletes line 10
+    /// - Range: "10-50" → deletes lines 10 through 50 inclusive
+    ///
+    /// - Parameter input: The line/range string from the user.
+    /// - Returns: A tuple of (start, end) line numbers, or nil if invalid.
+    private func parseLineRange(_ input: String) -> (start: UInt16, end: UInt16)? {
+        let trimmed = input.trimmingCharacters(in: .whitespaces)
+
+        if let dashIndex = trimmed.firstIndex(of: "-") {
+            // Range format: "10-50"
+            let startStr = String(trimmed[trimmed.startIndex..<dashIndex])
+            let endStr = String(trimmed[trimmed.index(after: dashIndex)..<trimmed.endIndex])
+            guard let start = UInt16(startStr), let end = UInt16(endStr),
+                  start <= end, start <= 32767, end <= 32767 else {
+                return nil
+            }
+            return (start, end)
+        } else {
+            // Single line: "10"
+            guard let lineNum = UInt16(trimmed), lineNum <= 32767 else {
+                return nil
+            }
+            return (lineNum, lineNum)
+        }
+    }
+
+    /// Deletes one or more BASIC lines by line number or range.
+    ///
+    /// Supports single line ("10") or range ("10-50"). Lines are stored
+    /// sorted in the statement table, so matching lines form a contiguous
+    /// block. A single memory shift removes the entire block efficiently.
+    ///
+    /// - Parameter lineOrRange: A line number or "start-end" range string.
+    /// - Returns: The result of the deletion operation.
+    public func deleteLines(lineOrRange: String) async -> BASICLineResult {
+        guard let range = parseLineRange(lineOrRange) else {
+            return .error("Invalid line range: \(lineOrRange)")
+        }
+
+        let state = await readMemoryState()
+
+        // Scan statement table to find the contiguous block of matching lines.
+        // Lines are sorted by number, so all matches are adjacent in memory.
+        var blockStart: UInt16? = nil
+        var blockEnd: UInt16? = nil
+        var address = state.stmtab
+        var deletedCount = 0
+
+        while address < state.starp {
+            let lineNum = await emulator.readWord(at: address)
+            if lineNum == 0 { break }
+
+            let lineLength = Int(await emulator.readMemoryBlock(
+                at: address + 2, count: 1
+            ).first ?? 0)
+
+            if lineNum >= range.start && lineNum <= range.end {
+                if blockStart == nil {
+                    blockStart = address
+                }
+                blockEnd = address &+ UInt16(lineLength)
+                deletedCount += 1
+            } else if lineNum > range.end {
+                break
+            }
+
+            address = address &+ UInt16(lineLength)
+        }
+
+        // If no lines matched, return gracefully
+        guard let start = blockStart, let end = blockEnd, deletedCount > 0 else {
+            if range.start == range.end {
+                return .deleted(lineNumber: range.start)
+            }
+            return .immediate("No lines in range \(range.start)-\(range.end)")
+        }
+
+        let blockSize = Int(end - start)
+
+        await emulator.pause()
+
+        // Single memory shift removes the entire contiguous block
+        await shiftMemory(from: end, by: -blockSize, until: state.starp)
+
+        let newStarp = UInt16(Int(state.starp) - blockSize)
+        await emulator.writeWord(at: BASICPointers.starp, value: newStarp)
+
+        await emulator.resume()
+
+        if range.start == range.end {
+            return .deleted(lineNumber: range.start)
+        }
+        return .immediate("Deleted \(deletedCount) lines (\(range.start)-\(range.end))")
+    }
+
+    // =========================================================================
     // MARK: - Program Commands
     // =========================================================================
 
@@ -611,6 +713,216 @@ public actor BASICLineHandler {
 
         let vntBytes = await emulator.readMemoryBlock(at: state.vntp, count: vntSize)
         return BASICVariableTable.parseVNT(from: vntBytes)
+    }
+
+    // =========================================================================
+    // MARK: - Variable Values
+    // =========================================================================
+
+    /// Decodes a variable value from its 8-byte VVT entry.
+    ///
+    /// The VVT stores different data depending on variable type:
+    /// - Numeric: 6-byte BCD float at bytes 0-5
+    /// - String: buffer address (0-1), DIM capacity (2-3), current length (4-5)
+    /// - Numeric array: offset (0-1), first dim+1 (2-3), second dim+1 (4-5)
+    /// - String array: offset (0-1), dim+1 (2-3), unused (4-7)
+    ///
+    /// - Parameters:
+    ///   - vvtEntry: The 8 raw bytes from the VVT for this variable.
+    ///   - type: The variable type from the VNT.
+    /// - Returns: A human-readable string representation of the value.
+    private func decodeVariableValue(vvtEntry: [UInt8], type: BASICVariableType) async -> String {
+        guard vvtEntry.count == 8 else { return "?" }
+
+        switch type {
+        case .numeric:
+            // First 6 bytes are the BCD floating-point representation
+            let bcdBytes = Array(vvtEntry[0..<6])
+            let bcd = BCDFloat(bytes: bcdBytes)
+            return bcd.decimalString
+
+        case .string:
+            // Atari BASIC string VVT layout:
+            // bytes 0-1: buffer address, bytes 2-3: DIM capacity, bytes 4-5: current length
+            let address = UInt16(vvtEntry[0]) | (UInt16(vvtEntry[1]) << 8)
+            let currentLength = UInt16(vvtEntry[4]) | (UInt16(vvtEntry[5]) << 8)
+            if currentLength == 0 || address == 0 {
+                return "\"\""
+            }
+            // Read up to 256 chars of the actual string content from memory
+            let readLen = Int(min(currentLength, 256))
+            let stringBytes = await emulator.readMemoryBlock(at: address, count: readLen)
+            // Convert ATASCII to printable characters (basic ASCII range)
+            let chars = stringBytes.map { byte -> Character in
+                if byte >= 32 && byte < 127 {
+                    return Character(UnicodeScalar(byte))
+                } else {
+                    return "."
+                }
+            }
+            return "\"\(String(chars))\""
+
+        case .numericArray:
+            // Atari BASIC stores dimensions as size+1
+            // bytes 0-1: offset from STARP, bytes 2-3: dim1+1, bytes 4-5: dim2+1
+            let dim1 = UInt16(vvtEntry[2]) | (UInt16(vvtEntry[3]) << 8)
+            let dim2 = UInt16(vvtEntry[4]) | (UInt16(vvtEntry[5]) << 8)
+            if dim2 <= 1 {
+                return "DIM(\(dim1 > 0 ? dim1 - 1 : 0))"
+            } else {
+                return "DIM(\(dim1 > 0 ? dim1 - 1 : 0),\(dim2 > 0 ? dim2 - 1 : 0))"
+            }
+
+        case .stringArray:
+            // String arrays use DIM for capacity
+            let dim1 = UInt16(vvtEntry[2]) | (UInt16(vvtEntry[3]) << 8)
+            return "DIM$(\(dim1 > 0 ? dim1 - 1 : 0))"
+        }
+    }
+
+    /// Lists all variables with their current values.
+    ///
+    /// Reads variable names from the VNT and their corresponding 8-byte
+    /// entries from the VVT, decoding each value based on its type.
+    ///
+    /// - Returns: Array of (name, value) pairs for all defined variables.
+    public func listVariablesWithValues() async -> [(name: BASICVariableName, value: String)] {
+        let state = await readMemoryState()
+        let names = await readVariableNames(state: state)
+
+        guard !names.isEmpty else { return [] }
+
+        // Read the entire VVT block (8 bytes per variable)
+        let vvtSize = state.variableCount * BASICMemoryDefaults.vvtEntrySize
+        guard vvtSize > 0 else { return [] }
+
+        let vvtBytes = await emulator.readMemoryBlock(at: state.vvtp, count: vvtSize)
+
+        var results: [(name: BASICVariableName, value: String)] = []
+
+        for (index, name) in names.enumerated() {
+            let entryStart = index * BASICMemoryDefaults.vvtEntrySize
+            let entryEnd = entryStart + BASICMemoryDefaults.vvtEntrySize
+            guard entryEnd <= vvtBytes.count else { break }
+
+            let entry = Array(vvtBytes[entryStart..<entryEnd])
+            let value = await decodeVariableValue(vvtEntry: entry, type: name.type)
+            results.append((name: name, value: value))
+        }
+
+        return results
+    }
+
+    /// Reads the value of a single variable by name.
+    ///
+    /// Parses the variable name string, finds it in the VNT by matching
+    /// both name and type, then reads and decodes its VVT entry.
+    ///
+    /// - Parameter name: The variable name (e.g., "X", "A$", "SCORE").
+    /// - Returns: The variable's value as a string, or nil if not found.
+    public func readVariableValue(name: String) async -> String? {
+        guard let varName = BASICVariableName.parse(name) else {
+            return nil
+        }
+
+        let state = await readMemoryState()
+        let names = await readVariableNames(state: state)
+
+        guard let index = names.firstIndex(of: varName) else {
+            return nil
+        }
+
+        // Read the specific 8-byte VVT entry for this variable
+        let entryAddress = state.vvtp + UInt16(index * BASICMemoryDefaults.vvtEntrySize)
+        let entry = await emulator.readMemoryBlock(
+            at: entryAddress, count: BASICMemoryDefaults.vvtEntrySize
+        )
+        guard entry.count == BASICMemoryDefaults.vvtEntrySize else { return nil }
+
+        return await decodeVariableValue(vvtEntry: entry, type: varName.type)
+    }
+
+    // =========================================================================
+    // MARK: - Export / Import
+    // =========================================================================
+
+    /// Exports the current BASIC program to a file as detokenized text.
+    ///
+    /// Uses `listProgram()` to get the human-readable listing and writes
+    /// it to the specified path as UTF-8 text. Each line in the output
+    /// file is a complete BASIC statement with its line number.
+    ///
+    /// - Parameter path: The file path to write to (tilde is expanded).
+    /// - Returns: A summary message with the number of lines exported.
+    /// - Throws: File I/O errors if the path is not writable.
+    public func exportProgram(to path: String) async throws -> String {
+        let listing = await listProgram(range: nil)
+        guard !listing.isEmpty else {
+            return "No program to export"
+        }
+
+        let expandedPath = (path as NSString).expandingTildeInPath
+        try listing.write(toFile: expandedPath, atomically: true, encoding: .utf8)
+
+        let lineCount = listing.components(separatedBy: "\n").filter { !$0.isEmpty }.count
+        return "Exported \(lineCount) lines to \(expandedPath)"
+    }
+
+    /// Imports a BASIC program from a text file.
+    ///
+    /// Reads each line from the file and enters it via `enterLine()`.
+    /// The file should contain one BASIC statement per line with line numbers.
+    /// Does NOT clear the existing program first — call NEW explicitly
+    /// before importing if a clean slate is desired.
+    ///
+    /// - Parameter path: The file path to read from (tilde is expanded).
+    /// - Returns: A result with success/error counts.
+    /// - Throws: File I/O errors if the file cannot be read.
+    public func importProgram(from path: String) async throws -> BASICLineResult {
+        let expandedPath = (path as NSString).expandingTildeInPath
+
+        guard FileManager.default.fileExists(atPath: expandedPath) else {
+            return .error("File not found: \(expandedPath)")
+        }
+
+        let content = try String(contentsOfFile: expandedPath, encoding: .utf8)
+        let lines = content.components(separatedBy: .newlines).filter { !$0.isEmpty }
+
+        guard !lines.isEmpty else {
+            return .error("File is empty: \(expandedPath)")
+        }
+
+        var successCount = 0
+        var errorCount = 0
+        var errors: [String] = []
+
+        for line in lines {
+            let result = await enterLine(line)
+            if result.success {
+                successCount += 1
+            } else {
+                errorCount += 1
+                // Collect up to 5 error messages for reporting
+                if errors.count < 5 {
+                    errors.append(result.message)
+                }
+            }
+        }
+
+        var message = "Imported \(successCount) lines from \(expandedPath)"
+        if errorCount > 0 {
+            message += ", \(errorCount) errors"
+            if !errors.isEmpty {
+                message += ": " + errors.joined(separator: "; ")
+            }
+        }
+
+        return BASICLineResult(
+            success: errorCount == 0,
+            message: message,
+            lineNumber: nil,
+            bytesUsed: nil
+        )
     }
 }
 
