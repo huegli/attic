@@ -843,6 +843,427 @@ public actor BASICLineHandler {
     }
 
     // =========================================================================
+    // MARK: - Renumber
+    // =========================================================================
+
+    /// Renumbers all lines in the current BASIC program.
+    ///
+    /// This rewrites both the 2-byte line number in each statement header and
+    /// any BCD line-number constants in GOTO, GO TO, GOSUB, TRAP, RESTORE, and
+    /// ON...GOTO/GOSUB expressions. Because BCD constants are always 6 bytes,
+    /// replacing a line number never changes program size — no memory shifting
+    /// is required.
+    ///
+    /// - Parameters:
+    ///   - start: First new line number (default 10).
+    ///   - step: Increment between lines (default 10).
+    /// - Returns: Result indicating success or error.
+    public func renumberProgram(start: Int?, step: Int?) async -> BASICLineResult {
+        let startNum = start ?? 10
+        let stepNum = step ?? 10
+
+        guard startNum >= 0, startNum <= 32767 else {
+            return .error("Start line must be 0-32767")
+        }
+        guard stepNum > 0 else {
+            return .error("Step must be greater than 0")
+        }
+
+        let state = await readMemoryState()
+
+        // Phase 1: Collect all existing line entries (address + line number)
+        var entries: [(address: UInt16, lineNumber: UInt16, length: Int)] = []
+        var address = state.stmtab
+
+        while address < state.starp {
+            let lineNum = await emulator.readWord(at: address)
+            if lineNum == 0 { break }  // End of program marker
+
+            let lineLength = Int(await emulator.readMemoryBlock(at: address + 2, count: 1).first ?? 0)
+            guard lineLength > 0 else { break }  // Safety: avoid infinite loop
+
+            entries.append((address: address, lineNumber: lineNum, length: lineLength))
+            address = address &+ UInt16(lineLength)
+        }
+
+        guard !entries.isEmpty else {
+            return .error("No program to renumber")
+        }
+
+        // Phase 2: Generate new line numbers and validate
+        let lastNewLine = startNum + (entries.count - 1) * stepNum
+        guard lastNewLine <= 32767 else {
+            return .error("Renumber would exceed line 32767 (last line would be \(lastNewLine))")
+        }
+
+        // Phase 3: Build old→new mapping
+        var mapping: [UInt16: UInt16] = [:]
+        for (index, entry) in entries.enumerated() {
+            let newLineNum = UInt16(startNum + index * stepNum)
+            mapping[entry.lineNumber] = newLineNum
+        }
+
+        // Phase 4: Apply changes (pause emulator for atomic memory updates)
+        await emulator.pause()
+
+        for (index, entry) in entries.enumerated() {
+            let newLineNum = UInt16(startNum + index * stepNum)
+
+            // Update the 2-byte line number header
+            await emulator.writeWord(at: entry.address, value: newLineNum)
+
+            // Scan expression bytes for line number references and update them
+            await updateLineReferences(
+                at: entry.address,
+                lineLength: entry.length,
+                mapping: mapping
+            )
+        }
+
+        await emulator.resume()
+
+        return .immediate("Renumbered \(entries.count) lines (\(startNum)-\(lastNewLine), step \(stepNum))")
+    }
+
+    /// Scans a single tokenized statement for BCD line-number references and
+    /// replaces them using the old→new mapping.
+    ///
+    /// Only certain statement types contain line-number references:
+    /// - GOTO ($0A), GO TO ($0B), GOSUB ($0C), TRAP ($0D): all BCD constants
+    ///   in the expression are line numbers
+    /// - RESTORE ($23): the optional BCD constant (if present) is a line number
+    /// - ON ($1E): after finding gotoInOn ($17) or gosubInOn ($18) operator,
+    ///   all subsequent BCD constants are line numbers
+    ///
+    /// - Parameters:
+    ///   - address: Start address of the line in memory.
+    ///   - lineLength: Total length of the line (including header).
+    ///   - mapping: Old line number → new line number dictionary.
+    private func updateLineReferences(
+        at address: UInt16,
+        lineLength: Int,
+        mapping: [UInt16: UInt16]
+    ) async {
+        // Read the full line bytes
+        let bytes = await emulator.readMemoryBlock(at: address, count: lineLength)
+        guard bytes.count >= BASICLineFormat.headerSize else { return }
+
+        // The statement token is at offset 3 (after line# and length bytes)
+        // Actually in Atari BASIC, offset 2 is length, offset 3 is the statement
+        // offset to next statement. The statement token is at offset
+        // BASICLineFormat.contentOffset (4). Wait — let me re-check.
+        //
+        // Atari BASIC line format:
+        // [0-1] line number (2 bytes, little-endian)
+        // [2]   total line length (1 byte)
+        // [3]   offset to next statement within line (for multi-statement lines)
+        // [4]   statement token
+        // [5..] expression bytes
+        // [n]   end-of-line marker (0x16)
+        //
+        // For multi-statement lines (using : separator), each statement has its own
+        // statement token. We scan the whole expression area.
+
+        var pos = BASICLineFormat.contentOffset  // Start at statement token
+
+        while pos < bytes.count {
+            let byte = bytes[pos]
+
+            // End of line marker
+            if byte == BASICLineFormat.endOfLineMarker {
+                break
+            }
+
+            // Check if this is a statement token position
+            // The first byte after the header and after each statement boundary is
+            // a statement token
+            let stmtToken = byte
+
+            // Determine if this statement type has line-number references
+            let hasLineRefs: Bool
+            let isOnStatement: Bool
+
+            switch stmtToken {
+            case BASICStatementToken.goto.rawValue,
+                 BASICStatementToken.goTo.rawValue,
+                 BASICStatementToken.gosub.rawValue,
+                 BASICStatementToken.trap.rawValue,
+                 BASICStatementToken.restore.rawValue:
+                hasLineRefs = true
+                isOnStatement = false
+            case BASICStatementToken.on.rawValue:
+                hasLineRefs = true
+                isOnStatement = true
+            default:
+                hasLineRefs = false
+                isOnStatement = false
+            }
+
+            pos += 1  // Move past statement token
+
+            if hasLineRefs && !isOnStatement {
+                // All BCD constants in this statement's expression are line numbers
+                await replaceAllBCDLineRefs(
+                    lineAddress: address,
+                    bytes: bytes,
+                    startPos: pos,
+                    mapping: mapping
+                )
+            } else if isOnStatement {
+                // ON statement: BCD constants after gotoInOn/gosubInOn are line numbers
+                await replaceOnStatementLineRefs(
+                    lineAddress: address,
+                    bytes: bytes,
+                    startPos: pos,
+                    mapping: mapping
+                )
+            }
+
+            // Skip to the next statement or end of line
+            // Walk through expression bytes to find end-of-line or next statement
+            while pos < bytes.count {
+                let b = bytes[pos]
+                if b == BASICLineFormat.endOfLineMarker {
+                    break
+                } else if b == BASICSpecialToken.bcdFloatPrefix {
+                    pos += 7  // $0E + 6 BCD bytes
+                } else if b == BASICSpecialToken.smallIntPrefix {
+                    pos += 2  // $0D + 1 value byte
+                } else if b == BASICSpecialToken.stringPrefix {
+                    // $0F + length byte + string bytes
+                    if pos + 1 < bytes.count {
+                        let strLen = Int(bytes[pos + 1])
+                        pos += 2 + strLen
+                    } else {
+                        pos += 1
+                    }
+                } else {
+                    pos += 1
+                }
+            }
+        }
+    }
+
+    /// Replaces all BCD constants in a statement expression that match known
+    /// line numbers. Used for GOTO, GO TO, GOSUB, TRAP, RESTORE.
+    private func replaceAllBCDLineRefs(
+        lineAddress: UInt16,
+        bytes: [UInt8],
+        startPos: Int,
+        mapping: [UInt16: UInt16]
+    ) async {
+        var pos = startPos
+
+        while pos < bytes.count {
+            let b = bytes[pos]
+            if b == BASICLineFormat.endOfLineMarker { break }
+
+            if b == BASICSpecialToken.bcdFloatPrefix && pos + 6 < bytes.count {
+                // Decode the BCD constant to see if it's a known line number
+                let bcdBytes = Array(bytes[(pos + 1)...(pos + 6)])
+                let bcd = BCDFloat(bytes: bcdBytes)
+                let value = bcd.decode()
+                let intValue = Int(value.rounded())
+
+                if intValue >= 0, intValue <= 32767,
+                   let newLineNum = mapping[UInt16(intValue)] {
+                    // Encode the new line number as BCD and write it
+                    let newBCD = BCDFloat.encode(Double(newLineNum))
+                    let memAddr = lineAddress &+ UInt16(pos + 1)
+                    await emulator.writeMemoryBlock(at: memAddr, bytes: newBCD.bytes)
+                }
+                pos += 7
+            } else if b == BASICSpecialToken.smallIntPrefix {
+                pos += 2
+            } else if b == BASICSpecialToken.stringPrefix {
+                if pos + 1 < bytes.count {
+                    pos += 2 + Int(bytes[pos + 1])
+                } else {
+                    pos += 1
+                }
+            } else {
+                pos += 1
+            }
+        }
+    }
+
+    /// Replaces BCD line-number constants in an ON...GOTO/GOSUB statement.
+    ///
+    /// In an ON expression, only BCD constants that appear AFTER a gotoInOn
+    /// ($17) or gosubInOn ($18) operator are line numbers. Constants before
+    /// that point are part of the ON expression itself.
+    private func replaceOnStatementLineRefs(
+        lineAddress: UInt16,
+        bytes: [UInt8],
+        startPos: Int,
+        mapping: [UInt16: UInt16]
+    ) async {
+        var pos = startPos
+        var afterGotoGosub = false
+
+        while pos < bytes.count {
+            let b = bytes[pos]
+            if b == BASICLineFormat.endOfLineMarker { break }
+
+            // Check for gotoInOn or gosubInOn operator
+            if b == BASICOperatorToken.gotoInOn.rawValue ||
+               b == BASICOperatorToken.gosubInOn.rawValue {
+                afterGotoGosub = true
+                pos += 1
+                continue
+            }
+
+            if b == BASICSpecialToken.bcdFloatPrefix && pos + 6 < bytes.count {
+                if afterGotoGosub {
+                    // This BCD constant is a line number reference
+                    let bcdBytes = Array(bytes[(pos + 1)...(pos + 6)])
+                    let bcd = BCDFloat(bytes: bcdBytes)
+                    let value = bcd.decode()
+                    let intValue = Int(value.rounded())
+
+                    if intValue >= 0, intValue <= 32767,
+                       let newLineNum = mapping[UInt16(intValue)] {
+                        let newBCD = BCDFloat.encode(Double(newLineNum))
+                        let memAddr = lineAddress &+ UInt16(pos + 1)
+                        await emulator.writeMemoryBlock(at: memAddr, bytes: newBCD.bytes)
+                    }
+                }
+                pos += 7
+            } else if b == BASICSpecialToken.smallIntPrefix {
+                pos += 2
+            } else if b == BASICSpecialToken.stringPrefix {
+                if pos + 1 < bytes.count {
+                    pos += 2 + Int(bytes[pos + 1])
+                } else {
+                    pos += 1
+                }
+            } else {
+                pos += 1
+            }
+        }
+    }
+
+    // =========================================================================
+    // MARK: - Save / Load (ATR Disk)
+    // =========================================================================
+
+    /// Gets the raw tokenized BASIC program as binary data suitable for saving.
+    ///
+    /// The format mirrors real Atari BASIC's SAVE command: the entire memory
+    /// region from LOMEM to STARP is dumped as raw bytes. A 14-byte header
+    /// records the seven BASIC pointers (VNTP through STARP) as relative
+    /// offsets from LOMEM so the program can be loaded at any LOMEM address.
+    ///
+    /// Header format (14 bytes, 7 little-endian UInt16):
+    ///   [0-1]  VNTP offset from LOMEM
+    ///   [2-3]  VNTD offset from LOMEM
+    ///   [4-5]  VVTP offset from LOMEM
+    ///   [6-7]  STMTAB offset from LOMEM
+    ///   [8-9]  STMCUR offset from LOMEM
+    ///   [10-11] STARP offset from LOMEM
+    ///   [12-13] RUNSTK offset from LOMEM (typically same as MEMTOP−LOMEM)
+    /// Followed by raw bytes from LOMEM to STARP.
+    ///
+    /// - Returns: The binary data, or nil if no program exists.
+    public func getRawProgram() async -> Data? {
+        let state = await readMemoryState()
+
+        let programRegionSize = Int(state.starp - state.lomem)
+        guard programRegionSize > 0 else { return nil }
+
+        // Read the entire LOMEM-to-STARP region
+        let rawBytes = await emulator.readMemoryBlock(at: state.lomem, count: programRegionSize)
+
+        // Build the header with relative offsets from LOMEM
+        var header = Data(capacity: 14)
+        let offsets: [UInt16] = [
+            state.vntp - state.lomem,
+            state.vntd - state.lomem,
+            state.vvtp - state.lomem,
+            state.stmtab - state.lomem,
+            state.stmcur - state.lomem,
+            state.starp - state.lomem,
+            state.runstk - state.lomem,
+        ]
+
+        for offset in offsets {
+            header.append(UInt8(offset & 0xFF))
+            header.append(UInt8(offset >> 8))
+        }
+
+        var data = header
+        data.append(contentsOf: rawBytes)
+        return data
+    }
+
+    /// Loads a raw tokenized BASIC program from binary data.
+    ///
+    /// Reads the 14-byte header to recover relative pointer offsets, writes
+    /// the raw bytes starting at LOMEM, and updates all BASIC pointers.
+    /// The program is loaded at the current LOMEM address regardless of where
+    /// it was saved from.
+    ///
+    /// - Parameter data: Binary data from `getRawProgram()`.
+    /// - Returns: Result indicating success or error.
+    public func loadRawProgram(data: Data) async -> BASICLineResult {
+        // Minimum size: 14-byte header + at least 3 bytes (end-of-program marker)
+        guard data.count >= 17 else {
+            return .error("Invalid BASIC program data (too small)")
+        }
+
+        // Parse header (7 little-endian UInt16 offsets)
+        let headerBytes = [UInt8](data[0..<14])
+        var offsets: [UInt16] = []
+        for i in stride(from: 0, to: 14, by: 2) {
+            let value = UInt16(headerBytes[i]) | (UInt16(headerBytes[i + 1]) << 8)
+            offsets.append(value)
+        }
+
+        let vntpOff = offsets[0]
+        let vntdOff = offsets[1]
+        let vvtpOff = offsets[2]
+        let stmtabOff = offsets[3]
+        let stmcurOff = offsets[4]
+        let starpOff = offsets[5]
+        // offsets[6] = runstk offset (not used — we keep current RUNSTK)
+
+        // Raw program bytes (everything after the 14-byte header)
+        let rawBytes = [UInt8](data[14...])
+
+        // Verify starp offset matches raw data size
+        guard Int(starpOff) == rawBytes.count else {
+            return .error("Invalid BASIC program data (size mismatch: header says \(starpOff) bytes, got \(rawBytes.count))")
+        }
+
+        let state = await readMemoryState()
+        let lomem = state.lomem
+
+        // Check if the program fits in available memory
+        let newStarp = lomem &+ starpOff
+        guard Int(newStarp) < Int(state.memtop) - 256 else {
+            return .error("Program too large to fit in memory")
+        }
+
+        await emulator.pause()
+
+        // Write the raw program bytes starting at LOMEM
+        await emulator.writeMemoryBlock(at: lomem, bytes: rawBytes)
+
+        // Update all BASIC pointers using LOMEM + relative offsets
+        await emulator.writeWord(at: BASICPointers.vntp, value: lomem &+ vntpOff)
+        await emulator.writeWord(at: BASICPointers.vntd, value: lomem &+ vntdOff)
+        await emulator.writeWord(at: BASICPointers.vvtp, value: lomem &+ vvtpOff)
+        await emulator.writeWord(at: BASICPointers.stmtab, value: lomem &+ stmtabOff)
+        await emulator.writeWord(at: BASICPointers.stmcur, value: lomem &+ stmcurOff)
+        await emulator.writeWord(at: BASICPointers.starp, value: newStarp)
+        // Keep RUNSTK and MEMTOP at their current values
+
+        await emulator.resume()
+
+        return .immediate("Loaded \(rawBytes.count) bytes")
+    }
+
+    // =========================================================================
     // MARK: - Export / Import
     // =========================================================================
 

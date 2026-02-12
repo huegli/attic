@@ -443,6 +443,14 @@ struct AtticCLI {
             return "basic import \(args)"
         case "DIR":
             return args.isEmpty ? "basic dir" : "basic dir \(args)"
+        case "RENUM", "RENUMBER":
+            return args.isEmpty ? "basic renum" : "basic renum \(args)"
+        case "SAVE":
+            guard !args.isEmpty else { return "basic save" }  // let server report error
+            return "basic save \(args)"
+        case "LOAD":
+            guard !args.isEmpty else { return "basic load" }  // let server report error
+            return "basic load \(args)"
 
         default:
             // Default: inject keys to type BASIC input via keyboard (natural input)
@@ -517,11 +525,14 @@ struct AtticCLI {
               Enter BASIC lines with line numbers (e.g. 10 PRINT "HELLO")
               list              List program (via detokenizer)
               del <line|range>  Delete line or range (e.g. del 30, del 10-50)
+              renum [s] [step]  Renumber lines (default: start 10, step 10)
               info              Show program size (lines, bytes, variables)
               vars              List all variables with values
               var <name>        Show single variable (e.g. var X, var A$)
               stop              Send BREAK to stop running program
               cont              Continue after BREAK
+              save D:FILE       Save program to ATR disk (e.g. save D:TEST)
+              load D:FILE       Load program from ATR disk (e.g. load D:TEST)
               export <path>     Export listing to file
               import <path>     Import listing from file
               dir [drive]       List disk directory (default: current drive)

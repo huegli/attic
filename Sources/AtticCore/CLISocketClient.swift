@@ -578,6 +578,21 @@ public actor CLISocketClient {
                 return "basic DIR \(d)"
             }
             return "basic DIR"
+        case .basicRenumber(let start, let step):
+            var cmd = "basic RENUM"
+            if let s = start { cmd += " \(s)" }
+            if let st = step { cmd += " \(st)" }
+            return cmd
+        case .basicSave(let drive, let filename):
+            if let d = drive {
+                return "basic SAVE D\(d):\(filename)"
+            }
+            return "basic SAVE D:\(filename)"
+        case .basicLoad(let drive, let filename):
+            if let d = drive {
+                return "basic LOAD D\(d):\(filename)"
+            }
+            return "basic LOAD D:\(filename)"
         }
     }
 

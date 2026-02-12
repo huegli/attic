@@ -186,6 +186,12 @@ public enum CLICommand: Sendable {
     case basicImport(path: String)
     /// List files on a disk drive (1-8). Nil means the default drive.
     case basicDir(drive: Int?)
+    /// Renumber BASIC program lines, optionally specifying start and step.
+    case basicRenumber(start: Int?, step: Int?)
+    /// Save tokenized BASIC program to an ATR disk file.
+    case basicSave(drive: Int?, filename: String)
+    /// Load tokenized BASIC program from an ATR disk file.
+    case basicLoad(drive: Int?, filename: String)
 }
 
 // =============================================================================
@@ -745,10 +751,86 @@ public struct CLICommandParser: Sendable {
                 throw CLIProtocolError.invalidDriveNumber(rest)
             }
             return .basicDir(drive: drive)
+        case "RENUM", "RENUMBER":
+            return try parseBasicRenum(rest)
+        case "SAVE":
+            guard !rest.isEmpty else {
+                throw CLIProtocolError.missingArgument("basic save requires a filename (e.g., D:TEST or D2:FILE)")
+            }
+            let (drive, filename) = parseDrivePrefix(rest)
+            return .basicSave(drive: drive, filename: filename)
+        case "LOAD":
+            guard !rest.isEmpty else {
+                throw CLIProtocolError.missingArgument("basic load requires a filename (e.g., D:TEST or D2:FILE)")
+            }
+            let (drive, filename) = parseDrivePrefix(rest)
+            return .basicLoad(drive: drive, filename: filename)
         default:
             // Anything else is a numbered BASIC line (e.g., "10 PRINT X")
             return .basicLine(line: trimmed)
         }
+    }
+
+    // MARK: - BASIC Command Helpers
+
+    /// Parses the RENUM subcommand arguments.
+    ///
+    /// Formats:
+    /// - `RENUM` - renumber with defaults (start=10, step=10)
+    /// - `RENUM 100` - start at 100, step=10
+    /// - `RENUM 100 20` - start at 100, step 20
+    private func parseBasicRenum(_ args: String) throws -> CLICommand {
+        let trimmed = args.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty {
+            return .basicRenumber(start: nil, step: nil)
+        }
+
+        let parts = trimmed.split(separator: " ", omittingEmptySubsequences: true)
+        guard let start = Int(parts[0]), start >= 0 else {
+            throw CLIProtocolError.invalidValue(String(parts[0]))
+        }
+
+        var step: Int? = nil
+        if parts.count > 1 {
+            guard let s = Int(parts[1]), s > 0 else {
+                throw CLIProtocolError.invalidValue(String(parts[1]))
+            }
+            step = s
+        }
+
+        return .basicRenumber(start: start, step: step)
+    }
+
+    /// Parses a `Dn:FILENAME` prefix to extract drive number and filename.
+    ///
+    /// Supports formats:
+    /// - `D:FILE` → drive nil (default), filename "FILE"
+    /// - `D1:FILE` → drive 1, filename "FILE"
+    /// - `D2:FILE` → drive 2, filename "FILE"
+    /// - `FILE` → drive nil, filename "FILE"
+    private func parseDrivePrefix(_ input: String) -> (drive: Int?, filename: String) {
+        let upper = input.uppercased()
+
+        // Match D: or Dn: prefix
+        if upper.hasPrefix("D") && upper.count > 1 {
+            let afterD = upper.dropFirst()
+            if afterD.hasPrefix(":") {
+                // D:FILENAME — default drive
+                let filename = String(input.dropFirst(2))
+                return (nil, filename)
+            }
+            if let colonIndex = afterD.firstIndex(of: ":") {
+                let driveStr = String(afterD[afterD.startIndex..<colonIndex])
+                if let drive = Int(driveStr), drive >= 1, drive <= 8 {
+                    let filenameStart = afterD.index(after: colonIndex)
+                    let filename = String(afterD[filenameStart...])
+                    return (drive, filename)
+                }
+            }
+        }
+
+        // No drive prefix
+        return (nil, input)
     }
 
     // MARK: - Helper Functions

@@ -660,6 +660,30 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
                 return .error(error.localizedDescription)
             }
 
+        case .basicRenumber(let start, let step):
+            let result = await basicHandler.renumberProgram(start: start, step: step)
+            return result.success ? .ok(result.message) : .error(result.message)
+
+        case .basicSave(let drive, let filename):
+            guard let data = await basicHandler.getRawProgram() else {
+                return .error("No program to save")
+            }
+            do {
+                let sectors = try await diskManager.writeFile(drive: drive, name: filename, data: data)
+                return .ok("Saved \(data.count) bytes to \(filename) (\(sectors) sectors)")
+            } catch {
+                return .error(error.localizedDescription)
+            }
+
+        case .basicLoad(let drive, let filename):
+            do {
+                let data = try await diskManager.readFile(drive: drive, name: filename)
+                let result = await basicHandler.loadRawProgram(data: data)
+                return result.success ? .ok(result.message) : .error(result.message)
+            } catch {
+                return .error(error.localizedDescription)
+            }
+
         case .basicDir(let drive):
             do {
                 let entries = try await diskManager.listDirectory(drive: drive)
