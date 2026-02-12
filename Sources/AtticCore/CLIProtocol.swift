@@ -166,6 +166,26 @@ public enum CLICommand: Sendable {
     case basicNew
     case basicRun
     case basicList
+
+    // BASIC editing commands
+    /// Delete a BASIC line or range of lines (e.g., "10" or "10-50").
+    case basicDelete(lineOrRange: String)
+    /// Stop a running BASIC program (equivalent to pressing BREAK).
+    case basicStop
+    /// Continue execution of a stopped BASIC program.
+    case basicCont
+    /// List all BASIC variables and their current values.
+    case basicVars
+    /// Show value and type of a specific BASIC variable.
+    case basicVar(name: String)
+    /// Show information about the current BASIC program (size, line count, etc.).
+    case basicInfo
+    /// Export the current BASIC program to a file. Path is tilde-expanded.
+    case basicExport(path: String)
+    /// Import a BASIC program from a file. Path is tilde-expanded.
+    case basicImport(path: String)
+    /// List files on a disk drive (1-8). Nil means the default drive.
+    case basicDir(drive: Int?)
 }
 
 // =============================================================================
@@ -663,21 +683,70 @@ public struct CLICommandParser: Sendable {
         return .disassemble(address: address, lines: lines)
     }
 
+    /// Parses BASIC subcommands.
+    ///
+    /// Recognized subcommands (case-insensitive): NEW, RUN, LIST, DEL, STOP,
+    /// CONT, VARS, VAR, INFO, EXPORT, IMPORT, DIR. Anything else that starts
+    /// with a digit falls through to `basicLine` (a numbered BASIC line).
     private func parseBasic(_ args: String) throws -> CLICommand {
-        // Handle immediate commands (RUN, NEW, LIST)
         let trimmed = args.trimmingCharacters(in: .whitespaces)
-        let upper = trimmed.uppercased()
 
-        if upper == "NEW" {
-            return .basicNew
-        } else if upper == "RUN" || upper.hasPrefix("RUN ") {
-            return .basicRun
-        } else if upper == "LIST" || upper.hasPrefix("LIST ") {
-            return .basicList
-        } else if trimmed.isEmpty {
+        guard !trimmed.isEmpty else {
             throw CLIProtocolError.missingArgument("basic requires a line or command")
-        } else {
-            // BASIC line entry (e.g., "10 PRINT HELLO")
+        }
+
+        // Split into first word and remaining argument text
+        let parts = trimmed.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+        let firstWord = String(parts[0]).uppercased()
+        let rest = parts.count > 1 ? String(parts[1]).trimmingCharacters(in: .whitespaces) : ""
+
+        switch firstWord {
+        case "NEW":
+            return .basicNew
+        case "RUN":
+            return .basicRun
+        case "LIST":
+            return .basicList
+        case "DEL":
+            guard !rest.isEmpty else {
+                throw CLIProtocolError.missingArgument("basic del requires a line number or range (e.g., 10 or 10-50)")
+            }
+            return .basicDelete(lineOrRange: rest)
+        case "STOP":
+            return .basicStop
+        case "CONT":
+            return .basicCont
+        case "VARS":
+            return .basicVars
+        case "VAR":
+            guard !rest.isEmpty else {
+                throw CLIProtocolError.missingArgument("basic var requires a variable name")
+            }
+            return .basicVar(name: rest)
+        case "INFO":
+            return .basicInfo
+        case "EXPORT":
+            guard !rest.isEmpty else {
+                throw CLIProtocolError.missingArgument("basic export requires a file path")
+            }
+            let expandedPath = NSString(string: rest).expandingTildeInPath
+            return .basicExport(path: expandedPath)
+        case "IMPORT":
+            guard !rest.isEmpty else {
+                throw CLIProtocolError.missingArgument("basic import requires a file path")
+            }
+            let expandedPath = NSString(string: rest).expandingTildeInPath
+            return .basicImport(path: expandedPath)
+        case "DIR":
+            if rest.isEmpty {
+                return .basicDir(drive: nil)
+            }
+            guard let drive = Int(rest), drive >= 1, drive <= 8 else {
+                throw CLIProtocolError.invalidDriveNumber(rest)
+            }
+            return .basicDir(drive: drive)
+        default:
+            // Anything else is a numbered BASIC line (e.g., "10 PRINT X")
             return .basicLine(line: trimmed)
         }
     }

@@ -611,6 +611,26 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
         case .basicRun:
             return .error("BASIC RUN injection is disabled. Use keyboard input instead.")
 
+        // BASIC editing commands — stubs, implementation in attic-vb1
+        case .basicDelete:
+            return .error("BASIC DEL not yet implemented")
+        case .basicStop:
+            return .error("BASIC STOP not yet implemented")
+        case .basicCont:
+            return .error("BASIC CONT not yet implemented")
+        case .basicVars:
+            return .error("BASIC VARS not yet implemented")
+        case .basicVar:
+            return .error("BASIC VAR not yet implemented")
+        case .basicInfo:
+            return .error("BASIC INFO not yet implemented")
+        case .basicExport:
+            return .error("BASIC EXPORT not yet implemented")
+        case .basicImport:
+            return .error("BASIC IMPORT not yet implemented")
+        case .basicDir:
+            return .error("BASIC DIR not yet implemented")
+
         // BASIC listing is read-only, so it remains enabled
         case .basicList:
             // List the BASIC program using the detokenizer

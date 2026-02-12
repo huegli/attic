@@ -555,6 +555,29 @@ public actor CLISocketClient {
             return "basic RUN"
         case .basicList:
             return "basic LIST"
+
+        // BASIC editing commands
+        case .basicDelete(let lineOrRange):
+            return "basic DEL \(lineOrRange)"
+        case .basicStop:
+            return "basic STOP"
+        case .basicCont:
+            return "basic CONT"
+        case .basicVars:
+            return "basic VARS"
+        case .basicVar(let name):
+            return "basic VAR \(name)"
+        case .basicInfo:
+            return "basic INFO"
+        case .basicExport(let path):
+            return "basic EXPORT \(path)"
+        case .basicImport(let path):
+            return "basic IMPORT \(path)"
+        case .basicDir(let drive):
+            if let d = drive {
+                return "basic DIR \(d)"
+            }
+            return "basic DIR"
         }
     }
 

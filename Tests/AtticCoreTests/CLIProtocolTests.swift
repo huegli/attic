@@ -1112,6 +1112,219 @@ final class CLIProtocolTests: XCTestCase {
     }
 
     // =========================================================================
+    // MARK: - CLICommandParser Tests - BASIC Editing Commands
+    // =========================================================================
+
+    func testParseBasicDeleteSingleLine() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("basic del 10")
+        guard case .basicDelete(let lineOrRange) = command else {
+            XCTFail("Expected .basicDelete, got \(command)")
+            return
+        }
+        XCTAssertEqual(lineOrRange, "10")
+    }
+
+    func testParseBasicDeleteRange() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("basic DEL 10-50")
+        guard case .basicDelete(let lineOrRange) = command else {
+            XCTFail("Expected .basicDelete, got \(command)")
+            return
+        }
+        XCTAssertEqual(lineOrRange, "10-50")
+    }
+
+    func testParseBasicDeleteMissingArg() {
+        let parser = CLICommandParser()
+        XCTAssertThrowsError(try parser.parse("basic del")) { error in
+            guard case CLIProtocolError.missingArgument = error else {
+                XCTFail("Expected missingArgument error, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testParseBasicStop() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("basic stop")
+        guard case .basicStop = command else {
+            XCTFail("Expected .basicStop, got \(command)")
+            return
+        }
+    }
+
+    func testParseBasicCont() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("basic CONT")
+        guard case .basicCont = command else {
+            XCTFail("Expected .basicCont, got \(command)")
+            return
+        }
+    }
+
+    func testParseBasicVars() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("basic vars")
+        guard case .basicVars = command else {
+            XCTFail("Expected .basicVars, got \(command)")
+            return
+        }
+    }
+
+    func testParseBasicVar() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("basic var X")
+        guard case .basicVar(let name) = command else {
+            XCTFail("Expected .basicVar, got \(command)")
+            return
+        }
+        XCTAssertEqual(name, "X")
+    }
+
+    func testParseBasicVarMissingName() {
+        let parser = CLICommandParser()
+        XCTAssertThrowsError(try parser.parse("basic var")) { error in
+            guard case CLIProtocolError.missingArgument = error else {
+                XCTFail("Expected missingArgument error, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testParseBasicInfo() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("basic info")
+        guard case .basicInfo = command else {
+            XCTFail("Expected .basicInfo, got \(command)")
+            return
+        }
+    }
+
+    func testParseBasicExport() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("basic export /tmp/program.bas")
+        guard case .basicExport(let path) = command else {
+            XCTFail("Expected .basicExport, got \(command)")
+            return
+        }
+        XCTAssertEqual(path, "/tmp/program.bas")
+    }
+
+    func testParseBasicExportTildeExpansion() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("basic export ~/program.bas")
+        guard case .basicExport(let path) = command else {
+            XCTFail("Expected .basicExport, got \(command)")
+            return
+        }
+        XCTAssertFalse(path.hasPrefix("~"), "Tilde should be expanded")
+        XCTAssertTrue(path.hasSuffix("program.bas"))
+    }
+
+    func testParseBasicExportMissingPath() {
+        let parser = CLICommandParser()
+        XCTAssertThrowsError(try parser.parse("basic export")) { error in
+            guard case CLIProtocolError.missingArgument = error else {
+                XCTFail("Expected missingArgument error, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testParseBasicImport() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("basic import /tmp/program.bas")
+        guard case .basicImport(let path) = command else {
+            XCTFail("Expected .basicImport, got \(command)")
+            return
+        }
+        XCTAssertEqual(path, "/tmp/program.bas")
+    }
+
+    func testParseBasicImportTildeExpansion() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("basic import ~/games/mygame.bas")
+        guard case .basicImport(let path) = command else {
+            XCTFail("Expected .basicImport, got \(command)")
+            return
+        }
+        XCTAssertFalse(path.hasPrefix("~"), "Tilde should be expanded")
+        XCTAssertTrue(path.hasSuffix("games/mygame.bas"))
+    }
+
+    func testParseBasicImportMissingPath() {
+        let parser = CLICommandParser()
+        XCTAssertThrowsError(try parser.parse("basic import")) { error in
+            guard case CLIProtocolError.missingArgument = error else {
+                XCTFail("Expected missingArgument error, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testParseBasicDirNoArg() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("basic dir")
+        guard case .basicDir(let drive) = command else {
+            XCTFail("Expected .basicDir, got \(command)")
+            return
+        }
+        XCTAssertNil(drive)
+    }
+
+    func testParseBasicDirWithDrive() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("basic dir 2")
+        guard case .basicDir(let drive) = command else {
+            XCTFail("Expected .basicDir, got \(command)")
+            return
+        }
+        XCTAssertEqual(drive, 2)
+    }
+
+    func testParseBasicDirInvalidDrive() {
+        let parser = CLICommandParser()
+        XCTAssertThrowsError(try parser.parse("basic dir 0")) { error in
+            guard case CLIProtocolError.invalidDriveNumber = error else {
+                XCTFail("Expected invalidDriveNumber error, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testParseBasicDirDriveTooHigh() {
+        let parser = CLICommandParser()
+        XCTAssertThrowsError(try parser.parse("basic dir 9")) { error in
+            guard case CLIProtocolError.invalidDriveNumber = error else {
+                XCTFail("Expected invalidDriveNumber error, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testParseBasicDirNonNumericDrive() {
+        let parser = CLICommandParser()
+        XCTAssertThrowsError(try parser.parse("basic dir abc")) { error in
+            guard case CLIProtocolError.invalidDriveNumber = error else {
+                XCTFail("Expected invalidDriveNumber error, got \(error)")
+                return
+            }
+        }
+    }
+
+    /// Regression: a numbered BASIC line should still parse as .basicLine
+    func testParseBasicLineStillWorks() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("basic 10 PRINT X")
+        guard case .basicLine(let line) = command else {
+            XCTFail("Expected .basicLine, got \(command)")
+            return
+        }
+        XCTAssertEqual(line, "10 PRINT X")
+    }
+
+    // =========================================================================
     // MARK: - CLICommandParser Tests - Error Cases
     // =========================================================================
 
