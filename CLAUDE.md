@@ -205,8 +205,20 @@ swift run attic --headless
 # Run headless without audio
 swift run attic --headless --silent
 
-# Tests
+# Tests (full suite ~61s)
 swift test
+
+# Tests via Makefile (see docs/TESTING.md for details)
+make test-smoke    # Fast feedback, skips slow integration suites (~3s)
+make test-unit     # Pure unit tests only (~2s)
+make test-basic    # BASIC tokenizer/detokenizer (<1s)
+make test-asm      # Assembler/disassembler/6502 (<1s)
+make test-atr      # ATR filesystem (<1s)
+make test-core     # Core emulator types + frame rate (<1s)
+make test-protocol # AESP protocol (messages, server, E2E) (~15s)
+make test-cli      # CLI parsing, sockets, subprocesses (~37s)
+make test-server   # AtticServer subprocess tests (~7s)
+make test          # Full suite (~61s)
 ```
 
 ### Using Xcode
