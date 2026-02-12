@@ -292,6 +292,21 @@ public final class LibAtari800Wrapper: @unchecked Sendable {
         executeFrame(input: &input)
     }
 
+    /// Sends a BREAK signal to the emulator.
+    ///
+    /// This simulates pressing the BREAK key on the Atari keyboard, which
+    /// stops a running BASIC program. The break is triggered through the
+    /// input system by setting `special = 1` in the input template.
+    /// libatari800 negates this value to produce `AKEY_BREAK` (-1).
+    public func sendBreak() {
+        guard isInitialized else { return }
+        stateIsCached = false
+        // Send break through the input system: special=1 → -1 = AKEY_BREAK
+        var input = InputState()
+        input.special = 1
+        executeFrame(input: &input)
+    }
+
     // =========================================================================
     // MARK: - Memory Access
     // =========================================================================
@@ -815,6 +830,7 @@ public struct InputState: Sendable {
     ///
     /// This maps to the `special` field of `input_template_t`. The value
     /// is negated by libatari800 to produce an AKEY_* code:
+    /// - 1 = AKEY_BREAK (-1): Break key (stops running BASIC program)
     /// - 2 = AKEY_WARMSTART (-2): Warm reset (like pressing RESET key)
     /// - 3 = AKEY_COLDSTART (-3): Cold reset (power cycle)
     public var special: UInt8 = 0

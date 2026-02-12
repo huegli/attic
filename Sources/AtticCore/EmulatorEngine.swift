@@ -253,6 +253,21 @@ public actor EmulatorEngine {
         state = wasRunning ? .running : .paused
     }
 
+    /// Sends a BREAK signal to stop a running BASIC program.
+    ///
+    /// This simulates pressing the BREAK key on the Atari keyboard.
+    /// After sending the break, a few frames are executed to allow
+    /// the emulator to process the signal and return to the READY prompt.
+    public func sendBreak() {
+        wrapper.sendBreak()
+        // Execute additional frames to let the break signal propagate
+        // and the BASIC interpreter return to the READY prompt.
+        var input = InputState()
+        for _ in 0..<10 {
+            _ = wrapper.executeFrame(input: &input)
+        }
+    }
+
     /// Clears the BASIC program from memory by resetting pointers.
     ///
     /// This is equivalent to issuing the NEW command in BASIC.

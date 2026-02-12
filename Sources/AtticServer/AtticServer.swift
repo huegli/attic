@@ -617,7 +617,8 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
             return result.success ? .ok(result.message) : .error(result.message)
 
         case .basicStop:
-            return .error("BASIC STOP not yet implemented")
+            await emulator.sendBreak()
+            return .ok("STOPPED")
 
         case .basicCont:
             let result = await basicHandler.continueProgram()
