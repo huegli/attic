@@ -660,8 +660,20 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
                 return .error(error.localizedDescription)
             }
 
-        case .basicDir:
-            return .error("BASIC DIR not yet implemented")
+        case .basicDir(let drive):
+            do {
+                let entries = try await diskManager.listDirectory(drive: drive)
+                if entries.isEmpty {
+                    return .ok("(empty disk)")
+                }
+                let lines = entries.map { entry in
+                    let lock = entry.isLocked ? "*" : " "
+                    return "\(lock) \(entry.fullName.padding(toLength: 12, withPad: " ", startingAt: 0)) \(entry.sectorCount) sectors"
+                }
+                return .okMultiLine(lines)
+            } catch {
+                return .error(error.localizedDescription)
+            }
 
         // BASIC listing is read-only, so it remains enabled
         case .basicList:
