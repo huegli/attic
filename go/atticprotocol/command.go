@@ -48,6 +48,9 @@ const (
 	CmdUnmount
 	CmdDrives
 
+	// Boot with file
+	CmdBoot
+
 	// State management
 	CmdStateSave
 	CmdStateLoad
@@ -64,6 +67,17 @@ const (
 	CmdBasicNew
 	CmdBasicRun
 	CmdBasicList
+
+	// BASIC editing commands
+	CmdBasicDelete
+	CmdBasicStop
+	CmdBasicCont
+	CmdBasicVars
+	CmdBasicVar
+	CmdBasicInfo
+	CmdBasicExport
+	CmdBasicImport
+	CmdBasicDir
 )
 
 // RegisterModification represents a register name and value pair for modification.
@@ -95,6 +109,8 @@ type Command struct {
 	Value         byte                   // For memoryFill
 	Lines         int                    // For disassemble
 	LinesSet      bool                   // Whether Lines was explicitly provided
+	LineOrRange   string                 // For basicDelete (e.g., "10" or "10-50")
+	VarName       string                 // For basicVar
 }
 
 // Command constructors - these provide a clean API for creating commands.
@@ -242,6 +258,12 @@ func NewDrivesCommand() Command {
 	return Command{Type: CmdDrives}
 }
 
+// NewBootCommand creates a command to boot the emulator with a file.
+// Supports ATR, XEX, BAS, LST, CAS, ROM, etc.
+func NewBootCommand(path string) Command {
+	return Command{Type: CmdBoot, Path: path}
+}
+
 // NewStateSaveCommand creates a command to save emulator state.
 func NewStateSaveCommand(path string) Command {
 	return Command{Type: CmdStateSave, Path: path}
@@ -286,6 +308,58 @@ func NewBasicRunCommand() Command {
 // NewBasicListCommand creates a BASIC LIST command.
 func NewBasicListCommand() Command {
 	return Command{Type: CmdBasicList}
+}
+
+// NewBasicDeleteCommand creates a command to delete a BASIC line or range.
+// lineOrRange can be a single line number (e.g., "10") or a range (e.g., "10-50").
+func NewBasicDeleteCommand(lineOrRange string) Command {
+	return Command{Type: CmdBasicDelete, LineOrRange: lineOrRange}
+}
+
+// NewBasicStopCommand creates a command to stop a running BASIC program.
+func NewBasicStopCommand() Command {
+	return Command{Type: CmdBasicStop}
+}
+
+// NewBasicContCommand creates a command to continue a stopped BASIC program.
+func NewBasicContCommand() Command {
+	return Command{Type: CmdBasicCont}
+}
+
+// NewBasicVarsCommand creates a command to list all BASIC variables.
+func NewBasicVarsCommand() Command {
+	return Command{Type: CmdBasicVars}
+}
+
+// NewBasicVarCommand creates a command to show a specific BASIC variable.
+func NewBasicVarCommand(name string) Command {
+	return Command{Type: CmdBasicVar, VarName: name}
+}
+
+// NewBasicInfoCommand creates a command to show BASIC program information.
+func NewBasicInfoCommand() Command {
+	return Command{Type: CmdBasicInfo}
+}
+
+// NewBasicExportCommand creates a command to export a BASIC program to a file.
+func NewBasicExportCommand(path string) Command {
+	return Command{Type: CmdBasicExport, Path: path}
+}
+
+// NewBasicImportCommand creates a command to import a BASIC program from a file.
+func NewBasicImportCommand(path string) Command {
+	return Command{Type: CmdBasicImport, Path: path}
+}
+
+// NewBasicDirCommand creates a command to list files on a disk drive.
+// If drive is nil, uses the default drive.
+func NewBasicDirCommand(drive *int) Command {
+	cmd := Command{Type: CmdBasicDir}
+	if drive != nil {
+		cmd.Drive = *drive
+		cmd.AddressSet = true // Reuse AddressSet to indicate drive was set
+	}
+	return cmd
 }
 
 // Format returns the command formatted for transmission over the protocol.
@@ -369,6 +443,8 @@ func (c Command) Format() string {
 		return fmt.Sprintf("unmount %d", c.Drive)
 	case CmdDrives:
 		return "drives"
+	case CmdBoot:
+		return fmt.Sprintf("boot %s", c.Path)
 	case CmdStateSave:
 		return fmt.Sprintf("state save %s", c.Path)
 	case CmdStateLoad:
@@ -381,12 +457,13 @@ func (c Command) Format() string {
 	case CmdInjectBasic:
 		return fmt.Sprintf("inject basic %s", c.Base64Data)
 	case CmdInjectKeys:
-		// Escape special characters
+		// Escape special characters (including space to prevent parser issues)
 		escaped := c.Text
 		escaped = strings.ReplaceAll(escaped, "\\", "\\\\")
 		escaped = strings.ReplaceAll(escaped, "\n", "\\n")
 		escaped = strings.ReplaceAll(escaped, "\t", "\\t")
 		escaped = strings.ReplaceAll(escaped, "\r", "\\r")
+		escaped = strings.ReplaceAll(escaped, " ", "\\s")
 		return fmt.Sprintf("inject keys %s", escaped)
 	case CmdBasicLine:
 		return fmt.Sprintf("basic %s", c.Line)
@@ -396,6 +473,27 @@ func (c Command) Format() string {
 		return "basic RUN"
 	case CmdBasicList:
 		return "basic LIST"
+	case CmdBasicDelete:
+		return fmt.Sprintf("basic DEL %s", c.LineOrRange)
+	case CmdBasicStop:
+		return "basic STOP"
+	case CmdBasicCont:
+		return "basic CONT"
+	case CmdBasicVars:
+		return "basic VARS"
+	case CmdBasicVar:
+		return fmt.Sprintf("basic VAR %s", c.VarName)
+	case CmdBasicInfo:
+		return "basic INFO"
+	case CmdBasicExport:
+		return fmt.Sprintf("basic EXPORT %s", c.Path)
+	case CmdBasicImport:
+		return fmt.Sprintf("basic IMPORT %s", c.Path)
+	case CmdBasicDir:
+		if c.AddressSet { // AddressSet is reused to indicate drive was set
+			return fmt.Sprintf("basic DIR %d", c.Drive)
+		}
+		return "basic DIR"
 	default:
 		return ""
 	}

@@ -85,16 +85,33 @@ func TestCommandFormatting(t *testing.T) {
 		{"Mount", NewMountCommand(1, "/path/to/disk.atr"), "mount 1 /path/to/disk.atr"},
 		{"Unmount", NewUnmountCommand(1), "unmount 1"},
 		{"Drives", NewDrivesCommand(), "drives"},
+		{"Boot", NewBootCommand("/path/to/game.xex"), "boot /path/to/game.xex"},
 		{"StateSave", NewStateSaveCommand("/path/to/state"), "state save /path/to/state"},
 		{"StateLoad", NewStateLoadCommand("/path/to/state"), "state load /path/to/state"},
 		{"Screenshot (no path)", NewScreenshotCommand(""), "screenshot"},
 		{"Screenshot (with path)", NewScreenshotCommand("/path/to/screenshot.png"), "screenshot /path/to/screenshot.png"},
 		{"InjectBasic", NewInjectBasicCommand("SGVsbG8="), "inject basic SGVsbG8="},
 		{"InjectKeys", NewInjectKeysCommand("Hello\n"), "inject keys Hello\\n"},
+		{"InjectKeys with space", NewInjectKeysCommand("Hello World"), "inject keys Hello\\sWorld"},
 		{"BasicLine", NewBasicLineCommand("10 PRINT HELLO"), "basic 10 PRINT HELLO"},
 		{"BasicNew", NewBasicNewCommand(), "basic NEW"},
 		{"BasicRun", NewBasicRunCommand(), "basic RUN"},
 		{"BasicList", NewBasicListCommand(), "basic LIST"},
+		// BASIC editing commands
+		{"BasicDelete", NewBasicDeleteCommand("10"), "basic DEL 10"},
+		{"BasicDelete range", NewBasicDeleteCommand("10-50"), "basic DEL 10-50"},
+		{"BasicStop", NewBasicStopCommand(), "basic STOP"},
+		{"BasicCont", NewBasicContCommand(), "basic CONT"},
+		{"BasicVars", NewBasicVarsCommand(), "basic VARS"},
+		{"BasicVar", NewBasicVarCommand("X"), "basic VAR X"},
+		{"BasicInfo", NewBasicInfoCommand(), "basic INFO"},
+		{"BasicExport", NewBasicExportCommand("/path/to/file.bas"), "basic EXPORT /path/to/file.bas"},
+		{"BasicImport", NewBasicImportCommand("/path/to/file.bas"), "basic IMPORT /path/to/file.bas"},
+		{"BasicDir (no drive)", NewBasicDirCommand(nil), "basic DIR"},
+		{"BasicDir (drive 1)", func() Command {
+			d := 1
+			return NewBasicDirCommand(&d)
+		}(), "basic DIR 1"},
 	}
 
 	for _, tt := range tests {
@@ -210,6 +227,22 @@ func TestCommandParsing(t *testing.T) {
 		{"Basic NEW", "basic NEW", NewBasicNewCommand()},
 		{"Basic RUN", "basic RUN", NewBasicRunCommand()},
 		{"Basic line", "basic 10 PRINT HELLO", NewBasicLineCommand("10 PRINT HELLO")},
+		// New commands
+		{"Boot", "boot /path/to/game.xex", NewBootCommand("/path/to/game.xex")},
+		{"Basic DEL", "basic DEL 10", NewBasicDeleteCommand("10")},
+		{"Basic DEL range", "basic DEL 10-50", NewBasicDeleteCommand("10-50")},
+		{"Basic STOP", "basic STOP", NewBasicStopCommand()},
+		{"Basic CONT", "basic CONT", NewBasicContCommand()},
+		{"Basic VARS", "basic VARS", NewBasicVarsCommand()},
+		{"Basic VAR", "basic VAR X", NewBasicVarCommand("X")},
+		{"Basic INFO", "basic INFO", NewBasicInfoCommand()},
+		{"Basic EXPORT", "basic EXPORT /path/to/file.bas", NewBasicExportCommand("/path/to/file.bas")},
+		{"Basic IMPORT", "basic IMPORT /path/to/file.bas", NewBasicImportCommand("/path/to/file.bas")},
+		{"Basic DIR", "basic DIR", NewBasicDirCommand(nil)},
+		{"Basic DIR with drive", "basic DIR 1", func() Command {
+			d := 1
+			return NewBasicDirCommand(&d)
+		}()},
 	}
 
 	for _, tt := range tests {
@@ -321,10 +354,10 @@ func TestResponseParsingErrors(t *testing.T) {
 
 // TestEscapeSequences verifies escape sequence handling.
 func TestEscapeSequences(t *testing.T) {
-	// Test that InjectKeys properly escapes special characters
-	cmd := NewInjectKeysCommand("line1\nline2\ttab\r")
+	// Test that InjectKeys properly escapes special characters including space
+	cmd := NewInjectKeysCommand("line1\nline2\ttab\r space here")
 	formatted := cmd.Format()
-	expected := "inject keys line1\\nline2\\ttab\\r"
+	expected := "inject keys line1\\nline2\\ttab\\r\\sspace\\shere"
 	if formatted != expected {
 		t.Errorf("got %q, want %q", formatted, expected)
 	}
@@ -338,6 +371,7 @@ func TestParseEscapes(t *testing.T) {
 		{"hello\\nworld", "hello\nworld"},
 		{"tab\\there", "tab\there"},
 		{"cr\\rhere", "cr\rhere"},
+		{"space\\shere", "space here"},
 		{"escape\\ehere", "escape\x1Bhere"},
 		{"backslash\\\\here", "backslash\\here"},
 		{"no escapes", "no escapes"},

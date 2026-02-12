@@ -65,10 +65,12 @@
 //   - Assembly: NewAssembleCommand, NewAssembleLineCommand, NewDisassembleCommand
 //   - Monitor: NewStepOverCommand, NewRunUntilCommand, NewMemoryFillCommand
 //   - Disk: NewMountCommand, NewUnmountCommand, NewDrivesCommand
+//   - Boot: NewBootCommand
 //   - State: NewStateSaveCommand, NewStateLoadCommand
 //   - Display: NewScreenshotCommand
 //   - Injection: NewInjectBasicCommand, NewInjectKeysCommand
 //   - BASIC: NewBasicLineCommand, NewBasicNewCommand, NewBasicRunCommand, NewBasicListCommand
+//   - BASIC Editing: NewBasicDeleteCommand, NewBasicStopCommand, NewBasicContCommand, NewBasicVarsCommand, NewBasicVarCommand, NewBasicInfoCommand, NewBasicExportCommand, NewBasicImportCommand, NewBasicDirCommand
 //
 // # Parsing Commands
 //

@@ -28,6 +28,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
+	"strings"
+	"syscall"
 	"time"
 )
 
@@ -82,7 +85,10 @@ func CurrentSocketPath() string {
 }
 
 // DiscoverSockets finds all AtticServer sockets in /tmp.
+// Only returns sockets whose server process is still running (validates PID).
 // Returns socket paths sorted by modification time (most recent first).
+// Stale sockets (where the server process is no longer running) are automatically
+// cleaned up.
 func DiscoverSockets() ([]string, error) {
 	pattern := filepath.Join("/tmp", "attic-*.sock")
 	matches, err := filepath.Glob(pattern)
@@ -98,6 +104,13 @@ func DiscoverSockets() ([]string, error) {
 	sockets := make([]socketInfo, 0, len(matches))
 
 	for _, path := range matches {
+		// Extract PID from filename and verify the process is still running
+		if !isServerProcessRunning(filepath.Base(path)) {
+			// Stale socket - server process no longer running, clean it up
+			os.Remove(path)
+			continue
+		}
+
 		info, err := os.Stat(path)
 		if err != nil {
 			continue // Skip inaccessible sockets
@@ -119,6 +132,32 @@ func DiscoverSockets() ([]string, error) {
 	}
 
 	return result, nil
+}
+
+// isServerProcessRunning checks if the server process for a socket file is still running.
+// Extracts the PID from the socket filename (format: attic-<PID>.sock) and checks if
+// that process is still alive.
+func isServerProcessRunning(socketFilename string) bool {
+	// Extract PID from filename: attic-<PID>.sock
+	name := strings.TrimPrefix(socketFilename, "attic-")
+	name = strings.TrimSuffix(name, ".sock")
+
+	pid, err := strconv.Atoi(name)
+	if err != nil {
+		return false
+	}
+
+	// Check if process is running using kill(pid, 0)
+	// This doesn't send a signal, just checks if the process exists
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+
+	// On Unix, FindProcess always succeeds, so we need to send signal 0
+	// to check if the process actually exists
+	err = process.Signal(syscall.Signal(0))
+	return err == nil
 }
 
 // DiscoverSocket finds the most recently active AtticServer socket.

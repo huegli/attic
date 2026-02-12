@@ -100,6 +100,10 @@ func (p *CommandParser) Parse(line string) (Command, error) {
 	case "drives":
 		return NewDrivesCommand(), nil
 
+	// Boot with file
+	case "boot":
+		return p.parseBoot(argsString)
+
 	// State management
 	case "state":
 		return p.parseState(argsString)
@@ -376,6 +380,15 @@ func (p *CommandParser) parseUnmount(args string) (Command, error) {
 	return NewUnmountCommand(drive), nil
 }
 
+func (p *CommandParser) parseBoot(args string) (Command, error) {
+	path := strings.TrimSpace(args)
+	if path == "" {
+		return Command{}, newMissingArgumentError("boot requires a file path")
+	}
+	// Note: Tilde expansion should be done by the caller if needed
+	return NewBootCommand(path), nil
+}
+
 func (p *CommandParser) parseState(args string) (Command, error) {
 	parts := strings.SplitN(strings.TrimSpace(args), " ", 2)
 	if len(parts) == 0 || parts[0] == "" {
@@ -420,19 +433,69 @@ func (p *CommandParser) parseInject(args string) (Command, error) {
 
 func (p *CommandParser) parseBasic(args string) (Command, error) {
 	trimmed := strings.TrimSpace(args)
-	upper := strings.ToUpper(trimmed)
 
-	if upper == "NEW" {
-		return NewBasicNewCommand(), nil
-	} else if upper == "RUN" || strings.HasPrefix(upper, "RUN ") {
-		return NewBasicRunCommand(), nil
-	} else if upper == "LIST" || strings.HasPrefix(upper, "LIST ") {
-		return NewBasicListCommand(), nil
-	} else if trimmed == "" {
+	if trimmed == "" {
 		return Command{}, newMissingArgumentError("basic requires a line or command")
 	}
-	// BASIC line entry (e.g., "10 PRINT HELLO")
-	return NewBasicLineCommand(trimmed), nil
+
+	// Split into first word and remaining argument text
+	parts := strings.SplitN(trimmed, " ", 2)
+	firstWord := strings.ToUpper(parts[0])
+	rest := ""
+	if len(parts) > 1 {
+		rest = strings.TrimSpace(parts[1])
+	}
+
+	switch firstWord {
+	case "NEW":
+		return NewBasicNewCommand(), nil
+	case "RUN":
+		return NewBasicRunCommand(), nil
+	case "LIST":
+		return NewBasicListCommand(), nil
+	case "DEL":
+		if rest == "" {
+			return Command{}, newMissingArgumentError("basic del requires a line number or range (e.g., 10 or 10-50)")
+		}
+		return NewBasicDeleteCommand(rest), nil
+	case "STOP":
+		return NewBasicStopCommand(), nil
+	case "CONT":
+		return NewBasicContCommand(), nil
+	case "VARS":
+		return NewBasicVarsCommand(), nil
+	case "VAR":
+		if rest == "" {
+			return Command{}, newMissingArgumentError("basic var requires a variable name")
+		}
+		return NewBasicVarCommand(rest), nil
+	case "INFO":
+		return NewBasicInfoCommand(), nil
+	case "EXPORT":
+		if rest == "" {
+			return Command{}, newMissingArgumentError("basic export requires a file path")
+		}
+		// Note: Tilde expansion should be done by the caller if needed
+		return NewBasicExportCommand(rest), nil
+	case "IMPORT":
+		if rest == "" {
+			return Command{}, newMissingArgumentError("basic import requires a file path")
+		}
+		// Note: Tilde expansion should be done by the caller if needed
+		return NewBasicImportCommand(rest), nil
+	case "DIR":
+		if rest == "" {
+			return NewBasicDirCommand(nil), nil
+		}
+		drive, err := strconv.Atoi(rest)
+		if err != nil || drive < 1 || drive > 8 {
+			return Command{}, newInvalidDriveNumberError(rest)
+		}
+		return NewBasicDirCommand(&drive), nil
+	default:
+		// Anything else is a numbered BASIC line (e.g., "10 PRINT X")
+		return NewBasicLineCommand(trimmed), nil
+	}
 }
 
 // Helper functions
@@ -488,6 +551,8 @@ func parseEscapes(s string) string {
 				result.WriteRune('\t')
 			case 'r':
 				result.WriteRune('\r')
+			case 's':
+				result.WriteRune(' ') // Space
 			case 'e':
 				result.WriteRune('\x1B') // Escape character
 			case '\\':
