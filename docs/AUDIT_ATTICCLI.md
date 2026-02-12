@@ -1,127 +1,82 @@
 # AtticCLI Audit Report
 
-**Date**: 2026-02-03
+**Date**: 2026-02-12
 **Auditor**: Claude Code
 **Scope**: Sources/AtticCLI/, Sources/AtticCore/CLI*.swift, related documentation
+**Branch**: main (post-cleanup)
 
 ## Executive Summary
 
-The AtticCLI module functions but has several documentation mismatches, redundant code (~105 lines), and incomplete command translation. The most significant issues are:
+The AtticCLI module has been significantly improved since the initial audit. Several issues have been addressed:
 
-1. **Non-functional flags**: `--headless` and `--repl` are parsed but have no effect
-2. **Dead code**: Local REPL implementation is never called
-3. **Duplicated code**: fd_set helpers copied between client/server
-4. **Incomplete translation**: Many documented commands not forwarded to server
-5. **Doc mismatch**: Prompt format and command syntax differ from documentation
+**Fixed:**
+- `--repl` flag removed (was useless)
+- `runLocalREPL()` dead code removed
+- Server launch logic refactored to shared `ServerLauncher` class
+- New commands added (`.screenshot`, `.boot`)
+- BASIC mode now uses key injection for natural input
+
+**Remaining Issues:**
+1. **`--headless` flag**: Still parsed but explicitly unused (documented as "kept for API compatibility")
+2. **Duplicated code**: fd_set helpers still copied between client/server
+3. **Unused property**: `commandParser` in CLISocketClient still unused
+4. **Incomplete translations**: Some documented commands still not forwarded
 
 ---
 
-## 1. Documentation vs Implementation Mismatches
+## 1. Resolved Issues (from previous audit)
 
-### 1.1 `--headless` Flag Non-Functional (CRITICAL)
+### 1.1 `--repl` Flag - FIXED
 
-The `--headless` flag is documented and parsed but **has no effect**.
+The useless `--repl` flag has been completely removed:
+- Removed from `Arguments` struct
+- Removed from argument parsing
+- Removed from help text
 
-**Code path:**
-```
-main() line 683:     launchServer(headless: args.headless, silent: args.silent)
-                              ↓
-launchServer() line 551-555:
-    var arguments: [String] = []
-    if silent {
-        arguments.append("--silent")  // ✓ Used
-    }
-    // headless parameter is IGNORED - never added to arguments
-```
+### 1.2 Dead Code `runLocalREPL()` - FIXED
 
-**Location**: AtticCLI.swift:540-593
+The entire `runLocalREPL()` function (previously lines 166-200) has been removed. The CLI is now documented as a "pure protocol client" that always connects to AtticServer.
 
-The `headless` parameter is received by `launchServer()` but never added to the AtticServer command-line arguments. Running `attic --headless` behaves identically to `attic`.
+### 1.3 Server Launch Logic - IMPROVED
 
-**Recommendation**: Either:
-1. Pass `--headless` to AtticServer: `if headless { arguments.append("--headless") }`
-2. Remove the flag entirely if headless mode isn't supported
-3. Implement true local headless mode using `runLocalREPL()` (currently dead code)
+Server launching has been refactored from inline code to a shared `ServerLauncher` class in AtticCore:
+- `findServerExecutable()` moved to `ServerLauncher`
+- Launch logic now in `ServerLauncher.launchServer(options:)`
+- Returns structured `ServerLaunchResult` enum
+- Shared between CLI, GUI, and MCP
 
-### 1.2 `--repl` Flag Useless (MEDIUM)
+### 1.4 Server Lifecycle Tracking - NEW
 
-The `--repl` flag is documented but **completely unnecessary**.
+New `launchedServerPid` property tracks whether this CLI session launched the server:
+- `.shutdown` only terminates server if CLI launched it
+- Prevents accidentally killing a shared server
 
-**Code analysis:**
+---
+
+## 2. Remaining Issues
+
+### 2.1 `--headless` Flag Unused (LOW)
+
+**Location**: AtticCLI.swift
+
+The `--headless` flag is still parsed but explicitly documented as unused:
+
 ```swift
-// Line 48: Defaults to true
-var repl: Bool = true
-
-// Line 76-77: Can only set to true (already the default)
-case "--repl":
-    args.repl = true
-
-// args.repl is NEVER READ anywhere in main() or elsewhere
+/// - Parameters:
+///   - headless: Whether to run without GUI (unused, kept for API compatibility).
+///   - silent: Whether to disable audio.
+static func launchServer(headless: Bool, silent: Bool) -> String? {
+    let options = ServerLaunchOptions(silent: silent)
+    // headless is not passed to options
 ```
 
-**Location**: AtticCLI.swift:48, 76-77
+**Status**: Documented as intentional. The flag exists for potential future use or API stability.
 
-The flag:
-- Defaults to `true`
-- Has no `--no-repl` counterpart
-- Is never checked to make any decision
+**Recommendation**: Either implement headless mode in `ServerLaunchOptions` or remove the flag entirely with a deprecation notice.
 
-Running `attic --repl` is identical to running `attic`.
+### 2.2 Unused `commandParser` Property (LOW)
 
-**Recommendation**: Remove `--repl` flag entirely - it serves no purpose.
-
-### 1.3 Prompt Format Discrepancy (HIGH)
-
-| Source | Format |
-|--------|--------|
-| REPL_COMMANDS.md:11 | `[monitor] $E477>` (with PC) |
-| AtticCLI.swift:214 | `[monitor] >` (no PC) |
-
-**Impact**: Loses debugging context; may break Emacs comint regex matching.
-
-### 1.4 Breakpoint Command Syntax (MEDIUM)
-
-| Source | Set Breakpoint | Clear Breakpoint |
-|--------|---------------|------------------|
-| REPL_COMMANDS.md:203-206 | `bp $600A` | `bc $600A` |
-| AtticCLI.swift:432 | `b set $600A` | `b clear $600A` |
-| CLIProtocol.swift:450 | `breakpoint set $600A` | `breakpoint clear $600A` |
-
-**Impact**: Documented shortcuts (`bp`, `bc`) don't work as expected.
-
-### 1.5 Missing Command Translations (HIGH)
-
-Commands documented in `REPL_COMMANDS.md` but NOT translated in `AtticCLI.swift`:
-
-**Monitor Mode** (AtticCLI.swift:406-435):
-- `w` (watch memory) - not implemented
-- `wc` (clear watch) - not implemented
-- `a` (assemble) - not translated
-- `f` (fill) - not translated (protocol uses `fill`)
-
-**BASIC Mode** - All forwarded as `basic <input>` without specific handling:
-- `del`, `renum` - line management
-- `stop`, `cont` - execution control
-- `vars` - variable listing
-- `save`, `load` - ATR disk operations
-- `dir` - directory listing
-
-**DOS Mode** (AtticCLI.swift:439-455) - Only 3 commands handled:
-- ✓ `mount`, `unmount`, `drives`
-- ✗ `cd`, `type`, `dump`, `info`, `copy`, `rename`, `delete`, `lock`, `unlock`, `export`, `import`, `newdisk`, `format`
-
-### 1.6 `.basic turbo` Mode (LOW)
-
-- **Doc** (REPL_COMMANDS.md:29): Should switch to Turbo BASIC XL tokenizer
-- **Code** (AtticCLI.swift:271): Accepts command but doesn't configure different tokenizer variant
-
----
-
-## 2. Unnecessary Dependencies
-
-### 2.1 Unused `commandParser` Property
-
-**Location**: CLISocketClient.swift:97
+**Location**: CLISocketClient.swift:103
 
 ```swift
 private let commandParser = CLICommandParser()
@@ -131,228 +86,138 @@ Never used - commands sent via `formatCommand()` or `sendRaw()`.
 
 **Recommendation**: Remove this property.
 
-### 2.2 REPLEngine Underutilized
-
-AtticCLI imports AtticCore but reimplements mode switching and prompt generation locally (SocketREPLMode enum) instead of using REPLEngine's facilities.
-
-### 2.3 AtticCore Import Analysis
-
-AtticCLI imports the entire AtticCore module but only uses a subset:
-
-| Symbol | Line(s) | Required? |
-|--------|---------|-----------|
-| `CLISocketClient` | 232, 515, 522, 645 | **Yes** - socket communication |
-| `CLIProtocolConstants.socketPath()` | 578 | **Yes** - socket path generation |
-| `AtticCore.fullTitle` | 145 | **Yes** - version display |
-| `AtticCore.buildConfiguration` | 146 | **Yes** - version display |
-| `AtticCore.welcomeBanner` | 168, 234 | **Yes** - welcome message |
-| `REPLEngine` | 166 | **No** - only in dead `runLocalREPL()` |
-
-**Analysis**: The import IS necessary for socket communication (`CLISocketClient`, `CLIProtocolConstants`). However:
-
-1. `REPLEngine` is only referenced in dead code - removing `runLocalREPL()` eliminates this dependency
-2. Version strings (`fullTitle`, `buildConfiguration`, `welcomeBanner`) could be moved to a lightweight `AtticVersion` module to reduce coupling
-3. The core requirement is `CLISocketClient` and `CLIProtocolConstants` - these are essential
-
-**Recommendation**: After removing dead code, consider whether a smaller `AtticProtocol` module (containing just CLI socket/protocol code) would be cleaner than depending on all of AtticCore.
-
----
-
-## 3. Redundant Code
-
-### 3.1 Duplicated fd_set Helpers (HIGH)
+### 2.3 Duplicated fd_set Helpers (MEDIUM)
 
 **Identical implementations in two files:**
 
 | File | Lines | Functions |
 |------|-------|-----------|
-| CLISocketClient.swift | 644-667 | `fdZero`, `fdSet` |
+| CLISocketClient.swift | 707-730 | `fdZero`, `fdSet` |
 | CLISocketServer.swift | 468-508 | `fdZero`, `fdSet`, `fdIsSet` |
 
 **Recommendation**: Extract to shared `SocketHelpers.swift` in AtticCore.
 
-### 3.2 Duplicated Socket Address Setup (MEDIUM)
+### 2.4 Prompt Format Discrepancy (MEDIUM)
 
-Nearly identical sockaddr_un initialization code:
-- CLISocketClient.swift:192-206
-- CLISocketServer.swift:177-191
+| Source | Format |
+|--------|--------|
+| REPL_COMMANDS.md | `[monitor] $E477>` (with PC) |
+| AtticCLI.swift | `[monitor] >` (no PC) |
 
-**Recommendation**: Create shared `UnixSocket.makeAddress(path:)` helper.
+**Impact**: Loses debugging context; may affect Emacs comint regex matching.
 
-### 3.3 Dead Code: Local REPL (HIGH)
+### 2.5 Incomplete Command Translations (LOW)
 
-**Location**: AtticCLI.swift:166-200
+**DOS Mode** - Only 3 commands explicitly handled in `translateDOSCommand()`:
+- ✓ `mount`, `unmount`, `drives`
+- Other commands pass through untranslated
 
-```swift
-@MainActor
-static func runLocalREPL(repl: REPLEngine) async {
-    // 35 lines of code never executed
-}
-```
-
-The `main()` function always uses socket-based REPL via `runSocketREPL()`. The local REPL path is unreachable.
-
-**Recommendation**: Remove `runLocalREPL()` and associated logic.
-
-### 3.4 Redundant Mode Enum (MEDIUM)
-
-| File | Enum |
-|------|------|
-| AtticCLI.swift:208-222 | `SocketREPLMode` |
-| AtticCore/REPLEngine.swift | `REPLMode` |
-
-Both represent the same concept (monitor/basic/dos) with similar properties.
-
-**Recommendation**: Reuse `REPLMode` from AtticCore.
-
-### 3.5 Duplicated Help Text (LOW)
-
-| File | Function | Purpose |
-|------|----------|---------|
-| AtticCLI.swift:459-508 | `printHelp()` | CLI help |
-| REPLEngine.swift:799-822 | `formatHelp()` | REPL help |
-
-Similar content defined separately.
+**Note**: This may be intentional if the server handles raw DOS commands.
 
 ---
 
-## 4. Simplification Opportunities
+## 3. New Features Added
 
-### 4.1 Simplify Command Flow
+### 3.1 New Commands
 
-**Current flow** (inefficient):
-```
-User input
-  → translateToProtocol() creates string
-  → sendRaw() sends string to server
-  → CLICommandParser.parse() on server parses string back to CLICommand
-```
+| Command | Translation | Purpose |
+|---------|-------------|---------|
+| `.screenshot` | `screenshot` | Take screenshot |
+| `.screenshot <path>` | `screenshot <path>` | Take screenshot to path |
+| `.boot <path>` | `boot <path>` | Boot with file (ATR, XEX, BAS) |
 
-**Proposed flow** (direct):
-```
-User input
-  → Parse to CLICommand directly
-  → send(CLICommand) to server
-  → Server executes CLICommand
-```
+### 3.2 BASIC Mode Key Injection
 
-### 4.2 Fix or Remove Non-Functional Flags
+New `translateBASICCommand()` function:
+- `LIST` → `basic list` (protocol command for clean listing)
+- Everything else → `inject keys <escaped>\n` (natural keyboard input)
 
-Two flags are non-functional:
+This is a significant improvement - BASIC input now goes through the emulator's keyboard handler for authentic behavior.
 
-**`--headless`** (see section 1.1): Parsed but never passed to AtticServer. Options:
-1. **Quick fix**: Add `if headless { arguments.append("--headless") }` in `launchServer()`
-2. **Proper fix**: Implement true local headless mode using `runLocalREPL()` with embedded emulator
-3. **Remove**: Delete the flag and document that AtticServer is always required
+### 3.3 Improved Shutdown Behavior
 
-**`--repl`** (see section 1.2): Defaults to true, can only be set to true, and is never read.
-- **Remove**: Delete the flag entirely - it serves no purpose
-
-### 4.3 Complete or Remove Partial Translations
-
-`translateDOSCommand()` only handles 3 of 15+ documented commands, passing others through unparsed. Either:
-- Complete all translations, or
-- Remove the function and let server handle all DOS commands directly
+The `.shutdown` command now checks `launchedServerPid`:
+- If CLI launched the server: sends shutdown command AND `kill(pid, SIGTERM)`
+- If server was already running: just disconnects, leaves server running
 
 ---
 
-## 5. Code Quality Metrics
+## 4. Code Quality Metrics
 
-### Lines of Code
+### Lines of Code (Updated)
 
-| File | Lines | Issues |
+| File | Lines | Change |
 |------|-------|--------|
-| AtticCLI.swift | 714 | 35 lines dead code |
-| CLIProtocol.swift | 845 | Well-structured |
-| CLISocketClient.swift | 668 | 25 lines duplicated, 1 unused property |
-| CLISocketServer.swift | 509 | 45 lines duplicated |
-| **Total** | **2,736** | **~105 lines to consolidate** |
+| AtticCLI.swift | 637 | -77 lines |
+| CLIProtocol.swift | ~845 | unchanged |
+| CLISocketClient.swift | ~730 | unchanged |
+| CLISocketServer.swift | ~509 | unchanged |
+| ServerLauncher.swift | ~150 | NEW |
 
 ### Complexity Assessment
 
-- **AtticCLI.swift**: Moderate complexity, clear structure
-- **CLIProtocol.swift**: Well-organized with comprehensive error handling
-- **CLISocketClient/Server**: Good actor isolation, proper async/await usage
+- **AtticCLI.swift**: Simplified, cleaner structure
+- **ServerLauncher.swift**: Well-designed, reusable component
+- Code is more modular with shared server launch logic
 
 ---
 
-## 6. Recommended Actions
-
-### Critical Priority
-
-| Action | Files | Effort |
-|--------|-------|--------|
-| Fix `--headless` flag (pass to server or remove) | AtticCLI.swift:551-555 | 15 min |
-| Remove useless `--repl` flag | AtticCLI.swift:48, 76-77, 119 | 10 min |
-
-### High Priority
-
-| Action | Files | Effort |
-|--------|-------|--------|
-| Remove dead `runLocalREPL()` | AtticCLI.swift | 15 min |
-| Extract fd_set helpers to shared file | CLISocketClient.swift, CLISocketServer.swift, new file | 30 min |
-| Fix monitor prompt to show PC | AtticCLI.swift:214 | 15 min |
+## 5. Recommended Actions
 
 ### Medium Priority
 
 | Action | Files | Effort |
 |--------|-------|--------|
+| Extract fd_set helpers to shared file | CLISocketClient.swift, CLISocketServer.swift | 30 min |
+| Fix monitor prompt to show PC | AtticCLI.swift | 15 min |
 | Remove unused `commandParser` | CLISocketClient.swift | 5 min |
-| Reuse REPLMode instead of SocketREPLMode | AtticCLI.swift | 30 min |
-| Complete command translations or document gaps | AtticCLI.swift, docs | 2 hrs |
 
 ### Low Priority
 
 | Action | Files | Effort |
 |--------|-------|--------|
-| Add breakpoint shortcuts (bp, bc) | CLIProtocol.swift | 30 min |
-| Update REPL_COMMANDS.md accuracy | docs/REPL_COMMANDS.md | 1 hr |
-| Consolidate help text | AtticCLI.swift, REPLEngine.swift | 30 min |
+| Decide on `--headless` flag (implement or remove) | AtticCLI.swift, ServerLauncher.swift | 30 min |
+| Update REPL_COMMANDS.md for new commands | docs/REPL_COMMANDS.md | 15 min |
+
+---
+
+## 6. AtticCore Dependency Analysis (Updated)
+
+AtticCLI now uses from AtticCore:
+
+| Symbol | Required? |
+|--------|-----------|
+| `CLISocketClient` | **Yes** - socket communication |
+| `CLIProtocolConstants` | **Yes** - protocol constants |
+| `ServerLauncher` | **Yes** - server auto-launch |
+| `ServerLaunchOptions` | **Yes** - launch configuration |
+| `ServerLaunchResult` | **Yes** - launch result handling |
+| `AtticCore.fullTitle` | **Yes** - version display |
+| `AtticCore.buildConfiguration` | **Yes** - version display |
+| `AtticCore.welcomeBanner` | **Yes** - welcome message |
+
+**Note**: `REPLEngine` is no longer imported (dead code removed).
 
 ---
 
 ## 7. Architecture Notes
 
-### What Works Well
+### Improvements
 
-1. **Actor isolation**: Both CLISocketClient and CLISocketServer properly use actors for thread safety
-2. **Protocol design**: Text-based CLI protocol is human-readable and debuggable
-3. **Error handling**: Comprehensive error types with localized descriptions
-4. **Async/await**: Modern concurrency patterns used throughout
+1. **Clean separation**: CLI is now purely a protocol client
+2. **Shared utilities**: `ServerLauncher` reused across CLI, GUI, MCP
+3. **Better lifecycle management**: Tracks server ownership for clean shutdown
+4. **Natural BASIC input**: Key injection provides authentic emulator interaction
 
-### Areas for Improvement
-
-1. **Command abstraction**: Direct CLICommand passing would be cleaner than string translation
-2. **Shared utilities**: Socket helpers should be in a common location
-3. **Documentation sync**: Docs and implementation should be kept in sync
-4. **Mode consistency**: Single source of truth for REPL modes
-
----
-
-## 8. Testing Recommendations
-
-Current test coverage for CLI components is minimal. Recommended tests:
-
-1. **CLICommandParser**: Unit tests for all command variants and error cases
-2. **Socket communication**: Integration tests for client-server roundtrip
-3. **Command translation**: Verify all documented commands are properly handled
-4. **Mode switching**: Verify prompts match documentation
-
----
-
-## Appendix: File Locations
+### File Structure
 
 ```
 Sources/
 ├── AtticCLI/
-│   └── AtticCLI.swift          # Main CLI executable (714 lines)
+│   └── AtticCLI.swift          # CLI executable (637 lines, -77)
 └── AtticCore/
-    ├── CLIProtocol.swift        # Protocol types and parser (845 lines)
-    ├── CLISocketClient.swift    # Client socket implementation (668 lines)
-    ├── CLISocketServer.swift    # Server socket implementation (509 lines)
-    └── REPLEngine.swift         # REPL state machine (1087 lines)
-
-docs/
-├── REPL_COMMANDS.md            # Command reference (570 lines)
-└── PROTOCOL.md                 # Protocol specification (1262 lines)
+    ├── CLIProtocol.swift        # Protocol types and parser
+    ├── CLISocketClient.swift    # Client socket implementation
+    ├── CLISocketServer.swift    # Server socket implementation
+    └── ServerLauncher.swift     # NEW: Shared server launch utility
 ```
