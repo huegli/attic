@@ -30,7 +30,7 @@ final class BASICTokenizerTests: XCTestCase {
     func testBCDOne() {
         let bcd = BCDFloat.encode(1)
         XCTAssertEqual(bcd.bytes[0] & 0x7F, 0x40)  // Exponent = 0 + 64 = 64 = $40
-        XCTAssertEqual(bcd.bytes[1], 0x10)  // First digit is 1
+        XCTAssertEqual(bcd.bytes[1], 0x01)  // Mantissa = 01 (BCD for 1, power-of-100 format)
         XCTAssertFalse(bcd.isNegative)
 
         let decoded = bcd.decode()
@@ -39,8 +39,8 @@ final class BASICTokenizerTests: XCTestCase {
 
     func testBCDTen() {
         let bcd = BCDFloat.encode(10)
-        // Exponent should be 1 + 64 = 65 = $41
-        XCTAssertEqual(bcd.bytes[0] & 0x7F, 0x41)
+        // Power-of-100: 10 = 10 × 100^0, exponent = 0 + 64 = 64 = $40
+        XCTAssertEqual(bcd.bytes[0] & 0x7F, 0x40)
 
         let decoded = bcd.decode()
         XCTAssertEqual(decoded, 10.0, accuracy: 0.001)
@@ -48,8 +48,8 @@ final class BASICTokenizerTests: XCTestCase {
 
     func testBCDHundred() {
         let bcd = BCDFloat.encode(100)
-        // Exponent should be 2 + 64 = 66 = $42
-        XCTAssertEqual(bcd.bytes[0] & 0x7F, 0x42)
+        // Power-of-100: 100 = 1 × 100^1, exponent = 1 + 64 = 65 = $41
+        XCTAssertEqual(bcd.bytes[0] & 0x7F, 0x41)
 
         let decoded = bcd.decode()
         XCTAssertEqual(decoded, 100.0, accuracy: 0.01)
@@ -89,16 +89,15 @@ final class BASICTokenizerTests: XCTestCase {
     }
 
     func testBCDNumericEncoding() {
-        // Small int uses 2 bytes
+        // Real Atari BASIC always uses $0E + 6-byte BCD for all numeric constants
         let encoding0 = BASICNumericEncoding.forValue(0)
-        if case .smallInt(let v) = encoding0 {
-            XCTAssertEqual(v, 0)
-            XCTAssertEqual(encoding0.byteCount, 2)
+        if case .bcdFloat = encoding0 {
+            XCTAssertEqual(encoding0.byteCount, 7)
         } else {
-            XCTFail("Expected smallInt encoding for 0")
+            XCTFail("Expected bcdFloat encoding for 0")
         }
 
-        // Large number uses 7 bytes
+        // Large number also uses 7 bytes
         let encoding1000 = BASICNumericEncoding.forValue(1000)
         if case .bcdFloat = encoding1000 {
             XCTAssertEqual(encoding1000.byteCount, 7)
