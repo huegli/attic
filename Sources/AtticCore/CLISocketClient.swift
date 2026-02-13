@@ -593,6 +593,38 @@ public actor CLISocketClient {
                 return "basic LOAD D\(d):\(filename)"
             }
             return "basic LOAD D:\(filename)"
+
+        // DOS mode commands
+        case .dosChangeDrive(let drive):
+            return "dos cd \(drive)"
+        case .dosDirectory(let pattern):
+            if let p = pattern { return "dos dir \(p)" }
+            return "dos dir"
+        case .dosFileInfo(let filename):
+            return "dos info \(filename)"
+        case .dosType(let filename):
+            return "dos type \(filename)"
+        case .dosDump(let filename):
+            return "dos dump \(filename)"
+        case .dosCopy(let source, let destination):
+            return "dos copy \(source) \(destination)"
+        case .dosRename(let oldName, let newName):
+            return "dos rename \(oldName) \(newName)"
+        case .dosDelete(let filename):
+            return "dos delete \(filename)"
+        case .dosLock(let filename):
+            return "dos lock \(filename)"
+        case .dosUnlock(let filename):
+            return "dos unlock \(filename)"
+        case .dosExport(let filename, let hostPath):
+            return "dos export \(filename) \(hostPath)"
+        case .dosImport(let hostPath, let filename):
+            return "dos import \(hostPath) \(filename)"
+        case .dosNewDisk(let path, let type):
+            if let t = type { return "dos newdisk \(path) \(t)" }
+            return "dos newdisk \(path)"
+        case .dosFormat:
+            return "dos format"
         }
     }
 

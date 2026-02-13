@@ -192,6 +192,39 @@ public enum CLICommand: Sendable {
     case basicSave(drive: Int?, filename: String)
     /// Load tokenized BASIC program from an ATR disk file.
     case basicLoad(drive: Int?, filename: String)
+
+    // DOS mode commands — file and disk management via DiskManager.
+    // These map to the same operations available in the old direct-REPL
+    // DOS mode, but routed through the CLI socket protocol.
+
+    /// Change the current drive (1-8).
+    case dosChangeDrive(drive: Int)
+    /// List directory contents, optionally filtered by a wildcard pattern.
+    case dosDirectory(pattern: String?)
+    /// Show detailed file information (size, sectors, locked status, etc.).
+    case dosFileInfo(filename: String)
+    /// Display a text file's contents (ATASCII decoded).
+    case dosType(filename: String)
+    /// Display a hex dump of a file's contents.
+    case dosDump(filename: String)
+    /// Copy a file between drives (e.g., "D1:FILE D2:FILE").
+    case dosCopy(source: String, destination: String)
+    /// Rename a file on the current drive.
+    case dosRename(oldName: String, newName: String)
+    /// Delete a file from the current drive.
+    case dosDelete(filename: String)
+    /// Lock a file (set read-only flag in directory).
+    case dosLock(filename: String)
+    /// Unlock a file (clear read-only flag in directory).
+    case dosUnlock(filename: String)
+    /// Export a file from ATR disk to the host filesystem.
+    case dosExport(filename: String, hostPath: String)
+    /// Import a file from the host filesystem to ATR disk.
+    case dosImport(hostPath: String, filename: String)
+    /// Create a new blank ATR disk image. Type is "sd", "ed", or "dd".
+    case dosNewDisk(path: String, type: String?)
+    /// Format the current drive (erases all data).
+    case dosFormat
 }
 
 // =============================================================================
@@ -378,6 +411,10 @@ public struct CLICommandParser: Sendable {
         // BASIC commands
         case "basic":
             return try parseBasic(argsString)
+
+        // DOS mode commands
+        case "dos":
+            return try parseDOS(argsString)
 
         default:
             throw CLIProtocolError.invalidCommand(command)
@@ -799,6 +836,174 @@ public struct CLICommandParser: Sendable {
         }
 
         return .basicRenumber(start: start, step: step)
+    }
+
+    // MARK: - DOS Command Parser
+
+    /// Parses DOS subcommands for disk and file operations.
+    ///
+    /// Recognized subcommands (case-insensitive): CD, DIR, INFO, TYPE, DUMP,
+    /// COPY, RENAME, DELETE, LOCK, UNLOCK, EXPORT, IMPORT, NEWDISK, FORMAT.
+    private func parseDOS(_ args: String) throws -> CLICommand {
+        let trimmed = args.trimmingCharacters(in: .whitespaces)
+
+        guard !trimmed.isEmpty else {
+            throw CLIProtocolError.missingArgument("dos requires a subcommand (cd, dir, info, type, dump, copy, rename, delete, lock, unlock, export, import, newdisk, format)")
+        }
+
+        // Split into subcommand and remaining argument text
+        let parts = trimmed.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+        let subcommand = String(parts[0]).uppercased()
+        let rest = parts.count > 1 ? String(parts[1]).trimmingCharacters(in: .whitespaces) : ""
+
+        switch subcommand {
+        case "CD":
+            guard !rest.isEmpty else {
+                throw CLIProtocolError.missingArgument("dos cd requires a drive number (1-8)")
+            }
+            guard let drive = Int(rest), drive >= 1, drive <= 8 else {
+                throw CLIProtocolError.invalidDriveNumber(rest)
+            }
+            return .dosChangeDrive(drive: drive)
+
+        case "DIR":
+            return .dosDirectory(pattern: rest.isEmpty ? nil : rest)
+
+        case "INFO":
+            guard !rest.isEmpty else {
+                throw CLIProtocolError.missingArgument("dos info requires a filename")
+            }
+            return .dosFileInfo(filename: rest)
+
+        case "TYPE":
+            guard !rest.isEmpty else {
+                throw CLIProtocolError.missingArgument("dos type requires a filename")
+            }
+            return .dosType(filename: rest)
+
+        case "DUMP":
+            guard !rest.isEmpty else {
+                throw CLIProtocolError.missingArgument("dos dump requires a filename")
+            }
+            return .dosDump(filename: rest)
+
+        case "COPY":
+            return try parseDOSCopy(rest)
+
+        case "RENAME":
+            return try parseDOSRename(rest)
+
+        case "DELETE", "DEL":
+            guard !rest.isEmpty else {
+                throw CLIProtocolError.missingArgument("dos delete requires a filename")
+            }
+            return .dosDelete(filename: rest)
+
+        case "LOCK":
+            guard !rest.isEmpty else {
+                throw CLIProtocolError.missingArgument("dos lock requires a filename")
+            }
+            return .dosLock(filename: rest)
+
+        case "UNLOCK":
+            guard !rest.isEmpty else {
+                throw CLIProtocolError.missingArgument("dos unlock requires a filename")
+            }
+            return .dosUnlock(filename: rest)
+
+        case "EXPORT":
+            return try parseDOSExport(rest)
+
+        case "IMPORT":
+            return try parseDOSImport(rest)
+
+        case "NEWDISK":
+            return try parseDOSNewDisk(rest)
+
+        case "FORMAT":
+            return .dosFormat
+
+        default:
+            throw CLIProtocolError.invalidCommand("dos \(subcommand)")
+        }
+    }
+
+    /// Parses `dos copy <source> <destination>`.
+    ///
+    /// Both source and destination can include drive prefixes (e.g., D1:FILE).
+    /// Example: `dos copy D1:GAME.BAS D2:GAME.BAS`
+    private func parseDOSCopy(_ args: String) throws -> CLICommand {
+        let parts = args.split(separator: " ", omittingEmptySubsequences: true)
+        guard parts.count == 2 else {
+            throw CLIProtocolError.missingArgument("dos copy requires source and destination (e.g., D1:FILE D2:FILE)")
+        }
+        return .dosCopy(source: String(parts[0]), destination: String(parts[1]))
+    }
+
+    /// Parses `dos rename <oldname> <newname>`.
+    private func parseDOSRename(_ args: String) throws -> CLICommand {
+        let parts = args.split(separator: " ", omittingEmptySubsequences: true)
+        guard parts.count == 2 else {
+            throw CLIProtocolError.missingArgument("dos rename requires old name and new name")
+        }
+        return .dosRename(oldName: String(parts[0]), newName: String(parts[1]))
+    }
+
+    /// Parses `dos export <filename> <hostpath>`.
+    ///
+    /// Exports a file from the ATR disk image to the host filesystem.
+    /// The host path is tilde-expanded.
+    private func parseDOSExport(_ args: String) throws -> CLICommand {
+        let parts = args.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+        guard parts.count == 2 else {
+            throw CLIProtocolError.missingArgument("dos export requires filename and host path")
+        }
+        let hostPath = NSString(string: String(parts[1])).expandingTildeInPath
+        return .dosExport(filename: String(parts[0]), hostPath: hostPath)
+    }
+
+    /// Parses `dos import <hostpath> <filename>`.
+    ///
+    /// Imports a file from the host filesystem to the ATR disk image.
+    /// The host path is tilde-expanded.
+    private func parseDOSImport(_ args: String) throws -> CLICommand {
+        let parts = args.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+        guard parts.count == 2 else {
+            throw CLIProtocolError.missingArgument("dos import requires host path and filename")
+        }
+        let hostPath = NSString(string: String(parts[0])).expandingTildeInPath
+        return .dosImport(hostPath: hostPath, filename: String(parts[1]))
+    }
+
+    /// Parses `dos newdisk <path> [type]`.
+    ///
+    /// Creates a new blank ATR disk image. Type is optional:
+    /// - "sd" (default) — single density 90KB
+    /// - "ed" — enhanced density 130KB
+    /// - "dd" — double density 180KB
+    ///
+    /// The path is tilde-expanded.
+    private func parseDOSNewDisk(_ args: String) throws -> CLICommand {
+        guard !args.isEmpty else {
+            throw CLIProtocolError.missingArgument("dos newdisk requires a file path")
+        }
+
+        let parts = args.split(separator: " ", omittingEmptySubsequences: true)
+
+        // Last token might be a disk type (sd, ed, dd)
+        var type: String? = nil
+        var pathParts = parts
+
+        if parts.count >= 2 {
+            let lastPart = String(parts.last!).lowercased()
+            if ["sd", "ed", "dd"].contains(lastPart) {
+                type = lastPart
+                pathParts = parts.dropLast()
+            }
+        }
+
+        let path = NSString(string: pathParts.map(String.init).joined(separator: " ")).expandingTildeInPath
+        return .dosNewDisk(path: path, type: type)
     }
 
     /// Parses a `Dn:FILENAME` prefix to extract drive number and filename.

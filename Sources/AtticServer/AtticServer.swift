@@ -709,7 +709,234 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
             // Convert newlines to multi-line separator for CLI protocol
             let lines = listing.split(separator: "\n", omittingEmptySubsequences: false)
             return .okMultiLine(lines.map(String.init))
+
+        // DOS mode commands — all delegate to DiskManager which handles
+        // ATR filesystem operations and coordinates with EmulatorEngine.
+        case .dosChangeDrive(let drive):
+            do {
+                try await diskManager.changeDrive(to: drive)
+                return .ok("D\(drive):")
+            } catch {
+                return .error(error.localizedDescription)
+            }
+
+        case .dosDirectory(let pattern):
+            do {
+                let entries = try await diskManager.listDirectory(pattern: pattern)
+                if entries.isEmpty {
+                    return .ok("(empty disk)")
+                }
+                let lines = entries.map { entry in
+                    let lock = entry.isLocked ? "*" : " "
+                    return "\(lock) \(entry.fullName.padding(toLength: 12, withPad: " ", startingAt: 0)) \(String(format: "%3d", entry.sectorCount)) sectors"
+                }
+                return .okMultiLine(lines)
+            } catch {
+                return .error(error.localizedDescription)
+            }
+
+        case .dosFileInfo(let filename):
+            do {
+                let info = try await diskManager.getFileInfo(name: filename)
+                var lines: [String] = []
+                lines.append("Name:    \(info.entry.fullName)")
+                lines.append("Size:    \(info.fileSize) bytes (\(info.entry.sectorCount) sectors)")
+                lines.append("Locked:  \(info.entry.isLocked ? "yes" : "no")")
+                if info.isCorrupted {
+                    lines.append("WARNING: File appears corrupted")
+                }
+                return .okMultiLine(lines)
+            } catch {
+                return .error(error.localizedDescription)
+            }
+
+        case .dosType(let filename):
+            do {
+                let data = try await diskManager.readFile(name: filename)
+                // Convert to string, treating data as ATASCII/ASCII text
+                let text = String(data: data, encoding: .ascii) ?? String(data: data, encoding: .isoLatin1) ?? "(binary data)"
+                let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+                return .okMultiLine(lines.map(String.init))
+            } catch {
+                return .error(error.localizedDescription)
+            }
+
+        case .dosDump(let filename):
+            do {
+                let data = try await diskManager.readFile(name: filename)
+                let lines = formatHexDump(data: data)
+                return .okMultiLine(lines)
+            } catch {
+                return .error(error.localizedDescription)
+            }
+
+        case .dosCopy(let source, let destination):
+            do {
+                // Parse drive prefixes from source and destination
+                let (srcDrive, srcName) = parseDrivePrefix(source)
+                let (dstDrive, dstName) = parseDrivePrefix(destination)
+                // Resolve default drive outside ?? (actor isolation + autoclosure)
+                let defaultDrive = await diskManager.currentDrive
+                let fromDrive = srcDrive ?? defaultDrive
+                let toDrive = dstDrive ?? defaultDrive
+                let sectors = try await diskManager.copyFile(
+                    from: fromDrive, name: srcName,
+                    to: toDrive, as: dstName
+                )
+                return .ok("copied \(sectors) sectors")
+            } catch {
+                return .error(error.localizedDescription)
+            }
+
+        case .dosRename(let oldName, let newName):
+            do {
+                try await diskManager.renameFile(from: oldName, to: newName)
+                return .ok("renamed \(oldName) to \(newName)")
+            } catch {
+                return .error(error.localizedDescription)
+            }
+
+        case .dosDelete(let filename):
+            do {
+                try await diskManager.deleteFile(name: filename)
+                return .ok("deleted \(filename)")
+            } catch {
+                return .error(error.localizedDescription)
+            }
+
+        case .dosLock(let filename):
+            do {
+                try await diskManager.lockFile(name: filename)
+                return .ok("locked \(filename)")
+            } catch {
+                return .error(error.localizedDescription)
+            }
+
+        case .dosUnlock(let filename):
+            do {
+                try await diskManager.unlockFile(name: filename)
+                return .ok("unlocked \(filename)")
+            } catch {
+                return .error(error.localizedDescription)
+            }
+
+        case .dosExport(let filename, let hostPath):
+            do {
+                let bytes = try await diskManager.exportFile(name: filename, to: hostPath)
+                return .ok("exported \(bytes) bytes to \(hostPath)")
+            } catch {
+                return .error(error.localizedDescription)
+            }
+
+        case .dosImport(let hostPath, let filename):
+            do {
+                let sectors = try await diskManager.importFile(from: hostPath, name: filename)
+                return .ok("imported \(sectors) sectors")
+            } catch {
+                return .error(error.localizedDescription)
+            }
+
+        case .dosNewDisk(let path, let type):
+            do {
+                let diskType = parseDiskType(type)
+                let url = try await diskManager.createDisk(at: path, type: diskType)
+                return .ok("created \(url.path)")
+            } catch {
+                return .error(error.localizedDescription)
+            }
+
+        case .dosFormat:
+            do {
+                let drive = await diskManager.currentDrive
+                try await diskManager.formatDisk()
+                return .ok("formatted D\(drive):")
+            } catch {
+                return .error(error.localizedDescription)
+            }
         }
+    }
+
+    /// Parses a `Dn:FILENAME` prefix to extract drive number and filename.
+    ///
+    /// Used by DOS copy command to determine source/destination drives.
+    /// Supports: `D:FILE` (default drive), `D1:FILE` (specific drive), `FILE` (no prefix).
+    private func parseDrivePrefix(_ input: String) -> (drive: Int?, filename: String) {
+        let upper = input.uppercased()
+
+        if upper.hasPrefix("D") && upper.count > 1 {
+            let afterD = upper.dropFirst()
+            if afterD.hasPrefix(":") {
+                // D:FILENAME — default drive
+                let filename = String(input.dropFirst(2))
+                return (nil, filename)
+            }
+            if let colonIndex = afterD.firstIndex(of: ":") {
+                let driveStr = String(afterD[afterD.startIndex..<colonIndex])
+                if let drive = Int(driveStr), drive >= 1, drive <= 8 {
+                    let filenameStart = afterD.index(after: colonIndex)
+                    let filename = String(afterD[filenameStart...])
+                    return (drive, filename)
+                }
+            }
+        }
+
+        // No drive prefix
+        return (nil, input)
+    }
+
+    /// Converts a disk type string ("sd", "ed", "dd") to a DiskType enum value.
+    ///
+    /// Returns `.singleDensity` as the default if the string is nil or unrecognized.
+    private func parseDiskType(_ type: String?) -> DiskType {
+        switch type?.lowercased() {
+        case "sd", nil: return .singleDensity
+        case "ed": return .enhancedDensity
+        case "dd": return .doubleDensity
+        default: return .singleDensity
+        }
+    }
+
+    /// Formats raw data as a hex dump with 16 bytes per line.
+    ///
+    /// Output format: `0000: 48 65 6C 6C 6F 20 57 6F 72 6C 64 21 00 00 00 00  Hello World!....`
+    private func formatHexDump(data: Data) -> [String] {
+        var lines: [String] = []
+        let bytesPerLine = 16
+
+        for offset in stride(from: 0, to: data.count, by: bytesPerLine) {
+            let end = min(offset + bytesPerLine, data.count)
+            let chunk = data[offset..<end]
+
+            // Address
+            var line = String(format: "%04X: ", offset)
+
+            // Hex bytes
+            for (i, byte) in chunk.enumerated() {
+                line += String(format: "%02X ", byte)
+                if i == 7 { line += " " }  // Extra space at midpoint
+            }
+
+            // Pad if less than 16 bytes
+            let missing = bytesPerLine - chunk.count
+            for i in 0..<missing {
+                line += "   "
+                if chunk.count + i == 7 { line += " " }
+            }
+
+            // ASCII representation
+            line += " "
+            for byte in chunk {
+                if byte >= 0x20 && byte <= 0x7E {
+                    line += String(UnicodeScalar(byte))
+                } else {
+                    line += "."
+                }
+            }
+
+            lines.append(line)
+        }
+
+        return lines
     }
 
     /// Handles the screenshot command by capturing the current frame buffer and saving as PNG.

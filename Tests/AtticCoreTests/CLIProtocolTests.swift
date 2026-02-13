@@ -1535,4 +1535,403 @@ final class CLIProtocolTests: XCTestCase {
         }
         XCTAssertEqual(message, "Invalid command 'test'")
     }
+
+    // =========================================================================
+    // MARK: - CLICommandParser Tests - DOS Commands
+    // =========================================================================
+
+    func testParseDosChangeDrive() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("dos cd 2")
+        guard case .dosChangeDrive(let drive) = command else {
+            XCTFail("Expected .dosChangeDrive, got \(command)")
+            return
+        }
+        XCTAssertEqual(drive, 2)
+    }
+
+    func testParseDosChangeDriveInvalid() {
+        let parser = CLICommandParser()
+        XCTAssertThrowsError(try parser.parse("dos cd 0")) { error in
+            guard case CLIProtocolError.invalidDriveNumber = error else {
+                XCTFail("Expected invalidDriveNumber error, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testParseDosChangeDriveTooHigh() {
+        let parser = CLICommandParser()
+        XCTAssertThrowsError(try parser.parse("dos cd 9")) { error in
+            guard case CLIProtocolError.invalidDriveNumber = error else {
+                XCTFail("Expected invalidDriveNumber error, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testParseDosChangeDriveMissing() {
+        let parser = CLICommandParser()
+        XCTAssertThrowsError(try parser.parse("dos cd")) { error in
+            guard case CLIProtocolError.missingArgument = error else {
+                XCTFail("Expected missingArgument error, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testParseDosDirectoryNoPattern() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("dos dir")
+        guard case .dosDirectory(let pattern) = command else {
+            XCTFail("Expected .dosDirectory, got \(command)")
+            return
+        }
+        XCTAssertNil(pattern)
+    }
+
+    func testParseDosDirectoryWithPattern() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("dos dir *.COM")
+        guard case .dosDirectory(let pattern) = command else {
+            XCTFail("Expected .dosDirectory, got \(command)")
+            return
+        }
+        XCTAssertEqual(pattern, "*.COM")
+    }
+
+    func testParseDosFileInfo() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("dos info AUTORUN.SYS")
+        guard case .dosFileInfo(let filename) = command else {
+            XCTFail("Expected .dosFileInfo, got \(command)")
+            return
+        }
+        XCTAssertEqual(filename, "AUTORUN.SYS")
+    }
+
+    func testParseDosFileInfoMissing() {
+        let parser = CLICommandParser()
+        XCTAssertThrowsError(try parser.parse("dos info")) { error in
+            guard case CLIProtocolError.missingArgument = error else {
+                XCTFail("Expected missingArgument error, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testParseDosType() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("dos type README.TXT")
+        guard case .dosType(let filename) = command else {
+            XCTFail("Expected .dosType, got \(command)")
+            return
+        }
+        XCTAssertEqual(filename, "README.TXT")
+    }
+
+    func testParseDosTypeMissing() {
+        let parser = CLICommandParser()
+        XCTAssertThrowsError(try parser.parse("dos type")) { error in
+            guard case CLIProtocolError.missingArgument = error else {
+                XCTFail("Expected missingArgument error, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testParseDosDump() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("dos dump GAME.XEX")
+        guard case .dosDump(let filename) = command else {
+            XCTFail("Expected .dosDump, got \(command)")
+            return
+        }
+        XCTAssertEqual(filename, "GAME.XEX")
+    }
+
+    func testParseDosDumpMissing() {
+        let parser = CLICommandParser()
+        XCTAssertThrowsError(try parser.parse("dos dump")) { error in
+            guard case CLIProtocolError.missingArgument = error else {
+                XCTFail("Expected missingArgument error, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testParseDosCopy() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("dos copy D1:GAME.BAS D2:GAME.BAS")
+        guard case .dosCopy(let source, let destination) = command else {
+            XCTFail("Expected .dosCopy, got \(command)")
+            return
+        }
+        XCTAssertEqual(source, "D1:GAME.BAS")
+        XCTAssertEqual(destination, "D2:GAME.BAS")
+    }
+
+    func testParseDosCopyMissingDest() {
+        let parser = CLICommandParser()
+        XCTAssertThrowsError(try parser.parse("dos copy D1:FILE")) { error in
+            guard case CLIProtocolError.missingArgument = error else {
+                XCTFail("Expected missingArgument error, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testParseDosCopyMissingBoth() {
+        let parser = CLICommandParser()
+        XCTAssertThrowsError(try parser.parse("dos copy")) { error in
+            guard case CLIProtocolError.missingArgument = error else {
+                XCTFail("Expected missingArgument error, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testParseDosRename() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("dos rename OLDNAME.BAS NEWNAME.BAS")
+        guard case .dosRename(let oldName, let newName) = command else {
+            XCTFail("Expected .dosRename, got \(command)")
+            return
+        }
+        XCTAssertEqual(oldName, "OLDNAME.BAS")
+        XCTAssertEqual(newName, "NEWNAME.BAS")
+    }
+
+    func testParseDosRenameMissing() {
+        let parser = CLICommandParser()
+        XCTAssertThrowsError(try parser.parse("dos rename ONLYNAME")) { error in
+            guard case CLIProtocolError.missingArgument = error else {
+                XCTFail("Expected missingArgument error, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testParseDosDelete() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("dos delete TEMP.DAT")
+        guard case .dosDelete(let filename) = command else {
+            XCTFail("Expected .dosDelete, got \(command)")
+            return
+        }
+        XCTAssertEqual(filename, "TEMP.DAT")
+    }
+
+    func testParseDosDeleteAlias() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("dos del TEMP.DAT")
+        guard case .dosDelete(let filename) = command else {
+            XCTFail("Expected .dosDelete, got \(command)")
+            return
+        }
+        XCTAssertEqual(filename, "TEMP.DAT")
+    }
+
+    func testParseDosDeleteMissing() {
+        let parser = CLICommandParser()
+        XCTAssertThrowsError(try parser.parse("dos delete")) { error in
+            guard case CLIProtocolError.missingArgument = error else {
+                XCTFail("Expected missingArgument error, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testParseDosLock() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("dos lock GAME.BAS")
+        guard case .dosLock(let filename) = command else {
+            XCTFail("Expected .dosLock, got \(command)")
+            return
+        }
+        XCTAssertEqual(filename, "GAME.BAS")
+    }
+
+    func testParseDosLockMissing() {
+        let parser = CLICommandParser()
+        XCTAssertThrowsError(try parser.parse("dos lock")) { error in
+            guard case CLIProtocolError.missingArgument = error else {
+                XCTFail("Expected missingArgument error, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testParseDosUnlock() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("dos unlock GAME.BAS")
+        guard case .dosUnlock(let filename) = command else {
+            XCTFail("Expected .dosUnlock, got \(command)")
+            return
+        }
+        XCTAssertEqual(filename, "GAME.BAS")
+    }
+
+    func testParseDosUnlockMissing() {
+        let parser = CLICommandParser()
+        XCTAssertThrowsError(try parser.parse("dos unlock")) { error in
+            guard case CLIProtocolError.missingArgument = error else {
+                XCTFail("Expected missingArgument error, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testParseDosExport() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("dos export GAME.BAS /tmp/game.bas")
+        guard case .dosExport(let filename, let hostPath) = command else {
+            XCTFail("Expected .dosExport, got \(command)")
+            return
+        }
+        XCTAssertEqual(filename, "GAME.BAS")
+        XCTAssertEqual(hostPath, "/tmp/game.bas")
+    }
+
+    func testParseDosExportTildeExpansion() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("dos export GAME.BAS ~/games/game.bas")
+        guard case .dosExport(let filename, let hostPath) = command else {
+            XCTFail("Expected .dosExport, got \(command)")
+            return
+        }
+        XCTAssertEqual(filename, "GAME.BAS")
+        XCTAssertFalse(hostPath.hasPrefix("~"), "Tilde should be expanded")
+        XCTAssertTrue(hostPath.hasSuffix("games/game.bas"))
+    }
+
+    func testParseDosExportMissing() {
+        let parser = CLICommandParser()
+        XCTAssertThrowsError(try parser.parse("dos export GAME.BAS")) { error in
+            guard case CLIProtocolError.missingArgument = error else {
+                XCTFail("Expected missingArgument error, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testParseDosImport() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("dos import /tmp/game.bas GAME.BAS")
+        guard case .dosImport(let hostPath, let filename) = command else {
+            XCTFail("Expected .dosImport, got \(command)")
+            return
+        }
+        XCTAssertEqual(hostPath, "/tmp/game.bas")
+        XCTAssertEqual(filename, "GAME.BAS")
+    }
+
+    func testParseDosImportTildeExpansion() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("dos import ~/data/file.dat MYFILE.DAT")
+        guard case .dosImport(let hostPath, let filename) = command else {
+            XCTFail("Expected .dosImport, got \(command)")
+            return
+        }
+        XCTAssertFalse(hostPath.hasPrefix("~"), "Tilde should be expanded")
+        XCTAssertTrue(hostPath.hasSuffix("data/file.dat"))
+        XCTAssertEqual(filename, "MYFILE.DAT")
+    }
+
+    func testParseDosImportMissing() {
+        let parser = CLICommandParser()
+        XCTAssertThrowsError(try parser.parse("dos import /tmp/file")) { error in
+            guard case CLIProtocolError.missingArgument = error else {
+                XCTFail("Expected missingArgument error, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testParseDosNewDisk() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("dos newdisk /tmp/blank.atr")
+        guard case .dosNewDisk(let path, let type) = command else {
+            XCTFail("Expected .dosNewDisk, got \(command)")
+            return
+        }
+        XCTAssertEqual(path, "/tmp/blank.atr")
+        XCTAssertNil(type)
+    }
+
+    func testParseDosNewDiskWithType() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("dos newdisk /tmp/blank.atr dd")
+        guard case .dosNewDisk(let path, let type) = command else {
+            XCTFail("Expected .dosNewDisk, got \(command)")
+            return
+        }
+        XCTAssertEqual(path, "/tmp/blank.atr")
+        XCTAssertEqual(type, "dd")
+    }
+
+    func testParseDosNewDiskTildeExpansion() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("dos newdisk ~/disks/new.atr ed")
+        guard case .dosNewDisk(let path, let type) = command else {
+            XCTFail("Expected .dosNewDisk, got \(command)")
+            return
+        }
+        XCTAssertFalse(path.hasPrefix("~"), "Tilde should be expanded")
+        XCTAssertTrue(path.hasSuffix("disks/new.atr"))
+        XCTAssertEqual(type, "ed")
+    }
+
+    func testParseDosNewDiskMissing() {
+        let parser = CLICommandParser()
+        XCTAssertThrowsError(try parser.parse("dos newdisk")) { error in
+            guard case CLIProtocolError.missingArgument = error else {
+                XCTFail("Expected missingArgument error, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testParseDosFormat() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("dos format")
+        guard case .dosFormat = command else {
+            XCTFail("Expected .dosFormat, got \(command)")
+            return
+        }
+    }
+
+    func testParseDosNoSubcommand() {
+        let parser = CLICommandParser()
+        XCTAssertThrowsError(try parser.parse("dos")) { error in
+            guard case CLIProtocolError.missingArgument = error else {
+                XCTFail("Expected missingArgument error, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testParseDosInvalidSubcommand() {
+        let parser = CLICommandParser()
+        XCTAssertThrowsError(try parser.parse("dos badcommand")) { error in
+            guard case CLIProtocolError.invalidCommand = error else {
+                XCTFail("Expected invalidCommand error, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testParseDosCommandCaseInsensitive() throws {
+        let parser = CLICommandParser()
+        // "DIR", "dir", "Dir" should all parse correctly
+        let cmd1 = try parser.parse("dos DIR")
+        let cmd2 = try parser.parse("dos dir")
+        let cmd3 = try parser.parse("dos Dir")
+        guard case .dosDirectory = cmd1,
+              case .dosDirectory = cmd2,
+              case .dosDirectory = cmd3 else {
+            XCTFail("All should be .dosDirectory")
+            return
+        }
+    }
 }

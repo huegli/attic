@@ -464,6 +464,11 @@ struct AtticCLI {
     }
 
     /// Translates a DOS mode command.
+    ///
+    /// DOS commands are prefixed with `dos ` for the protocol, mirroring
+    /// how BASIC commands are prefixed with `basic `. The three original
+    /// disk commands (mount, unmount, drives) remain at the top level
+    /// since they're shared across modes.
     static func translateDOSCommand(_ cmd: String) -> String {
         let parts = cmd.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
         guard let command = parts.first else { return cmd }
@@ -472,12 +477,44 @@ struct AtticCLI {
         let args = parts.count > 1 ? String(parts[1]) : ""
 
         switch cmdLower {
+        // Top-level disk commands (shared, not DOS-prefixed)
         case "mount":
             return "mount \(args)"
         case "unmount", "umount":
             return "unmount \(args)"
-        case "drives", "dir":
-            return args.isEmpty ? "drives" : cmd
+        case "drives":
+            return "drives"
+
+        // DOS mode commands — prefixed with "dos" for the protocol
+        case "cd":
+            return "dos cd \(args)"
+        case "dir":
+            return args.isEmpty ? "dos dir" : "dos dir \(args)"
+        case "info":
+            return "dos info \(args)"
+        case "type":
+            return "dos type \(args)"
+        case "dump":
+            return "dos dump \(args)"
+        case "copy", "cp":
+            return "dos copy \(args)"
+        case "rename", "ren":
+            return "dos rename \(args)"
+        case "delete", "del":
+            return "dos delete \(args)"
+        case "lock":
+            return "dos lock \(args)"
+        case "unlock":
+            return "dos unlock \(args)"
+        case "export":
+            return "dos export \(args)"
+        case "import":
+            return "dos import \(args)"
+        case "newdisk":
+            return "dos newdisk \(args)"
+        case "format":
+            return "dos format"
+
         default:
             return cmd
         }
@@ -546,6 +583,20 @@ struct AtticCLI {
               mount <n> <path>  Mount disk image to drive n
               unmount <n>       Unmount drive n
               drives            List mounted drives
+              cd <n>            Change current drive (1-8)
+              dir [pattern]     List directory (e.g. dir *.COM)
+              info <file>       Show file details (size, sectors, locked)
+              type <file>       Display text file contents
+              dump <file>       Hex dump of file contents
+              copy <src> <dst>  Copy file (e.g. copy D1:FILE D2:FILE)
+              rename <old> <new> Rename a file
+              delete <file>     Delete a file
+              lock <file>       Lock file (read-only)
+              unlock <file>     Unlock file
+              export <f> <path> Export disk file to host filesystem
+              import <path> <f> Import host file to disk
+              newdisk <p> [type] Create new ATR (type: sd, ed, dd)
+              format            Format current drive (erases all data!)
             """)
         }
     }
