@@ -684,6 +684,15 @@ final class CLIProtocolTests: XCTestCase {
     // MARK: - CLICommandParser Tests - Display
     // =========================================================================
 
+    func testParseScreen() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("screen")
+        guard case .screenText = command else {
+            XCTFail("Expected .screenText, got \(command)")
+            return
+        }
+    }
+
     func testParseScreenshotWithPath() throws {
         let parser = CLICommandParser()
         let command = try parser.parse("screenshot /path/to/screenshot.png")

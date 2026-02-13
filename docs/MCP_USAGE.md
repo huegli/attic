@@ -260,6 +260,7 @@ Result: Key pressed: RETURN
 | Tool | Description |
 |------|-------------|
 | `emulator_screenshot` | Capture screenshot of the Atari display as PNG |
+| `emulator_get_screen_text` | Read the GRAPHICS 0 text screen as a string (40x24 chars) |
 
 **Example - Take Screenshot:**
 ```

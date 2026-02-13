@@ -329,6 +329,10 @@ struct AtticCLI {
                     // Forward to server
                     break
 
+                case ".screen":
+                    // Forward to server
+                    break
+
                 default:
                     // Handle commands that forward to server
                     let lowerTrimmed = trimmed.lowercased()
@@ -410,6 +414,8 @@ struct AtticCLI {
             switch lowerTrimmed {
             case ".status":
                 return "status"
+            case ".screen":
+                return "screen"
             case ".reset":
                 return "reset cold"
             case ".warmstart":
@@ -617,6 +623,7 @@ struct AtticCLI {
           .help             Show help
           .status           Show emulator status
           .screenshot [p]   Save screenshot (default: ~/Desktop/Attic-<time>.png)
+          .screen           Read screen text (GRAPHICS 0 only)
           .boot <path>      Boot with file (ATR, XEX, BAS, etc.)
           .reset            Cold reset
           .warmstart        Warm reset

@@ -469,6 +469,19 @@ async def emulator_press_key(
 
 
 @mcp.tool()
+async def emulator_get_screen_text() -> str:
+    """Read the text displayed on the Atari GRAPHICS 0 screen.
+
+    Returns the 40x24 character text screen as a multi-line string.
+    Only works when the emulator is in GRAPHICS 0 (text) mode.
+    Useful for reading prompts, BASIC listings, and other text output
+    without taking a pixel screenshot.
+    """
+    result = await _send("screen")
+    return result.replace(MULTI_LINE_SEP, "\n")
+
+
+@mcp.tool()
 async def emulator_screenshot(
     path: Annotated[str | None, Field(description=(
         "File path to save the PNG screenshot. If not specified, "

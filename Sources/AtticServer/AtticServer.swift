@@ -545,6 +545,9 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
         case .screenshot(let path):
             return await handleScreenshot(path: path)
 
+        case .screenText:
+            return await handleScreenText()
+
         // BASIC injection - DISABLED per attic-ahl (direct memory manipulation)
         case .injectBasic:
             return .error("BASIC injection is disabled. Use keyboard input instead.")
@@ -1078,6 +1081,86 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
         }
 
         return .ok("screenshot saved to \(actualPath)")
+    }
+
+    /// Handles the screen text command by reading GRAPHICS 0 display memory.
+    ///
+    /// Reads the 40x24 character screen RAM and converts Atari screen codes to
+    /// printable Unicode characters. Atari screen codes are NOT the same as
+    /// ATASCII — the mapping is:
+    ///   - Screen $00-$1F → ATASCII $20-$3F (space, digits, punctuation)
+    ///   - Screen $20-$3F → ATASCII $40-$5F (uppercase letters, @, [, etc.)
+    ///   - Screen $40-$5F → control characters → rendered as "."
+    ///   - Screen $60-$7F → ATASCII $60-$7F (lowercase letters)
+    ///   - Screen $80-$FF → inverse video of $00-$7F (bit 7 stripped)
+    ///
+    /// Key memory locations:
+    ///   - DINDEX ($0057) — current display mode (must be 0 for text)
+    ///   - SAVMSC ($0058-$0059) — 16-bit pointer to screen RAM base
+    ///
+    /// - Returns: CLI response with the screen text as multi-line output.
+    private func handleScreenText() async -> CLIResponse {
+        // Check display mode — DINDEX at $0057 must be 0 (GRAPHICS 0)
+        let dindex = await emulator.readMemory(at: 0x0057)
+        guard dindex == 0 else {
+            return .error("Not in GRAPHICS 0 mode (DINDEX=\(dindex))")
+        }
+
+        // Read SAVMSC ($0058-$0059) — little-endian pointer to screen RAM
+        let savmscLo = await emulator.readMemory(at: 0x0058)
+        let savmscHi = await emulator.readMemory(at: 0x0059)
+        let screenBase = UInt16(savmscHi) << 8 | UInt16(savmscLo)
+
+        // Read 960 bytes (40 columns x 24 rows) of screen RAM
+        let screenData = await emulator.readMemoryBlock(at: screenBase, count: 960)
+
+        // Convert screen codes to printable characters and split into lines
+        var lines: [String] = []
+        for row in 0..<24 {
+            var line = ""
+            for col in 0..<40 {
+                let screenCode = screenData[row * 40 + col]
+                line.append(screenCodeToChar(screenCode))
+            }
+            lines.append(line)
+        }
+
+        // Trim trailing blank lines
+        while let last = lines.last, last.allSatisfy({ $0 == " " }) {
+            lines.removeLast()
+        }
+
+        return .okMultiLine(lines)
+    }
+
+    /// Converts an Atari screen code byte to a printable Unicode character.
+    ///
+    /// Screen codes differ from ATASCII. The mapping strips the inverse-video
+    /// bit (bit 7), then maps the low 7 bits:
+    ///   - $00-$1F → characters ' ' through '?' (ASCII $20-$3F)
+    ///   - $20-$3F → characters '@' through '_' (ASCII $40-$5F)
+    ///   - $40-$5F → control characters → rendered as "."
+    ///   - $60-$7F → characters '`' through DEL → lowercase letters, etc.
+    private func screenCodeToChar(_ code: UInt8) -> Character {
+        // Strip inverse video bit
+        let base = code & 0x7F
+
+        switch base {
+        case 0x00...0x1F:
+            // Screen $00-$1F → ASCII $20-$3F (space, digits, punctuation)
+            return Character(UnicodeScalar(base + 0x20))
+        case 0x20...0x3F:
+            // Screen $20-$3F → ASCII $40-$5F (uppercase letters, @, [, etc.)
+            return Character(UnicodeScalar(base + 0x20))
+        case 0x40...0x5F:
+            // Screen $40-$5F → control characters, render as "."
+            return "."
+        case 0x60...0x7F:
+            // Screen $60-$7F → ASCII $60-$7F (lowercase letters)
+            return Character(UnicodeScalar(base))
+        default:
+            return "."
+        }
     }
 
     /// Handles the disassemble command.

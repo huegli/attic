@@ -61,6 +61,7 @@ Emulator Status
 |---------|-------------|
 | `.screenshot` | Save screenshot to Desktop |
 | `.screenshot <path>` | Save screenshot to specific path |
+| `.screen` | Read screen text (GRAPHICS 0 only) |
 
 ### State Management
 

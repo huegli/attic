@@ -154,6 +154,8 @@ public enum CLICommand: Sendable {
 
     // Display
     case screenshot(path: String?)
+    /// Read the text displayed on the GRAPHICS 0 screen as a string.
+    case screenText
 
     // BASIC injection
     case injectBasic(base64Data: String)
@@ -407,6 +409,8 @@ public struct CLICommandParser: Sendable {
         // Display
         case "screenshot":
             return .screenshot(path: argsString.isEmpty ? nil : argsString)
+        case "screen":
+            return .screenText
 
         // Injection
         case "inject":
