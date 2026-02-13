@@ -88,9 +88,9 @@ test-cli:
 test-basic:
 	swift test --filter 'BASIC'
 
-## Assembler, disassembler, 6502, expression evaluator (<1s)
+## Assembler, disassembler, 6502, monitor/debugger (<1s)
 test-asm:
-	swift test --filter 'Assembler|Disassembl|Opcode|CPUFlags|AddressingMode|ExpressionParser|SymbolTable|ParsedOperand|AssemblyResult|MonitorOpcodeTable|MonitorOpcodeInfo|InteractiveAssembler|BreakpointManager|BreakpointError|MonitorStepResult'
+	swift test --filter 'Assembler|Disassembl|Opcode|CPUFlags|AddressingMode|ExpressionParser|SymbolTable|ParsedOperand|AssemblyResult|MonitorOpcodeTable|MonitorOpcodeInfo|InteractiveAssembler|BreakpointManager|BreakpointError|MonitorStepResult|MonitorStepLogic'
 
 ## ATR filesystem tests (<1s)
 test-atr:

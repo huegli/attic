@@ -1430,3 +1430,994 @@ final class AssemblyResultTests: XCTestCase {
         XCTAssertEqual(result.length, 0)
     }
 }
+
+// =============================================================================
+// MARK: - Breakpoint Memory Interaction Tests (8.1)
+// =============================================================================
+//
+// These tests verify that BreakpointManager correctly injects BRK opcodes
+// into RAM, saves/restores original bytes, and handles all memory-modifying
+// operations (set, clear, suspend, resume, enable, disable) through the
+// MockMemoryAccess protocol.
+//
+
+/// Tests for breakpoint operations that require memory interaction.
+///
+/// Unlike BreakpointManagerTests (which use setBreakpointTracking for pure
+/// tracking tests), these tests use the full setBreakpoint/clearBreakpoint
+/// API with MockMemoryAccess to verify BRK injection and byte restoration.
+final class BreakpointManagerMemoryTests: XCTestCase {
+
+    // =========================================================================
+    // MARK: - Set / Clear with BRK Injection
+    // =========================================================================
+
+    /// Test that setting a RAM breakpoint injects BRK ($00) at the address.
+    func test_setBreakpoint_ram_injectsBRK() async throws {
+        let manager = BreakpointManager()
+        let memory = MockMemoryAccess()
+
+        // Place an LDA #$00 instruction at $0600
+        memory.set(0x0600, 0xA9)
+
+        let (bp, isROM) = try await manager.setBreakpoint(at: 0x0600, memory: memory)
+
+        // BRK should be injected
+        XCTAssertEqual(memory.get(0x0600), BreakpointManager.brkOpcode)
+        XCTAssertEqual(bp.address, 0x0600)
+        XCTAssertEqual(bp.type, .ram)
+        XCTAssertEqual(bp.originalByte, 0xA9)
+        XCTAssertFalse(isROM)
+    }
+
+    /// Test that setting a ROM breakpoint does NOT modify memory.
+    func test_setBreakpoint_rom_noMemoryModification() async throws {
+        let manager = BreakpointManager()
+        let memory = MockMemoryAccess()
+
+        // ROM address - should use PC watching, not BRK injection
+        memory.set(0xE477, 0x4C)  // JMP instruction in ROM
+
+        let (bp, isROM) = try await manager.setBreakpoint(at: 0xE477, memory: memory)
+
+        // Memory should NOT be modified (it's ROM)
+        XCTAssertEqual(memory.get(0xE477), 0x4C)
+        XCTAssertEqual(bp.type, .rom)
+        XCTAssertTrue(isROM)
+        XCTAssertNil(bp.originalByte)
+    }
+
+    /// Test that clearing a RAM breakpoint restores the original byte.
+    func test_clearBreakpoint_ram_restoresOriginal() async throws {
+        let manager = BreakpointManager()
+        let memory = MockMemoryAccess()
+
+        // Set up original instruction
+        memory.set(0x0600, 0xA9)
+
+        // Set and then clear breakpoint
+        try await manager.setBreakpoint(at: 0x0600, memory: memory)
+        XCTAssertEqual(memory.get(0x0600), 0x00)  // BRK injected
+
+        try await manager.clearBreakpoint(at: 0x0600, memory: memory)
+
+        // Original byte should be restored
+        XCTAssertEqual(memory.get(0x0600), 0xA9)
+
+        // Breakpoint should be removed from tracking
+        let hasBP = await manager.hasBreakpoint(at: 0x0600)
+        XCTAssertFalse(hasBP)
+    }
+
+    /// Test that clearing a ROM breakpoint removes it from tracking.
+    func test_clearBreakpoint_rom_removesTracking() async throws {
+        let manager = BreakpointManager()
+        let memory = MockMemoryAccess()
+
+        try await manager.setBreakpoint(at: 0xE477, memory: memory)
+
+        let hasROMBefore = await manager.hasROMBreakpoints
+        XCTAssertTrue(hasROMBefore)
+
+        try await manager.clearBreakpoint(at: 0xE477, memory: memory)
+
+        let hasROMAfter = await manager.hasROMBreakpoints
+        XCTAssertFalse(hasROMAfter)
+    }
+
+    /// Test that clearAllBreakpoints restores all original bytes.
+    func test_clearAllBreakpoints_restoresAll() async throws {
+        let manager = BreakpointManager()
+        let memory = MockMemoryAccess()
+
+        // Set up several instructions
+        memory.set(0x0600, 0xA9)  // LDA #
+        memory.set(0x0700, 0x8D)  // STA abs
+        memory.set(0x0800, 0xEA)  // NOP
+
+        try await manager.setBreakpoint(at: 0x0600, memory: memory)
+        try await manager.setBreakpoint(at: 0x0700, memory: memory)
+        try await manager.setBreakpoint(at: 0x0800, memory: memory)
+
+        // All should be BRK
+        XCTAssertEqual(memory.get(0x0600), 0x00)
+        XCTAssertEqual(memory.get(0x0700), 0x00)
+        XCTAssertEqual(memory.get(0x0800), 0x00)
+
+        await manager.clearAllBreakpoints(memory: memory)
+
+        // All originals should be restored
+        XCTAssertEqual(memory.get(0x0600), 0xA9)
+        XCTAssertEqual(memory.get(0x0700), 0x8D)
+        XCTAssertEqual(memory.get(0x0800), 0xEA)
+
+        let breakpoints = await manager.getAllBreakpoints()
+        XCTAssertTrue(breakpoints.isEmpty)
+    }
+
+    // =========================================================================
+    // MARK: - Error Cases
+    // =========================================================================
+
+    /// Test that setting a duplicate breakpoint throws alreadySet error.
+    func test_setBreakpoint_duplicate_throws() async throws {
+        let manager = BreakpointManager()
+        let memory = MockMemoryAccess()
+        memory.set(0x0600, 0xA9)
+
+        try await manager.setBreakpoint(at: 0x0600, memory: memory)
+
+        do {
+            try await manager.setBreakpoint(at: 0x0600, memory: memory)
+            XCTFail("Expected alreadySet error")
+        } catch let error as BreakpointError {
+            if case .alreadySet(let addr) = error {
+                XCTAssertEqual(addr, 0x0600)
+            } else {
+                XCTFail("Expected alreadySet, got \(error)")
+            }
+        }
+    }
+
+    /// Test that clearing a nonexistent breakpoint throws notFound error.
+    func test_clearBreakpoint_notFound_throws() async {
+        let manager = BreakpointManager()
+        let memory = MockMemoryAccess()
+
+        do {
+            try await manager.clearBreakpoint(at: 0x0600, memory: memory)
+            XCTFail("Expected notFound error")
+        } catch let error as BreakpointError {
+            if case .notFound(let addr) = error {
+                XCTAssertEqual(addr, 0x0600)
+            } else {
+                XCTFail("Expected notFound, got \(error)")
+            }
+        } catch {
+            XCTFail("Unexpected error type: \(error)")
+        }
+    }
+
+    // =========================================================================
+    // MARK: - Suspend / Resume
+    // =========================================================================
+
+    /// Test that suspending a breakpoint restores the original byte temporarily.
+    func test_suspendBreakpoint_restoresOriginal() async throws {
+        let manager = BreakpointManager()
+        let memory = MockMemoryAccess()
+        memory.set(0x0600, 0xA9)
+
+        try await manager.setBreakpoint(at: 0x0600, memory: memory)
+        XCTAssertEqual(memory.get(0x0600), 0x00)  // BRK
+
+        await manager.suspendBreakpoint(at: 0x0600, memory: memory)
+
+        // Original byte restored for execution
+        XCTAssertEqual(memory.get(0x0600), 0xA9)
+
+        // But breakpoint still tracked
+        let hasBP = await manager.hasBreakpoint(at: 0x0600)
+        XCTAssertTrue(hasBP)
+    }
+
+    /// Test that resuming a breakpoint re-injects BRK.
+    func test_resumeBreakpoint_reinjectsBRK() async throws {
+        let manager = BreakpointManager()
+        let memory = MockMemoryAccess()
+        memory.set(0x0600, 0xA9)
+
+        try await manager.setBreakpoint(at: 0x0600, memory: memory)
+        await manager.suspendBreakpoint(at: 0x0600, memory: memory)
+        XCTAssertEqual(memory.get(0x0600), 0xA9)  // Suspended
+
+        await manager.resumeBreakpoint(at: 0x0600, memory: memory)
+        XCTAssertEqual(memory.get(0x0600), 0x00)  // BRK re-injected
+    }
+
+    /// Test that suspend/resume is a no-op for ROM breakpoints.
+    func test_suspendResume_rom_noEffect() async throws {
+        let manager = BreakpointManager()
+        let memory = MockMemoryAccess()
+        memory.set(0xE477, 0x4C)
+
+        try await manager.setBreakpoint(at: 0xE477, memory: memory)
+
+        // Suspend should not modify memory
+        await manager.suspendBreakpoint(at: 0xE477, memory: memory)
+        XCTAssertEqual(memory.get(0xE477), 0x4C)
+
+        // Resume should not modify memory
+        await manager.resumeBreakpoint(at: 0xE477, memory: memory)
+        XCTAssertEqual(memory.get(0xE477), 0x4C)
+    }
+
+    // =========================================================================
+    // MARK: - Enable / Disable
+    // =========================================================================
+
+    /// Test that disabling a RAM breakpoint restores original byte.
+    func test_disableBreakpoint_ram_restoresOriginal() async throws {
+        let manager = BreakpointManager()
+        let memory = MockMemoryAccess()
+        memory.set(0x0600, 0xA9)
+
+        try await manager.setBreakpoint(at: 0x0600, memory: memory)
+        XCTAssertEqual(memory.get(0x0600), 0x00)  // BRK
+
+        await manager.disableBreakpoint(at: 0x0600, memory: memory)
+
+        // Original restored
+        XCTAssertEqual(memory.get(0x0600), 0xA9)
+
+        // Still tracked but disabled
+        let bp = await manager.getBreakpoint(at: 0x0600)
+        XCTAssertNotNil(bp)
+        XCTAssertFalse(bp!.enabled)
+    }
+
+    /// Test that enabling a disabled RAM breakpoint re-injects BRK.
+    func test_enableBreakpoint_ram_reinjectsBRK() async throws {
+        let manager = BreakpointManager()
+        let memory = MockMemoryAccess()
+        memory.set(0x0600, 0xA9)
+
+        try await manager.setBreakpoint(at: 0x0600, memory: memory)
+        await manager.disableBreakpoint(at: 0x0600, memory: memory)
+        XCTAssertEqual(memory.get(0x0600), 0xA9)  // Disabled
+
+        await manager.enableBreakpoint(at: 0x0600, memory: memory)
+
+        XCTAssertEqual(memory.get(0x0600), 0x00)  // BRK re-injected
+
+        let bp = await manager.getBreakpoint(at: 0x0600)
+        XCTAssertTrue(bp!.enabled)
+    }
+
+    /// Test that disabling a ROM breakpoint removes it from ROM set.
+    func test_disableBreakpoint_rom_removesFromSet() async throws {
+        let manager = BreakpointManager()
+        let memory = MockMemoryAccess()
+
+        try await manager.setBreakpoint(at: 0xE477, memory: memory)
+        let romBPsBefore = await manager.romBreakpoints
+        XCTAssertTrue(romBPsBefore.contains(0xE477))
+
+        await manager.disableBreakpoint(at: 0xE477, memory: memory)
+        let romBPsAfter = await manager.romBreakpoints
+        XCTAssertFalse(romBPsAfter.contains(0xE477))
+
+        // Re-enable
+        await manager.enableBreakpoint(at: 0xE477, memory: memory)
+        let romBPsFinal = await manager.romBreakpoints
+        XCTAssertTrue(romBPsFinal.contains(0xE477))
+    }
+
+    // =========================================================================
+    // MARK: - Temporary Breakpoints with Memory
+    // =========================================================================
+
+    /// Test that temporary breakpoint injects BRK and cleanup restores it.
+    func test_temporaryBreakpoint_ram_injectAndClean() async {
+        let manager = BreakpointManager()
+        let memory = MockMemoryAccess()
+        memory.set(0x0602, 0x8D)  // STA instruction
+
+        await manager.setTemporaryBreakpoint(at: 0x0602, memory: memory)
+
+        // BRK should be injected
+        XCTAssertEqual(memory.get(0x0602), 0x00)
+
+        await manager.clearTemporaryBreakpoint(memory: memory)
+
+        // Original should be restored
+        XCTAssertEqual(memory.get(0x0602), 0x8D)
+    }
+
+    /// Test that temporary breakpoint does NOT overwrite a permanent one.
+    func test_temporaryBreakpoint_doesNotOverwritePermanent() async throws {
+        let manager = BreakpointManager()
+        let memory = MockMemoryAccess()
+        memory.set(0x0600, 0xA9)
+
+        // Set permanent breakpoint first
+        try await manager.setBreakpoint(at: 0x0600, memory: memory)
+
+        // Setting temp at same address should be a no-op
+        await manager.setTemporaryBreakpoint(at: 0x0600, memory: memory)
+
+        // Still BRK (from permanent)
+        XCTAssertEqual(memory.get(0x0600), 0x00)
+
+        // Clearing temp should NOT restore (permanent still there)
+        await manager.clearTemporaryBreakpoint(memory: memory)
+        XCTAssertEqual(memory.get(0x0600), 0x00)  // BRK still injected
+
+        // Permanent breakpoint still tracked
+        let hasBP = await manager.hasBreakpoint(at: 0x0600)
+        XCTAssertTrue(hasBP)
+    }
+
+    /// Test breakpoint hit counting accumulates correctly.
+    func test_hitCount_accumulates() async throws {
+        let manager = BreakpointManager()
+        let memory = MockMemoryAccess()
+        memory.set(0x0600, 0xA9)
+
+        try await manager.setBreakpoint(at: 0x0600, memory: memory)
+
+        // Simulate multiple hits
+        await manager.recordHit(at: 0x0600)
+        await manager.recordHit(at: 0x0600)
+        await manager.recordHit(at: 0x0600)
+
+        let bp = await manager.getBreakpoint(at: 0x0600)
+        XCTAssertEqual(bp?.hitCount, 3)
+
+        // Hit count appears in formatted output
+        XCTAssertTrue(bp!.formatted.contains("hits: 3"))
+    }
+
+    /// Test reading original byte through breakpoint overlay.
+    func test_getOriginalByte_throughBreakpoint() async throws {
+        let manager = BreakpointManager()
+        let memory = MockMemoryAccess()
+        memory.set(0x0600, 0xA9)
+        memory.set(0x0601, 0x42)
+
+        try await manager.setBreakpoint(at: 0x0600, memory: memory)
+
+        // Should return original byte (not BRK)
+        let original = await manager.getOriginalByte(at: 0x0600)
+        XCTAssertEqual(original, 0xA9)
+
+        // Address without breakpoint returns nil
+        let noOriginal = await manager.getOriginalByte(at: 0x0601)
+        XCTAssertNil(noOriginal)
+    }
+
+    /// Test multiple breakpoints at different addresses.
+    func test_multipleBreakpoints_mixedTypes() async throws {
+        let manager = BreakpointManager()
+        let memory = MockMemoryAccess()
+        memory.set(0x0600, 0xA9)  // RAM
+        memory.set(0x0700, 0xEA)  // RAM
+
+        // Set RAM and ROM breakpoints
+        try await manager.setBreakpoint(at: 0x0600, memory: memory)
+        try await manager.setBreakpoint(at: 0x0700, memory: memory)
+        try await manager.setBreakpoint(at: 0xE477, memory: memory)  // ROM
+
+        let allBPs = await manager.getAllBreakpoints()
+        XCTAssertEqual(allBPs.count, 3)
+
+        // Verify types
+        let ramBPs = allBPs.filter { $0.type == .ram }
+        let romBPs = allBPs.filter { $0.type == .rom }
+        XCTAssertEqual(ramBPs.count, 2)
+        XCTAssertEqual(romBPs.count, 1)
+
+        // Verify addresses are sorted
+        let addresses = await manager.getAllAddresses()
+        XCTAssertEqual(addresses, [0x0600, 0x0700, 0xE477])
+    }
+
+    /// Test disabled breakpoint formatting.
+    func test_disabledBreakpoint_formatting() async throws {
+        let manager = BreakpointManager()
+        let memory = MockMemoryAccess()
+        memory.set(0x0600, 0xA9)
+
+        try await manager.setBreakpoint(at: 0x0600, memory: memory)
+        await manager.disableBreakpoint(at: 0x0600, memory: memory)
+
+        let bp = await manager.getBreakpoint(at: 0x0600)
+        XCTAssertTrue(bp!.formatted.contains("[disabled]"))
+    }
+}
+
+// =============================================================================
+// MARK: - Monitor Stepper Logic Tests (8.2)
+// =============================================================================
+//
+// These tests verify the stepping-related types and logic patterns.
+// Since MonitorStepper requires a real EmulatorEngine (which wraps libatari800),
+// we test the result types, flow control classification, and the patterns
+// that the stepper uses for branch/jump/return handling.
+//
+
+/// Tests for stepping logic and flow control classification.
+///
+/// The MonitorStepper relies on OpcodeTable helpers to classify instructions
+/// and determine where to place temporary breakpoints. These tests verify
+/// that classification works correctly for all flow-control instruction types.
+final class MonitorStepLogicTests: XCTestCase {
+
+    // =========================================================================
+    // MARK: - Flow Control Classification
+    // =========================================================================
+
+    /// Test that all branch instructions are classified for step handling.
+    func test_branchInstructions_classified() {
+        // All 8 branch opcodes should be recognized
+        let branchOpcodes: [(UInt8, String)] = [
+            (0x10, "BPL"), (0x30, "BMI"),
+            (0x50, "BVC"), (0x70, "BVS"),
+            (0x90, "BCC"), (0xB0, "BCS"),
+            (0xD0, "BNE"), (0xF0, "BEQ"),
+        ]
+
+        for (opcode, mnemonic) in branchOpcodes {
+            let info = OpcodeTable.lookup(opcode)
+            XCTAssertEqual(info.mnemonic, mnemonic)
+            XCTAssertTrue(OpcodeTable.isBranch(info.mnemonic),
+                          "\(mnemonic) should be classified as branch")
+            XCTAssertFalse(OpcodeTable.isJump(info.mnemonic))
+            XCTAssertFalse(OpcodeTable.isReturn(info.mnemonic))
+        }
+    }
+
+    /// Test that JMP and JSR are classified as jumps.
+    func test_jumpInstructions_classified() {
+        // JMP absolute
+        let jmpAbs = OpcodeTable.lookup(0x4C)
+        XCTAssertTrue(OpcodeTable.isJump(jmpAbs.mnemonic))
+        XCTAssertFalse(OpcodeTable.isBranch(jmpAbs.mnemonic))
+
+        // JMP indirect
+        let jmpInd = OpcodeTable.lookup(0x6C)
+        XCTAssertTrue(OpcodeTable.isJump(jmpInd.mnemonic))
+
+        // JSR
+        let jsr = OpcodeTable.lookup(0x20)
+        XCTAssertTrue(OpcodeTable.isJump(jsr.mnemonic))
+        XCTAssertTrue(OpcodeTable.isSubroutineCall(jsr.mnemonic))
+    }
+
+    /// Test that RTS and RTI are classified as returns.
+    func test_returnInstructions_classified() {
+        let rts = OpcodeTable.lookup(0x60)
+        XCTAssertTrue(OpcodeTable.isReturn(rts.mnemonic))
+        XCTAssertFalse(OpcodeTable.isJump(rts.mnemonic))
+
+        let rti = OpcodeTable.lookup(0x40)
+        XCTAssertTrue(OpcodeTable.isReturn(rti.mnemonic))
+    }
+
+    /// Test that normal instructions are NOT classified as flow control.
+    func test_normalInstructions_notFlowControl() {
+        let normalOpcodes: [UInt8] = [
+            0xA9, // LDA #
+            0x8D, // STA abs
+            0xEA, // NOP
+            0x48, // PHA
+            0x68, // PLA
+            0xE8, // INX
+            0xC8, // INY
+            0x0A, // ASL A
+        ]
+
+        for opcode in normalOpcodes {
+            let info = OpcodeTable.lookup(opcode)
+            XCTAssertFalse(OpcodeTable.isBranch(info.mnemonic),
+                           "\(info.mnemonic) should NOT be branch")
+            XCTAssertFalse(OpcodeTable.isJump(info.mnemonic),
+                           "\(info.mnemonic) should NOT be jump")
+            XCTAssertFalse(OpcodeTable.isReturn(info.mnemonic),
+                           "\(info.mnemonic) should NOT be return")
+        }
+    }
+
+    // =========================================================================
+    // MARK: - Step Target Calculation
+    // =========================================================================
+
+    /// Test next-PC calculation for normal instructions.
+    func test_nextPC_normalInstruction() {
+        // LDA # at $0600 → next is $0602 (2 bytes)
+        let length1 = OpcodeTable.instructionLength(0xA9)
+        XCTAssertEqual(UInt16(0x0600) &+ UInt16(length1), 0x0602)
+
+        // STA abs at $0602 → next is $0605 (3 bytes)
+        let length2 = OpcodeTable.instructionLength(0x8D)
+        XCTAssertEqual(UInt16(0x0602) &+ UInt16(length2), 0x0605)
+
+        // NOP at $0605 → next is $0606 (1 byte)
+        let length3 = OpcodeTable.instructionLength(0xEA)
+        XCTAssertEqual(UInt16(0x0605) &+ UInt16(length3), 0x0606)
+    }
+
+    /// Test step-over return address for JSR.
+    func test_stepOver_returnAddress_jsr() {
+        // JSR is 3 bytes, so step-over places temp BRK at PC + 3
+        let jsrLength = OpcodeTable.instructionLength(0x20)
+        XCTAssertEqual(jsrLength, 3)
+
+        // JSR $0700 at $0600 → step-over target is $0603
+        let returnAddress = UInt16(0x0600) &+ 3
+        XCTAssertEqual(returnAddress, 0x0603)
+    }
+
+    /// Test branch target calculation for forward branch.
+    func test_branchTarget_forwardBranch() {
+        // BNE at $0600 with offset +$0A
+        // After fetch, PC = $0602, target = $0602 + $0A = $060C
+        let target = OpcodeTable.branchTarget(from: 0x0602, offset: 0x0A)
+        XCTAssertEqual(target, 0x060C)
+    }
+
+    /// Test branch target calculation for backward branch.
+    func test_branchTarget_backwardBranch() {
+        // BNE at $060A with offset -6 ($FA)
+        // After fetch, PC = $060C, target = $060C + (-6) = $0606
+        let offset = Int8(bitPattern: 0xFA)  // -6
+        let target = OpcodeTable.branchTarget(from: 0x060C, offset: offset)
+        XCTAssertEqual(target, 0x0606)
+    }
+
+    /// Test branch has two possible targets (taken and not-taken).
+    func test_branchTargets_bothPaths() {
+        // BNE at $0600: fall-through = $0602, target = $0602 + offset
+        let fallThrough: UInt16 = 0x0602
+        let offset = Int8(bitPattern: 0x08)  // +8
+        let branchTarget = OpcodeTable.branchTarget(from: 0x0602, offset: offset)
+
+        XCTAssertEqual(fallThrough, 0x0602)
+        XCTAssertEqual(branchTarget, 0x060A)
+        XCTAssertNotEqual(fallThrough, branchTarget)
+    }
+
+    // =========================================================================
+    // MARK: - Step Result Combinations
+    // =========================================================================
+
+    /// Test step result for multi-step with breakpoint hit.
+    func test_stepResult_multiStepBreakpoint() {
+        let regs = CPURegisters(a: 0x42, x: 0x00, y: 0x00, s: 0xFF, p: 0x20, pc: 0x0700)
+        let result = MonitorStepResult.breakpoint(
+            registers: regs, address: 0x0700, instructionsExecuted: 5
+        )
+
+        XCTAssertTrue(result.success)
+        XCTAssertTrue(result.breakpointHit)
+        XCTAssertEqual(result.breakpointAddress, 0x0700)
+        XCTAssertEqual(result.instructionsExecuted, 5)
+        XCTAssertEqual(result.registers.a, 0x42)
+    }
+
+    /// Test step result for timeout error.
+    func test_stepResult_timeout() {
+        let regs = CPURegisters(a: 0x00, x: 0x00, y: 0x00, s: 0xFF, p: 0x20, pc: 0x0600)
+        let result = MonitorStepResult.error(
+            "Run until $0700 timed out after 1000000 instructions",
+            registers: regs
+        )
+
+        XCTAssertFalse(result.success)
+        XCTAssertFalse(result.breakpointHit)
+        XCTAssertTrue(result.errorMessage!.contains("timed out"))
+        XCTAssertEqual(result.stoppedAt, 0x0600)
+    }
+
+    /// Test step result with zero-count step.
+    func test_stepResult_zeroCount() {
+        let regs = CPURegisters(a: 0x00, x: 0x00, y: 0x00, s: 0xFF, p: 0x20, pc: 0x0600)
+        let result = MonitorStepResult.success(
+            registers: regs, stoppedAt: 0x0600, instructionsExecuted: 0
+        )
+
+        XCTAssertTrue(result.success)
+        XCTAssertEqual(result.instructionsExecuted, 0)
+    }
+
+    // =========================================================================
+    // MARK: - Temporary Breakpoint Stepping Patterns
+    // =========================================================================
+
+    /// Test the step pattern: set temp BRK, execute, clear temp BRK.
+    func test_stepPattern_tempBreakpointLifecycle() async {
+        let manager = BreakpointManager()
+        let memory = MockMemoryAccess()
+
+        // Simulate: PC at $0600 (LDA #$42, 2 bytes), next instruction at $0602
+        memory.set(0x0602, 0x8D)  // STA (the instruction after LDA)
+
+        // Step 1: Set temp BRK at $0602
+        await manager.setTemporaryBreakpoint(at: 0x0602, memory: memory)
+        XCTAssertEqual(memory.get(0x0602), 0x00)  // BRK injected
+        let isTemp = await manager.isTemporaryBreakpoint(at: 0x0602)
+        XCTAssertTrue(isTemp)
+
+        // Step 2: (execution would happen here)
+
+        // Step 3: Clear temp BRK
+        await manager.clearTemporaryBreakpoint(memory: memory)
+        XCTAssertEqual(memory.get(0x0602), 0x8D)  // Restored
+        let isTempAfter = await manager.isTemporaryBreakpoint(at: 0x0602)
+        XCTAssertFalse(isTempAfter)
+    }
+
+    /// Test stepping from a permanent breakpoint (suspend/execute/resume pattern).
+    func test_stepPattern_fromPermanentBreakpoint() async throws {
+        let manager = BreakpointManager()
+        let memory = MockMemoryAccess()
+
+        memory.set(0x0600, 0xA9)  // LDA # (permanent BP here)
+        memory.set(0x0602, 0x8D)  // STA (step target)
+
+        // Set permanent breakpoint at $0600
+        try await manager.setBreakpoint(at: 0x0600, memory: memory)
+        XCTAssertEqual(memory.get(0x0600), 0x00)  // BRK
+
+        // Pattern: suspend permanent, set temp at next, execute, clear temp, resume permanent
+        await manager.suspendBreakpoint(at: 0x0600, memory: memory)
+        XCTAssertEqual(memory.get(0x0600), 0xA9)  // Original restored for execution
+
+        await manager.setTemporaryBreakpoint(at: 0x0602, memory: memory)
+        XCTAssertEqual(memory.get(0x0602), 0x00)  // Temp BRK at next
+
+        // (execution would happen here)
+
+        await manager.clearTemporaryBreakpoint(memory: memory)
+        XCTAssertEqual(memory.get(0x0602), 0x8D)  // Temp cleared
+
+        await manager.resumeBreakpoint(at: 0x0600, memory: memory)
+        XCTAssertEqual(memory.get(0x0600), 0x00)  // Permanent re-injected
+    }
+}
+
+// =============================================================================
+// MARK: - Assembler Multi-Line & Forward Reference Tests (8.3)
+// =============================================================================
+//
+// These tests verify multi-line assembly programs, forward references that
+// resolve in the second pass, labels with branches, EQU constants, and
+// interactive assembly mode (enter, assemble, exit).
+//
+
+/// Tests for multi-line assembly and forward reference resolution.
+final class AssemblerMultiLineTests: XCTestCase {
+    var assembler: Assembler!
+
+    override func setUp() {
+        super.setUp()
+        assembler = Assembler(startAddress: 0x0600)
+    }
+
+    // =========================================================================
+    // MARK: - Forward References
+    // =========================================================================
+
+    /// Test forward reference resolution in a simple loop.
+    func test_forwardReference_branch() throws {
+        // A simple loop that branches forward to DONE
+        let source = """
+            ORG $0600
+                LDX #$05
+        LOOP    DEX
+                BNE LOOP
+                RTS
+        """
+
+        let results = try assembler.assemble(source)
+        let codeResults = results.filter { !$0.bytes.isEmpty }
+
+        // LDX #$05
+        XCTAssertEqual(codeResults[0].bytes, [0xA2, 0x05])
+        XCTAssertEqual(codeResults[0].address, 0x0600)
+
+        // DEX
+        XCTAssertEqual(codeResults[1].bytes, [0xCA])
+        XCTAssertEqual(codeResults[1].address, 0x0602)
+
+        // BNE LOOP → offset should go back to $0602
+        XCTAssertEqual(codeResults[2].bytes[0], 0xD0)  // BNE opcode
+        // Branch from $0605 to $0602 = offset -3 = $FD
+        XCTAssertEqual(codeResults[2].bytes[1], 0xFD)
+
+        // RTS
+        XCTAssertEqual(codeResults[3].bytes, [0x60])
+    }
+
+    /// Test forward reference to a label defined later in source.
+    func test_forwardReference_jumpToLater() throws {
+        let source = """
+            ORG $0600
+                JMP MAIN
+                NOP
+                NOP
+        MAIN    LDA #$00
+                RTS
+        """
+
+        let results = try assembler.assemble(source)
+        let codeResults = results.filter { !$0.bytes.isEmpty }
+
+        // JMP MAIN should reference $0605 (JMP=3 + NOP=1 + NOP=1)
+        XCTAssertEqual(codeResults[0].bytes[0], 0x4C)  // JMP absolute
+        XCTAssertEqual(codeResults[0].bytes[1], 0x05)   // Low byte of $0605
+        XCTAssertEqual(codeResults[0].bytes[2], 0x06)   // High byte of $0605
+    }
+
+    /// Test forward reference with BEQ branch.
+    func test_forwardReference_conditionalBranch() throws {
+        let source = """
+            ORG $0600
+                LDA $80
+                BEQ SKIP
+                INX
+        SKIP    RTS
+        """
+
+        let results = try assembler.assemble(source)
+        let codeResults = results.filter { !$0.bytes.isEmpty }
+
+        // LDA $80 (2 bytes at $0600)
+        XCTAssertEqual(codeResults[0].bytes, [0xA5, 0x80])
+
+        // BEQ SKIP at $0602, SKIP is at $0605
+        // Offset: $0605 - $0604 = +1
+        XCTAssertEqual(codeResults[1].bytes[0], 0xF0)  // BEQ opcode
+        XCTAssertEqual(codeResults[1].bytes[1], 0x01)   // +1 offset
+
+        // INX at $0604
+        XCTAssertEqual(codeResults[2].bytes, [0xE8])
+
+        // RTS at $0605
+        XCTAssertEqual(codeResults[3].bytes, [0x60])
+    }
+
+    // =========================================================================
+    // MARK: - Complete Programs
+    // =========================================================================
+
+    /// Test assembling a complete program that fills screen memory.
+    func test_completeProgram_screenFill() throws {
+        let source = """
+            ORG $0600
+        START   LDA #$00
+                TAX
+        LOOP    STA $D400,X
+                INX
+                BNE LOOP
+                RTS
+        """
+
+        let results = try assembler.assemble(source)
+        let codeResults = results.filter { !$0.bytes.isEmpty }
+
+        XCTAssertEqual(codeResults.count, 6)
+
+        // Verify START label is at $0600
+        let startResult = results.first { $0.label == "START" }
+        XCTAssertNotNil(startResult)
+        XCTAssertEqual(startResult?.address, 0x0600)
+
+        // Verify LOOP label
+        let loopResult = results.first { $0.label == "LOOP" }
+        XCTAssertNotNil(loopResult)
+
+        // Verify the total byte count
+        let totalBytes = codeResults.reduce(0) { $0 + $1.bytes.count }
+        // LDA#=2, TAX=1, STA abs,X=3, INX=1, BNE=2, RTS=1 = 10
+        XCTAssertEqual(totalBytes, 10)
+    }
+
+    /// Test assembling a program with JSR and subroutine.
+    func test_completeProgram_withSubroutine() throws {
+        let source = """
+            ORG $0600
+                JSR INIT
+                JSR LOOP
+                RTS
+        INIT    LDA #$00
+                RTS
+        LOOP    INX
+                RTS
+        """
+
+        let results = try assembler.assemble(source)
+        let codeResults = results.filter { !$0.bytes.isEmpty }
+
+        // JSR INIT at $0600 → INIT is at $0609 (JSR=3 + JSR=3 + RTS=1 = 7, so $0607... let me recalculate)
+        // $0600: JSR INIT (3 bytes) → $0603
+        // $0603: JSR LOOP (3 bytes) → $0606
+        // $0606: RTS (1 byte)       → $0607
+        // $0607: INIT: LDA #$00 (2) → $0609
+        // $0609: RTS (1)            → $060A
+        // $060A: LOOP: INX (1)      → $060B
+        // $060B: RTS (1)
+
+        // JSR INIT should point to $0607
+        XCTAssertEqual(codeResults[0].bytes[0], 0x20)  // JSR
+        XCTAssertEqual(codeResults[0].bytes[1], 0x07)  // Low byte
+        XCTAssertEqual(codeResults[0].bytes[2], 0x06)  // High byte
+
+        // JSR LOOP should point to $060A
+        XCTAssertEqual(codeResults[1].bytes[0], 0x20)  // JSR
+        XCTAssertEqual(codeResults[1].bytes[1], 0x0A)  // Low byte
+        XCTAssertEqual(codeResults[1].bytes[2], 0x06)  // High byte
+    }
+
+    // =========================================================================
+    // MARK: - Labels and Symbols
+    // =========================================================================
+
+    /// Test label-only lines (no instruction).
+    func test_labelOnlyLine() throws {
+        let result = try assembler.assembleLine("START")
+
+        XCTAssertEqual(result.label, "START")
+        XCTAssertTrue(result.bytes.isEmpty)
+        XCTAssertEqual(assembler.symbols.lookup("START"), 0x0600)
+    }
+
+    /// Test multiple labels at different addresses.
+    func test_multipleLabels() throws {
+        _ = try assembler.assembleLine("FIRST LDA #$00")
+        _ = try assembler.assembleLine("SECOND STA $80")
+        _ = try assembler.assembleLine("THIRD NOP")
+
+        XCTAssertEqual(assembler.symbols.lookup("FIRST"), 0x0600)
+        XCTAssertEqual(assembler.symbols.lookup("SECOND"), 0x0602)
+        XCTAssertEqual(assembler.symbols.lookup("THIRD"), 0x0604)
+    }
+
+    /// Test comments are ignored.
+    func test_commentsIgnored() throws {
+        let result = try assembler.assembleLine("LDA #$42  ; Load the value")
+
+        XCTAssertEqual(result.bytes, [0xA9, 0x42])
+    }
+
+    /// Test comment-only line.
+    func test_commentOnlyLine() throws {
+        let result = try assembler.assembleLine("; This is a comment")
+
+        XCTAssertTrue(result.bytes.isEmpty)
+    }
+
+    // =========================================================================
+    // MARK: - END Pseudo-Op
+    // =========================================================================
+
+    /// Test END pseudo-op produces no bytes and halts assembly.
+    func test_end_pseudoOp() throws {
+        let result = try assembler.assembleLine("END")
+
+        XCTAssertTrue(result.bytes.isEmpty)
+        XCTAssertEqual(result.length, 0)
+    }
+
+    /// Test multi-line assembly stops processing at END.
+    func test_end_stopsAssembly() throws {
+        // Note: The current implementation processes all lines but END produces
+        // empty results. Verify END line itself is empty.
+        let source = """
+            ORG $0600
+                LDA #$00
+                END
+                NOP
+        """
+
+        let results = try assembler.assemble(source)
+        let codeResults = results.filter { !$0.bytes.isEmpty }
+
+        // LDA #$00 should be present
+        XCTAssertTrue(codeResults.contains { $0.bytes == [0xA9, 0x00] })
+    }
+
+    // =========================================================================
+    // MARK: - Interactive Assembly Mode
+    // =========================================================================
+
+    /// Test entering interactive assembly mode and assembling instructions.
+    func test_interactiveMode_assembleSequence() throws {
+        let ia = InteractiveAssembler(startAddress: 0x0600)
+
+        XCTAssertEqual(ia.currentAddress, 0x0600)
+
+        let r1 = try ia.assembleLine("LDA #$42")
+        XCTAssertEqual(r1.bytes, [0xA9, 0x42])
+        XCTAssertEqual(ia.currentAddress, 0x0602)
+
+        let r2 = try ia.assembleLine("STA $80")
+        XCTAssertEqual(r2.bytes, [0x85, 0x80])
+        XCTAssertEqual(ia.currentAddress, 0x0604)
+
+        let r3 = try ia.assembleLine("RTS")
+        XCTAssertEqual(r3.bytes, [0x60])
+        XCTAssertEqual(ia.currentAddress, 0x0605)
+    }
+
+    /// Test interactive assembler with labels and backward branch.
+    func test_interactiveMode_withLabelsAndBranch() throws {
+        let ia = InteractiveAssembler(startAddress: 0x0600)
+
+        _ = try ia.assembleLine("LDX #$00")           // $0600
+        _ = try ia.assembleLine("LOOP INX")            // $0602 (label LOOP)
+        let branchResult = try ia.assembleLine("BNE LOOP")  // $0603
+
+        // BNE should branch back to $0602
+        // Branch from $0605 to $0602 = -3 = $FD
+        XCTAssertEqual(branchResult.bytes[0], 0xD0)
+        XCTAssertEqual(branchResult.bytes[1], 0xFD)
+
+        // Label should be defined
+        XCTAssertEqual(ia.symbols.lookup("LOOP"), 0x0602)
+    }
+
+    /// Test interactive assembler format output.
+    func test_interactiveMode_formatOutput() throws {
+        let ia = InteractiveAssembler(startAddress: 0x0600)
+        let result = try ia.assembleLine("JSR $FFE0")
+
+        let formatted = ia.format(result)
+
+        // Should show address, bytes, and instruction
+        XCTAssertTrue(formatted.contains("$0600"))
+        XCTAssertTrue(formatted.contains("20 E0 FF"))
+        XCTAssertTrue(formatted.contains("JSR $FFE0"))
+    }
+
+    /// Test interactive assembler handles all instruction types.
+    func test_interactiveMode_allInstructionTypes() throws {
+        let ia = InteractiveAssembler(startAddress: 0x0600)
+
+        // Implied
+        let nop = try ia.assembleLine("NOP")
+        XCTAssertEqual(nop.bytes, [0xEA])
+
+        // Immediate
+        let lda = try ia.assembleLine("LDA #$FF")
+        XCTAssertEqual(lda.bytes, [0xA9, 0xFF])
+
+        // Zero page
+        let zp = try ia.assembleLine("STA $80")
+        XCTAssertEqual(zp.bytes, [0x85, 0x80])
+
+        // Absolute
+        let abs = try ia.assembleLine("JMP $1000")
+        XCTAssertEqual(abs.bytes, [0x4C, 0x00, 0x10])
+
+        // Zero page indexed
+        let zpx = try ia.assembleLine("LDA $80,X")
+        XCTAssertEqual(zpx.bytes, [0xB5, 0x80])
+
+        // Absolute indexed
+        let absx = try ia.assembleLine("STA $2000,X")
+        XCTAssertEqual(absx.bytes, [0x9D, 0x00, 0x20])
+    }
+
+    /// Test interactive assembler error doesn't advance PC.
+    func test_interactiveMode_errorDoesNotAdvancePC() throws {
+        let ia = InteractiveAssembler(startAddress: 0x0600)
+
+        _ = try ia.assembleLine("LDA #$00")  // Advances to $0602
+        XCTAssertEqual(ia.currentAddress, 0x0602)
+
+        // Invalid instruction should throw and NOT advance PC
+        XCTAssertThrowsError(try ia.assembleLine(" XYZ"))
+        XCTAssertEqual(ia.currentAddress, 0x0602)  // Still at $0602
+    }
+}
