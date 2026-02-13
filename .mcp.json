@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "attic": {
-      "command": "swift",
-      "args": ["run", "--package-path", "/Users/nikolai/Source/Repos/GitHub/huegli/attic", "AtticMCP"]
+      "command": "uv",
+      "args": ["run", "--directory", "Sources/AtticMCP-Python", "attic-mcp"]
     }
   }
 }
