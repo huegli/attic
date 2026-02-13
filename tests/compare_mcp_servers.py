@@ -7,13 +7,29 @@ find discrepancies.
 
 Three levels of comparison are performed:
 
-  Level 1 — Schema comparison (no AtticServer needed):
+  Level 1 — Initialize (no AtticServer needed):
     - ``initialize`` response (protocol version, server info, capabilities)
+
+  Level 2 — Schema comparison (no AtticServer needed):
     - ``tools/list`` response (tool names, descriptions, parameter schemas)
 
-  Level 2 — Safe tool calls (requires a running AtticServer):
+  Level 3 — Safe tool calls (requires a running AtticServer):
     - Calls read-only tools (status, get_registers, list_breakpoints, etc.)
     - Compares the response payloads from both servers
+
+Shared AtticServer safety:
+    Both MCP servers connect to the same AtticServer instance via socket
+    discovery (``/tmp/attic-*.sock``).  This is safe because:
+
+    1. Tool calls are sent **sequentially** — Swift first, then Python —
+       so there is no interleaved socket I/O.
+    2. Only **read-only** tools are called (status, registers, memory read,
+       disassemble, list breakpoints, list drives, list BASIC).
+    3. Each MCP server maintains its own independent socket connection to
+       AtticServer, so there is no shared socket state.
+
+    Both servers are started with ``ATTIC_MCP_NO_LAUNCH=1`` to prevent
+    either one from trying to auto-launch a new AtticServer.
 
 Usage::
 
@@ -134,21 +150,37 @@ class MCPProcess:
     it requests, and reads responses with a timeout.
     """
 
-    def __init__(self, name: str, cmd: list[str], cwd: str | None = None) -> None:
+    def __init__(
+        self,
+        name: str,
+        cmd: list[str],
+        cwd: str | None = None,
+        env_overrides: dict[str, str] | None = None,
+    ) -> None:
         self.name = name
         self.cmd = cmd
         self.cwd = cwd
+        self.env_overrides = env_overrides or {}
         self.proc: subprocess.Popen[bytes] | None = None
         self._request_id = 0
 
     def start(self) -> None:
-        """Launch the MCP server subprocess."""
+        """Launch the MCP server subprocess.
+
+        The environment is inherited from the parent process, with any
+        ``env_overrides`` applied on top.  The harness sets
+        ``ATTIC_MCP_NO_LAUNCH=1`` to prevent either server from trying
+        to auto-launch its own AtticServer (which would create conflicts).
+        """
+        env = os.environ.copy()
+        env.update(self.env_overrides)
         self.proc = subprocess.Popen(
             self.cmd,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             cwd=self.cwd,
+            env=env,
         )
 
     def stop(self) -> None:
@@ -505,7 +537,11 @@ def compare_tool_calls(
     """Call safe read-only tools on both servers and compare responses.
 
     Only calls tools that don't modify emulator state (read-only).  Requires
-    a running AtticServer.
+    a running AtticServer that both MCP servers connect to independently.
+
+    Calls are made **sequentially** (Swift first, then Python for each tool)
+    so both servers never send commands to AtticServer simultaneously.  Since
+    only read-only tools are tested, the emulator state is identical for both.
     """
     result = CompareResult()
 
@@ -656,6 +692,27 @@ def _trunc(s: str, max_len: int) -> str:
 # Main
 # ---------------------------------------------------------------------------
 
+def check_attic_server_running() -> bool:
+    """Check if an AtticServer is reachable via a /tmp/attic-*.sock socket.
+
+    Returns True if a live socket was found, False otherwise.  This is used
+    as a pre-flight check before running Level 3 (tools/call) comparisons.
+    """
+    import glob as globmod
+    import signal
+
+    for path in globmod.glob("/tmp/attic-*.sock"):
+        basename = os.path.basename(path)
+        pid_str = basename.removeprefix("attic-").removesuffix(".sock")
+        try:
+            pid = int(pid_str)
+            os.kill(pid, 0)  # Signal 0 = check existence.
+            return True
+        except (ValueError, ProcessLookupError, PermissionError):
+            continue
+    return False
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Compare Python and Swift AtticMCP server responses",
@@ -710,9 +767,25 @@ def main() -> None:
     print(f"  Python command: {' '.join(python_cmd)}")
     print()
 
+    # -- Pre-flight check for --with-calls ----------------------------------
+    if args.with_calls:
+        if not check_attic_server_running():
+            print(red("Error: --with-calls requires a running AtticServer"))
+            print("  Start it with: swift run AtticServer")
+            print("  Both MCP servers will connect to this same instance.")
+            print("  (Read-only tools are called sequentially, so this is safe.)")
+            sys.exit(2)
+        print(f"  {green('AtticServer detected')} — Level 3 tool calls enabled")
+        print()
+
     # -- Start both servers -------------------------------------------------
-    swift = MCPProcess("Swift", swift_cmd, cwd=REPO_ROOT)
-    python = MCPProcess("Python", python_cmd, cwd=REPO_ROOT)
+    # Set ATTIC_MCP_NO_LAUNCH=1 to prevent either server from trying to
+    # auto-launch its own AtticServer.  For --with-calls, the user must
+    # start AtticServer manually so both MCP servers share the same instance.
+    no_launch_env = {"ATTIC_MCP_NO_LAUNCH": "1"}
+
+    swift = MCPProcess("Swift", swift_cmd, cwd=REPO_ROOT, env_overrides=no_launch_env)
+    python = MCPProcess("Python", python_cmd, cwd=REPO_ROOT, env_overrides=no_launch_env)
 
     try:
         print(f"{cyan('Starting servers...')}")

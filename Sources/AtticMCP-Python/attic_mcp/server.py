@@ -104,9 +104,15 @@ async def _send(command: str) -> str:
 
 
 async def _ensure_connected() -> None:
-    """Discover and connect to AtticServer, launching it if necessary."""
+    """Discover and connect to AtticServer, launching it if necessary.
+
+    If the ``ATTIC_MCP_NO_LAUNCH`` environment variable is set, the server
+    will not attempt to auto-launch AtticServer.  This is used by the test
+    harness to ensure both Swift and Python MCP servers share the same
+    AtticServer instance.
+    """
     path = await asyncio.to_thread(_client.discover_socket)
-    if path is None:
+    if path is None and not os.environ.get("ATTIC_MCP_NO_LAUNCH"):
         logger.info("No AtticServer socket found, attempting to launch...")
         await asyncio.to_thread(_try_launch_server)
         path = await asyncio.to_thread(_client.discover_socket)
