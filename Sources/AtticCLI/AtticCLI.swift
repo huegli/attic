@@ -10,8 +10,7 @@
 //
 // Usage:
 //   attic                    Connect to running AtticServer (or launch one)
-//   attic --headless         Launch AtticServer and connect
-//   attic --headless --silent  Headless without audio
+//   attic --silent           Launch without audio
 //   attic --socket <path>    Connect to specific socket
 //   attic --help             Show help
 //
@@ -43,10 +42,7 @@ struct AtticCLI {
 
     /// Parsed command-line arguments.
     struct Arguments {
-        /// Run without launching GUI.
-        var headless: Bool = false
-
-        /// Disable audio (headless only).
+        /// Disable audio output.
         var silent: Bool = false
 
         /// Path to socket for connecting to existing GUI.
@@ -74,9 +70,6 @@ struct AtticCLI {
 
         while let arg = arguments.popFirst() {
             switch arg {
-            case "--headless":
-                args.headless = true
-
             case "--silent":
                 args.silent = true
 
@@ -117,18 +110,16 @@ struct AtticCLI {
         USAGE: attic [options]
 
         OPTIONS:
-          --headless          Run without launching GUI
-          --silent            Disable audio output (headless mode only)
+          --silent            Disable audio output
           --atascii           Rich ATASCII rendering (ANSI inverse + Unicode graphics)
-          --socket <path>     Connect to GUI at specific socket path
+          --socket <path>     Connect to existing server at specific socket path
           --help, -h          Show this help
           --version, -v       Show version
 
         EXAMPLES:
-          attic                                Launch GUI and connect REPL
-          attic --headless                     Run emulator without GUI
-          attic --headless --silent            Headless without audio
-          attic --socket /tmp/attic-1234.sock  Connect to existing GUI
+          attic                                Launch server and connect REPL
+          attic --silent                       Launch without audio
+          attic --socket /tmp/attic-1234.sock  Connect to existing server
 
         MODES:
           The REPL operates in three modes. Switch with dot-commands:
@@ -741,11 +732,9 @@ struct AtticCLI {
 
     /// Launches AtticServer as a subprocess using the shared ServerLauncher.
     ///
-    /// - Parameters:
-    ///   - headless: Whether to run without GUI (unused, kept for API compatibility).
-    ///   - silent: Whether to disable audio.
+    /// - Parameter silent: Whether to disable audio.
     /// - Returns: The socket path if successful, nil otherwise.
-    static func launchServer(headless: Bool, silent: Bool) -> String? {
+    static func launchServer(silent: Bool) -> String? {
         let launcher = ServerLauncher()
         let options = ServerLaunchOptions(silent: silent)
 
@@ -814,7 +803,7 @@ struct AtticCLI {
         // If no socket found and we need one, launch server
         if socketPath == nil {
             print("No running AtticServer found. Launching...")
-            socketPath = launchServer(headless: args.headless, silent: args.silent)
+            socketPath = launchServer(silent: args.silent)
 
             if socketPath == nil {
                 printError("Failed to start AtticServer")

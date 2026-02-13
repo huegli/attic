@@ -99,9 +99,6 @@ public actor CLISocketClient {
     /// Path to the connected socket.
     private var connectedPath: String?
 
-    /// Command parser (for building commands).
-    private let commandParser = CLICommandParser()
-
     /// Response parser.
     private let responseParser = CLIResponseParser()
 
@@ -750,34 +747,4 @@ public actor CLISocketClient {
         pendingResponse = nil
         continuation.resume(throwing: CLIProtocolError.timeout)
     }
-}
-
-// =============================================================================
-// MARK: - fd_set Helpers (Duplicated for client module)
-// =============================================================================
-
-/// Clears an fd_set.
-private func fdZero(_ set: inout fd_set) {
-    #if canImport(Darwin)
-    _ = withUnsafeMutablePointer(to: &set) { ptr in
-        memset(ptr, 0, MemoryLayout<fd_set>.size)
-    }
-    #else
-    __FD_ZERO(&set)
-    #endif
-}
-
-/// Adds a file descriptor to an fd_set.
-private func fdSet(_ fd: Int32, _ set: inout fd_set) {
-    #if canImport(Darwin)
-    let intOffset = Int(fd) / 32
-    let bitOffset = Int(fd) % 32
-    withUnsafeMutablePointer(to: &set) { ptr in
-        let rawPtr = UnsafeMutableRawPointer(ptr)
-        let arrayPtr = rawPtr.assumingMemoryBound(to: Int32.self)
-        arrayPtr[intOffset] |= Int32(1 << bitOffset)
-    }
-    #else
-    __FD_SET(fd, &set)
-    #endif
 }
