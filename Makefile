@@ -13,7 +13,7 @@
 # See docs/TESTING.md for detailed test categorization.
 
 .PHONY: test test-smoke test-unit \
-        test-protocol test-cli test-basic test-asm test-atr test-core test-state test-server
+        test-protocol test-cli test-basic test-asm test-atr test-core test-state test-server test-perf
 
 # ---------------------------------------------------------------------------
 # Full suite
@@ -98,7 +98,7 @@ test-atr:
 
 ## Core emulator types and frame rate (<1s)
 test-core:
-	swift test --filter 'AtticCoreTests|CPURegisters|REPLMode|CommandParser|AtticError|AtariScreen|InputState|FrameResult|AudioConfiguration|StateTags|StateFlags|EmulatorState|LibAtari800Wrapper|EmulatorEngine|FrameRate|StatePersistence|StateSaveIntegration|StateLoadIntegration|StateIntegrityIntegration|StateCommandParsing'
+	swift test --filter 'AtticCoreTests|CPURegisters|REPLMode|CommandParser|AtticError|AtariScreen|InputState|FrameResult|AudioConfiguration|StateTags|StateFlags|EmulatorState|LibAtari800Wrapper|EmulatorEngine|FrameRate|StatePersistence|StateSaveIntegration|StateLoadIntegration|StateIntegrityIntegration|StateCommandParsing|FrameRatePerformance|AudioLatencyPerformance|MemoryUsagePerformance'
 
 ## State persistence save/load/integrity (<1s)
 test-state:
@@ -107,3 +107,7 @@ test-state:
 ## AtticServer subprocess tests (~7s)
 test-server:
 	swift test --filter 'AtticServerSubprocess'
+
+## Performance tests – frame rate, audio latency, memory usage (<1s)
+test-perf:
+	swift test --filter 'FrameRatePerformance|AudioLatencyPerformance|MemoryUsagePerformance'

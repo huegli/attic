@@ -14,6 +14,7 @@ make test-basic   # BASIC tokenizer/detokenizer              (<1s)
 make test-asm     # Assembler, disassembler, 6502            (~2s)
 make test-atr     # ATR filesystem                           (<1s)
 make test-core    # Core emulator types + frame rate         (<1s)
+make test-perf    # Performance: frame rate, audio, memory   (<1s)
 make test-protocol# AESP protocol (messages, server, E2E)   (~18s)
 make test-cli     # CLI parsing, sockets, subprocesses       (~37s)
 make test-server  # AtticServer subprocess tests             (~7s)
@@ -28,6 +29,7 @@ make test         # Full suite                               (~63s)
 | Editing assembler / disassembler code | `make test-asm` |
 | Editing ATR filesystem code | `make test-atr` |
 | Editing core types (registers, state, frame rate) | `make test-core` |
+| Editing performance-sensitive code (frame rate, audio, memory) | `make test-perf` |
 | Editing AESP protocol or server/client code | `make test-protocol` |
 | Editing CLI commands or socket layer | `make test-cli` |
 | General development – quick sanity check | `make test-smoke` |
@@ -49,6 +51,7 @@ Fast, in-process tests with no subprocess or network dependencies.
 | Disassembler | AddressingModeTests, AddressingModeDisassemblyTests, BasicDisassemblyTests, IllegalOpcodeDisassemblyTests, CPUFlagsTests, OpcodeTableTests, DisassembledInstructionTests, AddressLabelsTests, ArrayMemoryBusTests, DisassemblerTests, CLIDisassembleCommandTests | 6502 disassembly |
 | ATR filesystem | ATRImageTests, ATRFileSystemTests, DirectoryEntryTests, DiskTypeTests, DiskManagerTests, SectorLinkTests, VTOCTests | Disk image parsing |
 | Frame rate | FrameRateMonitorInitTests, FrameRateFPSTests, FrameRateDropTests, FrameRateStatisticsTests, FrameRateRingBufferTests, FrameRateResetTests, FrameRateSustainedTests, FrameRateFPSCounterTests | Performance monitoring |
+| Performance | FrameRatePerformanceTests, AudioLatencyPerformanceTests, MemoryUsagePerformanceTests | Sustained frame rate, audio latency, memory stability |
 | State persistence | StatePersistenceTests | Save/load emulator state |
 | CLI protocol | CLIProtocolTests, CLISocketClientTests, CLISocketServerTests | Protocol message types and socket layer |
 | DOS / Monitor commands | ModeSwitchingTests, DOSCommandParserTests, MonitorRegisterCommandTests, HelpAndStatusContentTests, DOSWorkflowTests | DOS and monitor modes |
