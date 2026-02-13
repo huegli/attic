@@ -184,6 +184,28 @@ Query emulator capabilities.
 | Request   | Empty                                |
 | Response  | UTF-8 JSON with version/capabilities |
 
+#### BOOT_FILE (0x07)
+Load and boot a file into the emulator.
+
+| Direction | Payload                                      |
+|-----------|----------------------------------------------|
+| Request   | UTF-8 file path string                       |
+| Response  | 1 byte status + UTF-8 message                |
+
+**Request Payload**: UTF-8 encoded absolute file path.
+
+**Response Payload**:
+```
+Offset 0: Status (1 byte)
+  0x00 = Success
+  0x01 = Failure
+Offset 1-N: UTF-8 status/error message
+```
+
+**Supported file types**: ATR, XFD, ATX, DCM, PRO (disk images), XEX/COM/EXE (executables), BAS/LST (BASIC programs), CART/ROM (cartridges), CAS (cassette images).
+
+**Test Case**: Send BOOT_FILE with valid ATR path, verify success response.
+
 #### ACK (0x0F)
 Generic acknowledgement.
 
@@ -652,6 +674,49 @@ OK:stepped A=$4F X=$03 Y=$00 S=$FD P=$30 PC=$E4A2
 - `CMD:step 100\n` - multiple steps, verify PC advanced
 - `CMD:step -1\n` - invalid count → `ERR:Invalid step count`
 
+#### stepover
+Step over JSR subroutine calls (treats JSR as atomic). Alias: `so`.
+```
+CMD:stepover
+OK:stepped A=$00 X=$00 Y=$00 S=$FF P=$34 PC=$E47B
+
+CMD:so
+OK:stepped A=$4F X=$03 Y=$00 S=$FD P=$30 PC=$E4A2
+```
+
+**Test Case**: Step over a JSR instruction, verify PC is at instruction after JSR.
+
+#### until
+Run emulator until PC reaches a specific address.
+```
+CMD:until $E480
+OK:stopped at $E480
+```
+
+**Test Cases**:
+- `CMD:until $0600\n` - run until address reached
+- `CMD:until xyz\n` → `ERR:Invalid address 'xyz'`
+
+#### boot
+Load and boot a file into the emulator.
+```
+CMD:boot /path/to/game.atr
+OK:booted /path/to/game.atr
+```
+
+**Supported file types**: ATR, XFD, ATX, DCM, PRO, XEX, COM, EXE, BAS, LST, CART, ROM, CAS.
+
+**Test Cases**:
+- `CMD:boot /valid/path.atr\n` - boot valid file
+- `CMD:boot /nonexistent.atr\n` → `ERR:File not found`
+
+#### version
+Query protocol version.
+```
+CMD:version
+OK:version 1.0
+```
+
 #### reset
 Reset the emulator.
 ```
@@ -713,6 +778,28 @@ Bytes are comma-separated hex values.
 - Write and read back: Write A9,00, read $0600, verify A9,00
 - `CMD:write $0600 GG\n` → `ERR:Invalid byte value 'GG'`
 - `CMD:write $0600\n` → `ERR:Missing data`
+
+#### fill
+Fill a memory range with a single byte value.
+```
+CMD:fill $0600 $06FF $00
+OK:filled 256 bytes
+```
+
+Address and value can be hex ($xxxx) or decimal.
+
+**Test Cases**:
+- `CMD:fill $0600 $06FF $EA\n` - fill range with NOP
+- `CMD:fill $0600\n` → `ERR:Missing end address`
+
+#### screen
+Read the text displayed on the GRAPHICS 0 screen as a 40×24 character string.
+```
+CMD:screen
+OK:<40x24 character text, lines joined with \x1E>
+```
+
+Only works when the emulator is in GRAPHICS 0 (text) mode.
 
 ### CPU State
 
@@ -1016,6 +1103,245 @@ Escape sequences:
 
 **Test Case**: Inject "PRINT 123\n", verify output appears on emulated screen.
 
+### BASIC Subsystem
+
+Commands for managing BASIC programs. All prefixed with `basic`.
+
+#### basic (line entry)
+Enter or replace a BASIC line (tokenized and injected into emulator memory).
+```
+CMD:basic 10 PRINT "HELLO"
+OK:injected
+```
+
+#### basic new
+Clear BASIC program from memory.
+```
+CMD:basic new
+OK:cleared
+```
+
+#### basic run
+Execute the BASIC program.
+```
+CMD:basic run
+OK:running
+```
+
+#### basic list
+List the BASIC program. Optional `atascii` flag enables rich ATASCII rendering.
+```
+CMD:basic list
+OK:10 PRINT "HELLO"\x1E20 GOTO 10
+
+CMD:basic list atascii
+OK:10 PRINT "HELLO"\x1E20 GOTO 10
+```
+
+#### basic del
+Delete BASIC line(s) by number or range.
+```
+CMD:basic del 10
+OK:deleted 1 lines
+
+CMD:basic del 10-50
+OK:deleted 5 lines
+```
+
+#### basic stop
+Stop a running BASIC program (equivalent to BREAK key).
+```
+CMD:basic stop
+OK:stopped
+```
+
+#### basic cont
+Continue a stopped BASIC program.
+```
+CMD:basic cont
+OK:running
+```
+
+#### basic vars
+Show all BASIC variables and their values.
+```
+CMD:basic vars
+OK:I=10\x1ECOUNT=42\x1ENAME$="CLAUDE"
+```
+
+#### basic var
+Show a specific BASIC variable.
+```
+CMD:basic var X
+OK:X=100 (integer)
+```
+
+#### basic info
+Show BASIC program metadata.
+```
+CMD:basic info
+OK:program size=1234 lines=42 ...
+```
+
+#### basic renum
+Renumber BASIC lines. Optional start and step arguments (defaults: 10, 10).
+```
+CMD:basic renum
+OK:renumbered to 10,20,30,...
+
+CMD:basic renum 100 20
+OK:renumbered to 100,120,140,...
+```
+
+#### basic save
+Save tokenized BASIC to ATR disk. Supports optional `D#:` drive prefix.
+```
+CMD:basic save D:MYPROG
+OK:saved to D1:MYPROG
+
+CMD:basic save D2:BACKUP
+OK:saved to D2:BACKUP
+```
+
+#### basic load
+Load tokenized BASIC from ATR disk. Supports optional `D#:` drive prefix.
+```
+CMD:basic load D:MYPROG
+OK:loaded from D1:MYPROG
+```
+
+#### basic export
+Export BASIC program to host filesystem as text.
+```
+CMD:basic export ~/game.bas
+OK:exported to /Users/nick/game.bas
+```
+
+#### basic import
+Import BASIC program from host filesystem text file.
+```
+CMD:basic import ~/game.bas
+OK:imported from /Users/nick/game.bas
+```
+
+#### basic dir
+List files on ATR disk. Optional drive number (default: current drive).
+```
+CMD:basic dir
+OK:<directory listing>
+
+CMD:basic dir 2
+OK:<D2: directory listing>
+```
+
+### DOS File System
+
+Commands for managing ATR disk images and files. All prefixed with `dos`.
+
+#### dos cd
+Change current working drive.
+```
+CMD:dos cd 2
+OK:changed to D2:
+```
+
+#### dos dir
+List files on current drive. Optional wildcard pattern.
+```
+CMD:dos dir
+OK:<directory listing>
+
+CMD:dos dir *.BAS
+OK:<filtered listing>
+```
+
+#### dos info
+Show detailed file information.
+```
+CMD:dos info GAME.BAS
+OK:GAME.BAS 2048 bytes 8 sectors locked=0
+```
+
+#### dos type
+Display text file contents (ATASCII decoded).
+```
+CMD:dos type README.TXT
+OK:Welcome to my disk!\x1EHave fun!
+```
+
+#### dos dump
+Hex dump of file contents.
+```
+CMD:dos dump PROG.COM
+OK:<hex dump output>
+```
+
+#### dos copy
+Copy file between drives. Supports `D#:` prefix on source and destination.
+```
+CMD:dos copy D1:SRC.BAS D2:DST.BAS
+OK:copied D1:SRC.BAS to D2:DST.BAS
+```
+
+#### dos rename
+Rename file on current drive.
+```
+CMD:dos rename OLDNAME.BAS NEWNAME.BAS
+OK:renamed to NEWNAME.BAS
+```
+
+#### dos delete
+Delete file from current drive.
+```
+CMD:dos delete TEMP.BAS
+OK:deleted TEMP.BAS
+```
+
+#### dos lock
+Set read-only flag on file.
+```
+CMD:dos lock READONLY.BAS
+OK:locked READONLY.BAS
+```
+
+#### dos unlock
+Clear read-only flag on file.
+```
+CMD:dos unlock READONLY.BAS
+OK:unlocked READONLY.BAS
+```
+
+#### dos export
+Export ATR file to host filesystem.
+```
+CMD:dos export GAME.BAS ~/game.bas
+OK:exported to ~/game.bas
+```
+
+#### dos import
+Import host file to ATR disk.
+```
+CMD:dos import ~/game.bas GAME.BAS
+OK:imported from ~/game.bas
+```
+
+#### dos newdisk
+Create a new blank ATR disk image. Types: `sd` (90K), `ed` (130K), `dd` (180K).
+```
+CMD:dos newdisk ~/disk.atr
+OK:created disk.atr (sd)
+
+CMD:dos newdisk ~/disk.atr ed
+OK:created disk.atr (ed)
+```
+
+#### dos format
+Format current drive (erases all data).
+```
+CMD:dos format
+OK:formatted current disk
+```
+
 ### Session Control
 
 #### quit
@@ -1147,6 +1473,7 @@ class SocketHandler {
 | Control  | RESET        | ✓      | ✓      | ✓          | Invalid type |
 | Control  | STATUS       | ✓      | ✓      | ✓          | -           |
 | Control  | INFO         | ✓      | ✓      | ✓          | -           |
+| Control  | BOOT_FILE    | ✓      | ✓      | ✓          | File not found |
 | Control  | ACK          | ✓      | ✓      | ✓          | -           |
 | Control  | ERROR        | ✓      | ✓      | ✓          | -           |
 | Input    | KEY_DOWN     | ✓      | ✓      | ✓          | Invalid format |
@@ -1188,6 +1515,10 @@ class SocketHandler {
 | pause | ✓ | - |
 | resume | ✓ | - |
 | step | ✓ | Invalid count, Negative count |
+| stepover | ✓ | - |
+| until | ✓ | Invalid address |
+| boot | ✓ | File not found |
+| version | ✓ | - |
 | reset | ✓ | Invalid type |
 | status | ✓ | - |
 | disassemble | ✓ | Invalid address, Invalid line count |
@@ -1197,6 +1528,8 @@ class SocketHandler {
 | assemble end | ✓ | No session |
 | read | ✓ | Invalid address, Missing count |
 | write | ✓ | Invalid address, Invalid byte, Missing data |
+| fill | ✓ | Missing address, Invalid value |
+| screen | ✓ | - |
 | registers (get) | ✓ | - |
 | registers (set) | ✓ | Invalid register, Invalid value |
 | breakpoint set | ✓ | Already set |
@@ -1211,5 +1544,35 @@ class SocketHandler {
 | screenshot | ✓ | Permission denied |
 | inject basic | ✓ | Invalid base64 |
 | inject keys | ✓ | - |
+| basic (line entry) | ✓ | Syntax error |
+| basic new | ✓ | - |
+| basic run | ✓ | - |
+| basic list | ✓ | - |
+| basic del | ✓ | Invalid line, Invalid range |
+| basic stop | ✓ | - |
+| basic cont | ✓ | - |
+| basic vars | ✓ | - |
+| basic var | ✓ | Variable not found |
+| basic info | ✓ | - |
+| basic renum | ✓ | Invalid start/step |
+| basic save | ✓ | No disk, File error |
+| basic load | ✓ | File not found |
+| basic export | ✓ | Permission denied |
+| basic import | ✓ | File not found |
+| basic dir | ✓ | No disk mounted |
+| dos cd | ✓ | Invalid drive |
+| dos dir | ✓ | No disk mounted |
+| dos info | ✓ | File not found |
+| dos type | ✓ | File not found |
+| dos dump | ✓ | File not found |
+| dos copy | ✓ | File not found, Dest drive not mounted |
+| dos rename | ✓ | File not found |
+| dos delete | ✓ | File not found, File locked |
+| dos lock | ✓ | File not found |
+| dos unlock | ✓ | File not found |
+| dos export | ✓ | File not found, Permission denied |
+| dos import | ✓ | File not found, Disk full |
+| dos newdisk | ✓ | Permission denied, Invalid type |
+| dos format | ✓ | No disk mounted |
 | quit | ✓ | - |
 | shutdown | ✓ | - |

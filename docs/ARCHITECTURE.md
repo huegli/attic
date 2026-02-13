@@ -42,7 +42,15 @@ This separation enables:
 | 6 | AESP Protocol Library | ✅ Complete |
 | 7 | Emulator Server | ✅ Complete |
 | 8 | GUI as Protocol Client | ✅ Complete |
-| 9-17 | REPL, Debugging, BASIC | Pending |
+| 9 | CLI Socket Protocol | ✅ Complete |
+| 10 | Input Handling (Joystick) | ✅ Complete (keyboard emulation; no GameController) |
+| 11 | 6502 Disassembler | ✅ Complete |
+| 12 | Monitor/Debugger | ✅ Complete |
+| 13 | ATR Filesystem | ✅ Complete |
+| 14 | DOS Mode | ✅ Complete |
+| 15 | BASIC Tokenizer | ✅ Complete |
+| 16 | State Save/Load | ✅ Complete |
+| 17 | Polish | ✅ Complete |
 | 18-19 | Web Browser Support | Pending |
 
 ## Component Diagram
@@ -72,14 +80,15 @@ All AtticCore files are at the module top level (no subdirectories). Files are g
 │  └─────────────────────────────────────┘                                     │
 │                                                                              │
 │  ┌─ REPL ──────────────────────────────┐  ┌─ CLI Socket ───────────────────┐ │
-│  │ REPLEngine.swift                    │  │ CLIProtocol.swift              │ │
-│  │ REPLMode.swift                      │  │ CLISocketClient.swift          │ │
-│  │ CommandParser.swift                 │  │ CLISocketServer.swift          │ │
+│  │ REPLMode.swift                      │  │ CLIProtocol.swift              │ │
+│  │ CommandParser.swift                 │  │ CLISocketClient.swift          │ │
+│  │                                     │  │ CLISocketServer.swift          │ │
 │  └─────────────────────────────────────┘  └────────────────────────────────┘ │
 │                                                                              │
-│  ┌─ Audio/Input ───────────────────────┐  ┌─ Module ───────────────────────┐ │
+│  ┌─ Audio/Input ───────────────────────┐  ┌─ Module/Utilities ────────────┐ │
 │  │ AudioEngine.swift                   │  │ AtticCore.swift                │ │
-│  │ KeyboardInputHandler.swift          │  │ (public API exports)           │ │
+│  │ KeyboardInputHandler.swift          │  │ FrameRateMonitor.swift         │ │
+│  │                                     │  │ ServerLauncher.swift           │ │
 │  └─────────────────────────────────────┘  └────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────────────────┘
            │                           │
@@ -89,8 +98,8 @@ All AtticCore files are at the module top level (no subdirectories). Files are g
     │                 │  Unix   │                 │
     │  SwiftUI Views  │ Socket  │  REPL Server    │
     │  Metal Renderer │         │  (stdio)        │
-    │  GameController │         │                 │
     │  Core Audio     │         │                 │
+    │                 │         │                 │
     └─────────────────┘         └─────────────────┘
                                        │
                                        ▼

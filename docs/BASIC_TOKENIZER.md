@@ -99,16 +99,18 @@ $24              ('$' - string indicator)
 Each line has this structure:
 
 ```
-┌─────────────┬──────────────┬─────────────────────┬─────┐
-│ Line Number │ Next Line    │ Tokenized           │ EOL │
-│ (2 bytes)   │ Offset       │ Statements          │     │
-│ little-end  │ (1 byte)     │                     │     │
-└─────────────┴──────────────┴─────────────────────┴─────┘
+┌─────────────┬──────────────┬──────────────┬─────────────────────┬─────┐
+│ Line Number │ Line Length  │ Statement    │ Tokenized           │ EOL │
+│ (2 bytes)   │ (1 byte)    │ Offset       │ Statements          │     │
+│ little-end  │             │ (1 byte)     │                     │     │
+└─────────────┴──────────────┴──────────────┴─────────────────────┴─────┘
+  Offset 0-1    Offset 2      Offset 3       Offset 4+             $16
 ```
 
 - **Line Number**: 16-bit little-endian (0-32767)
-- **Next Line Offset**: Bytes from start of this line to start of next
-- **Tokenized Statements**: Variable-length encoded content
+- **Line Length**: Total bytes from start of this line to start of next
+- **Statement Offset**: Offset to next statement within the line (for multi-statement lines with `:`)
+- **Tokenized Statements**: Variable-length encoded content (starts at offset 4)
 - **EOL**: End of line marker ($16)
 
 ### End of Program
@@ -154,46 +156,46 @@ $00 $00 $00
 | $34 | CSAVE | $35 | CLOAD |
 | $36 | (implied LET) | | |
 
-### Operator Tokens ($37-$5A)
+### Operator Tokens ($12-$37)
 
 | Token | Operator | Token | Operator |
 |-------|----------|-------|----------|
-| $37 | , | $38 | $ (string) |
-| $39 | : | $3A | ; |
-| $3B | EOL | $3C | GOTO (in ON) |
-| $3D | GOSUB (in ON) | $3E | TO |
-| $3F | STEP | $40 | THEN |
-| $41 | # | $42 | <= |
-| $43 | <> | $44 | >= |
-| $45 | < | $46 | > |
-| $47 | = | $48 | ^ |
-| $49 | * | $4A | + |
-| $4B | - | $4C | / |
-| $4D | NOT | $4E | OR |
-| $4F | AND | $50 | ( |
-| $51 | ) | $52 | = (assign) |
-| $53 | = (compare) | $54 | <= |
-| $55 | <> | $56 | >= |
-| $57 | < | $58 | > |
-| $59 | = | $5A | + (unary) |
-| $5B | - (unary) | $5C | ( (array) |
+| $12 | , | $13 | $ (string type) |
+| $14 | : | $15 | ; |
+| $16 | EOL | $17 | GOTO (in ON) |
+| $18 | GOSUB (in ON) | $19 | TO |
+| $1A | STEP | $1B | THEN |
+| $1C | # | $1D | <= |
+| $1E | <> | $1F | >= |
+| $20 | < | $21 | > |
+| $22 | = (expression) | $23 | ^ |
+| $24 | * | $25 | + |
+| $26 | - | $27 | / |
+| $28 | NOT | $29 | OR |
+| $2A | AND | $2B | ( |
+| $2C | ) | $2D | = (assignment) |
+| $2E | = (comparison) | $2F | <= (alt) |
+| $30 | <> (alt) | $31 | >= (alt) |
+| $32 | < (alt) | $33 | > (alt) |
+| $34 | = (alt) | $35 | + (unary) |
+| $36 | - (unary) | $37 | ( (array subscript) |
 
-### Function Tokens ($5D-$7F)
+### Function Tokens ($38-$4F)
 
 | Token | Function | Token | Function |
 |-------|----------|-------|----------|
-| $5D | STR$ | $5E | CHR$ |
-| $5F | USR | $60 | ASC |
-| $61 | VAL | $62 | LEN |
-| $63 | ADR | $64 | ATN |
-| $65 | COS | $66 | PEEK |
-| $67 | SIN | $68 | RND |
-| $69 | FRE | $6A | EXP |
-| $6B | LOG | $6C | CLOG |
-| $6D | SQR | $6E | SGN |
-| $6F | ABS | $70 | INT |
-| $71 | PADDLE | $72 | STICK |
-| $73 | PTRIG | $74 | STRIG |
+| $38 | STR$ | $39 | CHR$ |
+| $3A | USR | $3B | ASC |
+| $3C | VAL | $3D | LEN |
+| $3E | ADR | $3F | ATN |
+| $40 | COS | $41 | PEEK |
+| $42 | SIN | $43 | RND |
+| $44 | FRE | $45 | EXP |
+| $46 | LOG | $47 | CLOG |
+| $48 | SQR | $49 | SGN |
+| $4A | ABS | $4B | INT |
+| $4C | PADDLE | $4D | STICK |
+| $4E | PTRIG | $4F | STRIG |
 
 ### Numeric Constants
 
@@ -203,15 +205,9 @@ Numeric constants are encoded as:
 $0E <6-byte BCD floating point>
 ```
 
-Or for positive integers 0-255:
-```
-$0D <1-byte value>
-```
+All numeric constants use the BCD float prefix `$0E`, matching standard Atari BASIC behavior.
 
-Or for larger integers:
-```
-$0E <6-byte BCD>
-```
+**Legacy format**: The detokenizer also supports `$0D <1-byte value>` (small integer 0-255) for backward compatibility when reading tokenized programs that use this non-standard encoding.
 
 ### String Constants
 
@@ -401,7 +397,18 @@ Turbo BASIC XL is detected by:
 
 ## Detokenization
 
-Reverse process for LIST command:
+Reverse process for LIST command.
+
+### ATASCII Rendering Modes
+
+The detokenizer supports two rendering modes for ATASCII characters in string constants:
+
+| Mode | Description |
+|------|-------------|
+| `.plain` | Strips inverse video (bit 7), replaces ATASCII graphics ($00-$1F) with `.` |
+| `.rich` | Uses ANSI escape codes (`\e[7m`) for inverse video, maps ATASCII graphics to Unicode box-drawing/symbol characters |
+
+Rich mode is activated with the `--atascii` CLI flag.
 
 ### Algorithm
 
@@ -409,28 +416,28 @@ Reverse process for LIST command:
 func detokenize(from address: UInt16) -> String {
     var output = ""
     var addr = address
-    
+
     while true {
         // Read line number
         let lineNum = readWord(addr)
         if lineNum == 0 { break }
-        
+
         // Read line length
         let length = readByte(addr + 2)
-        
+
         output += "\(lineNum) "
-        
-        // Process tokens
-        var pos = addr + 3
+
+        // Process tokens (content starts at offset 4)
+        var pos = addr + 4
         while pos < addr + UInt16(length) {
             let token = readByte(pos)
             output += decodeToken(token, at: &pos)
         }
-        
+
         output += "\n"
         addr += UInt16(length)
     }
-    
+
     return output
 }
 ```

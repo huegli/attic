@@ -70,6 +70,7 @@ Replace `/path/to/attic` with the absolute path to your Attic repository.
 | `emulator_pause` | Pause emulation for inspection/debugging |
 | `emulator_resume` | Resume emulation after pause |
 | `emulator_reset` | Reset the emulator (cold or warm reset) |
+| `emulator_boot_file` | Load and boot a file (ATR, XEX, BAS, CAS, ROM) |
 
 **Example - Check Status:**
 ```
@@ -82,6 +83,13 @@ Result: status running PC=$F302 D1=(none) D2=(none) BP=(none)
 Tool: emulator_reset
 Arguments: { "cold": true }
 Result: Emulator reset (cold)
+```
+
+**Example - Boot a File:**
+```
+Tool: emulator_boot_file
+Arguments: { "path": "/path/to/game.atr" }
+Result: Booted /path/to/game.atr
 ```
 
 ### Memory Access

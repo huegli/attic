@@ -1,58 +1,22 @@
 # Complete Feature Specification
 
-## 1. Application Bundle
+## 1. Project Structure
 
-### Bundle Structure
+### SPM Executables
+
+The project is built with Swift Package Manager. There is no `.app` bundle; executables are produced directly by `swift build` or `swift run`:
 
 ```
-Attic.app/
-└── Contents/
-    ├── Info.plist
-    ├── MacOS/
-    │   ├── AtticGUI             # Main GUI executable (libatari800 statically linked)
-    │   └── attic                # Command-line tool (libatari800 statically linked)
-    ├── Resources/
-    │   ├── ROM/
-    │   │   ├── ATARIXL.ROM      # 16KB OS ROM
-    │   │   ├── ATARIBAS.ROM     # 8KB BASIC ROM
-    │   │   └── ATARIOSA.ROM     # Optional: OS-A for compatibility
-    │   ├── Assets.xcassets
-    │   └── Credits.rtf
-    └── Library/
-        └── LaunchServices/
-            └── attic            # For command-line access
+.build/debug/ (or .build/release/)
+├── AtticGUI            # Main GUI executable (libatari800 statically linked)
+├── AtticServer         # Standalone emulator server (AESP protocol)
+└── attic               # Command-line REPL tool (libatari800 statically linked)
 ```
 
-**Note:** libatari800 is statically linked into both executables rather than distributed
+ROMs are resolved at runtime from multiple search paths (see Startup Sequence below), not embedded in a bundle.
+
+**Note:** libatari800 is statically linked into all executables rather than distributed
 as a dynamic library. This simplifies deployment and eliminates framework path issues.
-
-### Info.plist Requirements
-
-```xml
-<key>CFBundleIdentifier</key>
-<string>com.example.attic</string>
-
-<key>CFBundleDocumentTypes</key>
-<array>
-    <dict>
-        <key>CFBundleTypeName</key>
-        <string>Atari Disk Image</string>
-        <key>CFBundleTypeExtensions</key>
-        <array>
-            <string>atr</string>
-            <string>ATR</string>
-        </array>
-    </dict>
-    <dict>
-        <key>CFBundleTypeName</key>
-        <string>Attic State</string>
-        <key>CFBundleTypeExtensions</key>
-        <array>
-            <string>attic</string>
-        </array>
-    </dict>
-</array>
-```
 
 ## 2. GUI Application
 
@@ -83,38 +47,22 @@ as a dynamic library. This simplifies deployment and eliminates framework path i
 ```
 Attic
   About Attic
-  Preferences...                    ⌘,
-  ───────────────────────────────────
-  Quit                              ⌘Q
+  Close                             ⌘W
+  Shutdown All                      ⌘Q
 
 File
-  Open Disk Image...                ⌘O
-  Recent Disk Images               ▶
-  Close Disk Image
-  ───────────────────────────────────
-  Save State...                     ⌘S
-  Save State As...                  ⌘⇧S
-  Load State...                     ⌘L
-  ───────────────────────────────────
-  Screenshot                        ⌘P
-  Screenshot As...                  ⌘⇧P
+  Open File...                      ⌘O
 
 Emulator
-  Run                               ⌘R
-  Pause                             ⌘.
+  Run / Pause                       ⌘R / ⌘.
   ───────────────────────────────────
   Reset (Cold)                      ⌘⇧R
   Reset (Warm)                      ⌘⌥R
   ───────────────────────────────────
-  Drive 1                          ▶
-    Insert Disk...
-    Eject
-    Write Protect
-  Drive 2                          ▶
-    ...
+  Joystick Emulation (toggle)       ⌘J
 
 View
-  Enter Full Screen                 ⌘⌃F
+  Toggle Full Screen                ⌘⌃F
 ```
 
 ### Keyboard Mapping
@@ -136,16 +84,16 @@ View
 | ` (backtick) | ATARI key |
 | Caps Lock | Caps |
 
-### Game Controller Mapping
+### Joystick Emulation
 
-| Controller | Atari |
-|------------|-------|
-| D-pad / Left Stick | Joystick directions |
-| Button A (South) | Fire button |
-| Button B (East) | Space (secondary) |
-| Start | START |
-| Select/Back | SELECT |
-| L1/R1 | OPTION |
+Joystick input is emulated via the keyboard (toggled with ⌘J):
+
+| Key | Atari Joystick |
+|-----|----------------|
+| Arrow keys | Joystick directions |
+| Space | Fire button |
+
+**Note:** GameController framework integration (physical gamepad support) is not implemented.
 
 ### Metal Rendering
 
@@ -177,17 +125,21 @@ View
 USAGE: attic [options]
 
 OPTIONS:
-  --repl              Start in REPL mode (default)
   --headless          Run without launching GUI
   --silent            Disable audio output (headless mode only)
+  --atascii           Rich ATASCII rendering (ANSI inverse + Unicode graphics)
   --socket <path>     Connect to GUI at specific socket path
-  --help              Show help information
+  --help, -h          Show help information
+  --version, -v       Show version
 
 EXAMPLES:
   attic                                Launch GUI and connect REPL
   attic --headless                     Run emulator without GUI
+  attic --headless --atascii           Headless with rich ATASCII display
   attic --socket /tmp/attic-1234.sock  Connect to existing GUI
 ```
+
+**Note:** The CLI always starts in REPL mode by default; there is no `--repl` flag.
 
 ### REPL Prompt Format
 

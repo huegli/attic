@@ -1,23 +1,23 @@
 # Test Suite Guide
 
-The Attic project has ~1120 tests across two SPM test targets. The full suite
-takes ~61 seconds, but **1012 unit tests finish in ~1.5s** while **108
-integration tests consume the remaining ~59.5s** (97.5% of runtime). A
+The Attic project has ~1384 tests across two SPM test targets. The full suite
+takes ~63 seconds, but **~1263 unit tests finish in ~1.5s** while **~121
+integration tests consume the remaining ~61s** (97% of runtime). A
 `Makefile` provides focused targets so you can iterate quickly.
 
 ## Quick Reference
 
 ```bash
-make test-smoke   # Fast feedback – skips slow suites        (~3s)
+make test-smoke   # Fast feedback – skips slow suites        (~8s)
 make test-unit    # Pure unit tests only                     (~2s)
 make test-basic   # BASIC tokenizer/detokenizer              (<1s)
-make test-asm     # Assembler, disassembler, 6502            (<1s)
+make test-asm     # Assembler, disassembler, 6502            (~2s)
 make test-atr     # ATR filesystem                           (<1s)
 make test-core    # Core emulator types + frame rate         (<1s)
-make test-protocol# AESP protocol (messages, server, E2E)   (~15s)
+make test-protocol# AESP protocol (messages, server, E2E)   (~18s)
 make test-cli     # CLI parsing, sockets, subprocesses       (~37s)
 make test-server  # AtticServer subprocess tests             (~7s)
-make test         # Full suite                               (~61s)
+make test         # Full suite                               (~63s)
 ```
 
 ## When to Use Each Target
@@ -35,7 +35,7 @@ make test         # Full suite                               (~61s)
 
 ## Test Categories
 
-### Unit Tests (~1012 tests, ~1.5s)
+### Unit Tests (~1263 tests, ~1.5s)
 
 Fast, in-process tests with no subprocess or network dependencies.
 
@@ -45,12 +45,12 @@ Fast, in-process tests with no subprocess or network dependencies.
 |-------|-------------|-------|
 | Core types | AtticCoreTests, CPURegistersTests, REPLModeTests, CommandParserTests, AtticErrorTests, AtariScreenTests, InputStateTests, FrameResultTests, AudioConfigurationTests, StateTagsTests, StateFlagsTests, EmulatorStateTests, LibAtari800WrapperTests, EmulatorEngineTests | Emulator type definitions and state |
 | BASIC | BASICTokenizerTests, BASICDetokenizerTests | Tokenization round-trips |
-| Assembler / Monitor | AssemblerTests, AssemblerPseudoOpTests, AssemblerErrorTests, ExpressionParserTests, SymbolTableTests, BreakpointManagerTests, BreakpointErrorTests, InteractiveAssemblerTests, MonitorStepResultTests, ParsedOperandTests, AssemblyResultTests, MonitorOpcodeTableHelperTests, MonitorOpcodeInfoUsageTests | 6502 assembly and monitor |
-| Disassembler | AddressingModeTests, CPUFlagsTests, OpcodeTableTests, DisassembledInstructionTests, AddressLabelsTests, ArrayMemoryBusTests, DisassemblerTests, CLIDisassembleCommandTests | 6502 disassembly |
-| ATR filesystem | ATRImageTests, ATRFileSystemTests, DirectoryEntryTests, DiskTypeTests, SectorLinkTests, VTOCTests | Disk image parsing |
+| Assembler / Monitor | AssemblerTests, AssemblerPseudoOpTests, AssemblerErrorTests, AssemblerMultiLineTests, ExpressionParserTests, SymbolTableTests, BreakpointManagerTests, BreakpointManagerMemoryTests, BreakpointErrorTests, InteractiveAssemblerTests, MonitorStepResultTests, MonitorStepLogicTests, ParsedOperandTests, AssemblyResultTests, MonitorOpcodeTableHelperTests, MonitorOpcodeInfoUsageTests | 6502 assembly and monitor |
+| Disassembler | AddressingModeTests, AddressingModeDisassemblyTests, BasicDisassemblyTests, IllegalOpcodeDisassemblyTests, CPUFlagsTests, OpcodeTableTests, DisassembledInstructionTests, AddressLabelsTests, ArrayMemoryBusTests, DisassemblerTests, CLIDisassembleCommandTests | 6502 disassembly |
+| ATR filesystem | ATRImageTests, ATRFileSystemTests, DirectoryEntryTests, DiskTypeTests, DiskManagerTests, SectorLinkTests, VTOCTests | Disk image parsing |
 | Frame rate | FrameRateMonitorInitTests, FrameRateFPSTests, FrameRateDropTests, FrameRateStatisticsTests, FrameRateRingBufferTests, FrameRateResetTests, FrameRateSustainedTests, FrameRateFPSCounterTests | Performance monitoring |
 | State persistence | StatePersistenceTests | Save/load emulator state |
-| CLI protocol | CLIProtocolTests | Protocol message types |
+| CLI protocol | CLIProtocolTests, CLISocketClientTests, CLISocketServerTests | Protocol message types and socket layer |
 | DOS / Monitor commands | ModeSwitchingTests, DOSCommandParserTests, MonitorRegisterCommandTests, HelpAndStatusContentTests, DOSWorkflowTests | DOS and monitor modes |
 | Integration (fast) | BASICPipelineIntegrationTests, StatePersistenceIntegrationTests, AssemblerDisassemblerIntegrationTests, ExpressionEvaluatorIntegrationTests | Cross-component in-process tests |
 
@@ -62,7 +62,7 @@ Fast, in-process tests with no subprocess or network dependencies.
 | Extended messages | AESPControlMessageExtendedTests, AESPInputMessageExtendedTests, AESPVideoMessageExtendedTests, AESPAudioMessageExtendedTests, AESPProtocolConformanceTests | Additional message types |
 | Config | AESPServerConfigurationTests, AESPClientConfigurationTests, AESPSendableTests, AESPServerDelegatePropertyTests | Server/client configuration |
 
-### Integration Tests (~108 tests, ~59.5s)
+### Integration Tests (~121 tests, ~61s)
 
 These tests launch subprocesses, open TCP connections, or perform end-to-end
 protocol exchanges. They are skipped by `make test-smoke`.
