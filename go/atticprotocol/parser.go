@@ -112,6 +112,8 @@ func (p *CommandParser) Parse(line string) (Command, error) {
 	case "screenshot":
 		path := strings.TrimSpace(argsString)
 		return NewScreenshotCommand(path), nil
+	case "screen":
+		return NewScreenTextCommand(), nil
 
 	// Injection
 	case "inject":
@@ -120,6 +122,10 @@ func (p *CommandParser) Parse(line string) (Command, error) {
 	// BASIC commands
 	case "basic":
 		return p.parseBasic(argsString)
+
+	// DOS mode commands
+	case "dos":
+		return p.parseDOS(argsString)
 
 	default:
 		return Command{}, newInvalidCommandError(command)
@@ -301,9 +307,24 @@ func (p *CommandParser) parseDisassemble(args string) (Command, error) {
 func (p *CommandParser) parseAssemble(args string) (Command, error) {
 	parts := strings.SplitN(strings.TrimSpace(args), " ", 2)
 	if len(parts) == 0 || parts[0] == "" {
-		return Command{}, newMissingArgumentError("assemble requires address")
+		return Command{}, newMissingArgumentError("assemble requires address or subcommand")
 	}
 
+	firstWord := strings.ToLower(parts[0])
+
+	// Check for interactive assembly session subcommands
+	if firstWord == "input" {
+		if len(parts) < 2 {
+			return Command{}, newMissingArgumentError("asm input requires an instruction")
+		}
+		return NewAssembleInputCommand(strings.TrimSpace(parts[1])), nil
+	}
+
+	if firstWord == "end" {
+		return NewAssembleEndCommand(), nil
+	}
+
+	// Otherwise, parse as address
 	address, ok := parseAddress(parts[0])
 	if !ok {
 		return Command{}, newInvalidAddressError(parts[0])
@@ -452,7 +473,14 @@ func (p *CommandParser) parseBasic(args string) (Command, error) {
 	case "RUN":
 		return NewBasicRunCommand(), nil
 	case "LIST":
-		return NewBasicListCommand(), nil
+		atascii := strings.ToUpper(rest) == "ATASCII"
+		return NewBasicListCommand(atascii), nil
+	case "RENUM", "RENUMBER":
+		return p.parseBasicRenum(rest)
+	case "SAVE":
+		return p.parseBasicSaveLoad(rest, true)
+	case "LOAD":
+		return p.parseBasicSaveLoad(rest, false)
 	case "DEL":
 		if rest == "" {
 			return Command{}, newMissingArgumentError("basic del requires a line number or range (e.g., 10 or 10-50)")
@@ -495,6 +523,205 @@ func (p *CommandParser) parseBasic(args string) (Command, error) {
 	default:
 		// Anything else is a numbered BASIC line (e.g., "10 PRINT X")
 		return NewBasicLineCommand(trimmed), nil
+	}
+}
+
+// parseBasicRenum parses BASIC RENUM arguments.
+// Format: RENUM [start [step]]
+func (p *CommandParser) parseBasicRenum(args string) (Command, error) {
+	args = strings.TrimSpace(args)
+	if args == "" {
+		return NewBasicRenumberCommand(nil, nil), nil
+	}
+
+	parts := strings.Fields(args)
+	var start, step *int
+
+	if len(parts) >= 1 {
+		s, err := strconv.Atoi(parts[0])
+		if err != nil || s < 0 || s > 32767 {
+			return Command{}, newInvalidValueError(parts[0])
+		}
+		start = &s
+	}
+
+	if len(parts) >= 2 {
+		st, err := strconv.Atoi(parts[1])
+		if err != nil || st < 1 || st > 32767 {
+			return Command{}, newInvalidValueError(parts[1])
+		}
+		step = &st
+	}
+
+	return NewBasicRenumberCommand(start, step), nil
+}
+
+// parseBasicSaveLoad parses BASIC SAVE/LOAD arguments.
+// Format: SAVE D[n]:filename or SAVE D:filename
+func (p *CommandParser) parseBasicSaveLoad(args string, isSave bool) (Command, error) {
+	args = strings.TrimSpace(args)
+	if args == "" {
+		if isSave {
+			return Command{}, newMissingArgumentError("basic save requires a filename (e.g., D:FILENAME or D1:FILENAME)")
+		}
+		return Command{}, newMissingArgumentError("basic load requires a filename (e.g., D:FILENAME or D1:FILENAME)")
+	}
+
+	// Parse drive prefix: D:, D1:, D2:, etc.
+	var drive *int
+	var filename string
+
+	upper := strings.ToUpper(args)
+	if strings.HasPrefix(upper, "D") {
+		colonIdx := strings.Index(args, ":")
+		if colonIdx > 0 {
+			// Extract drive number if present
+			driveStr := args[1:colonIdx]
+			if driveStr != "" {
+				d, err := strconv.Atoi(driveStr)
+				if err != nil || d < 1 || d > 8 {
+					return Command{}, newInvalidDriveNumberError(driveStr)
+				}
+				drive = &d
+			}
+			filename = args[colonIdx+1:]
+		} else {
+			filename = args
+		}
+	} else {
+		filename = args
+	}
+
+	if filename == "" {
+		if isSave {
+			return Command{}, newMissingArgumentError("basic save requires a filename")
+		}
+		return Command{}, newMissingArgumentError("basic load requires a filename")
+	}
+
+	if isSave {
+		return NewBasicSaveCommand(drive, filename), nil
+	}
+	return NewBasicLoadCommand(drive, filename), nil
+}
+
+// parseDOS parses DOS mode commands.
+func (p *CommandParser) parseDOS(args string) (Command, error) {
+	trimmed := strings.TrimSpace(args)
+	if trimmed == "" {
+		return Command{}, newMissingArgumentError("dos requires a subcommand (cd, dir, info, type, dump, copy, rename, delete, lock, unlock, export, import, newdisk, format)")
+	}
+
+	// Split into subcommand and remaining arguments
+	parts := strings.SplitN(trimmed, " ", 2)
+	subcommand := strings.ToLower(parts[0])
+	rest := ""
+	if len(parts) > 1 {
+		rest = strings.TrimSpace(parts[1])
+	}
+
+	switch subcommand {
+	case "cd":
+		if rest == "" {
+			return Command{}, newMissingArgumentError("dos cd requires a drive number (1-8)")
+		}
+		drive, err := strconv.Atoi(rest)
+		if err != nil || drive < 1 || drive > 8 {
+			return Command{}, newInvalidDriveNumberError(rest)
+		}
+		return NewDosChangeDriveCommand(drive), nil
+
+	case "dir":
+		if rest == "" {
+			return NewDosDirectoryCommand(nil), nil
+		}
+		return NewDosDirectoryCommand(&rest), nil
+
+	case "info":
+		if rest == "" {
+			return Command{}, newMissingArgumentError("dos info requires a filename")
+		}
+		return NewDosFileInfoCommand(rest), nil
+
+	case "type":
+		if rest == "" {
+			return Command{}, newMissingArgumentError("dos type requires a filename")
+		}
+		return NewDosTypeCommand(rest), nil
+
+	case "dump":
+		if rest == "" {
+			return Command{}, newMissingArgumentError("dos dump requires a filename")
+		}
+		return NewDosDumpCommand(rest), nil
+
+	case "copy":
+		copyParts := strings.Fields(rest)
+		if len(copyParts) != 2 {
+			return Command{}, newMissingArgumentError("dos copy requires source and destination")
+		}
+		return NewDosCopyCommand(copyParts[0], copyParts[1]), nil
+
+	case "rename":
+		renameParts := strings.Fields(rest)
+		if len(renameParts) != 2 {
+			return Command{}, newMissingArgumentError("dos rename requires old and new filenames")
+		}
+		return NewDosRenameCommand(renameParts[0], renameParts[1]), nil
+
+	case "delete", "del":
+		if rest == "" {
+			return Command{}, newMissingArgumentError("dos delete requires a filename")
+		}
+		return NewDosDeleteCommand(rest), nil
+
+	case "lock":
+		if rest == "" {
+			return Command{}, newMissingArgumentError("dos lock requires a filename")
+		}
+		return NewDosLockCommand(rest), nil
+
+	case "unlock":
+		if rest == "" {
+			return Command{}, newMissingArgumentError("dos unlock requires a filename")
+		}
+		return NewDosUnlockCommand(rest), nil
+
+	case "export":
+		exportParts := strings.Fields(rest)
+		if len(exportParts) != 2 {
+			return Command{}, newMissingArgumentError("dos export requires filename and host path")
+		}
+		return NewDosExportCommand(exportParts[0], exportParts[1]), nil
+
+	case "import":
+		importParts := strings.Fields(rest)
+		if len(importParts) != 2 {
+			return Command{}, newMissingArgumentError("dos import requires host path and filename")
+		}
+		return NewDosImportCommand(importParts[0], importParts[1]), nil
+
+	case "newdisk":
+		newdiskParts := strings.Fields(rest)
+		if len(newdiskParts) == 0 {
+			return Command{}, newMissingArgumentError("dos newdisk requires a path")
+		}
+		path := newdiskParts[0]
+		var diskType *string
+		if len(newdiskParts) > 1 {
+			dt := strings.ToLower(newdiskParts[1])
+			if dt != "sd" && dt != "ed" && dt != "dd" {
+				return Command{}, newInvalidCommandError("dos newdisk disk type must be sd, ed, or dd")
+			}
+			diskType = &dt
+		}
+		return NewDosNewDiskCommand(path, diskType), nil
+
+	case "format":
+		return NewDosFormatCommand(), nil
+
+	default:
+		return Command{}, newInvalidCommandError("dos " + subcommand)
 	}
 }
 

@@ -36,6 +36,8 @@ const (
 	// Assembly
 	CmdAssemble
 	CmdAssembleLine
+	CmdAssembleInput // Feed instruction to active assembly session
+	CmdAssembleEnd   // End interactive assembly session
 	CmdDisassemble
 
 	// Monitor
@@ -57,6 +59,7 @@ const (
 
 	// Display
 	CmdScreenshot
+	CmdScreenText // Read GRAPHICS 0 screen text
 
 	// Injection
 	CmdInjectBasic
@@ -78,6 +81,25 @@ const (
 	CmdBasicExport
 	CmdBasicImport
 	CmdBasicDir
+	CmdBasicRenumber
+	CmdBasicSave
+	CmdBasicLoad
+
+	// DOS mode commands
+	CmdDosChangeDrive
+	CmdDosDirectory
+	CmdDosFileInfo
+	CmdDosType
+	CmdDosDump
+	CmdDosCopy
+	CmdDosRename
+	CmdDosDelete
+	CmdDosLock
+	CmdDosUnlock
+	CmdDosExport
+	CmdDosImport
+	CmdDosNewDisk
+	CmdDosFormat
 )
 
 // RegisterModification represents a register name and value pair for modification.
@@ -111,6 +133,17 @@ type Command struct {
 	LinesSet      bool                   // Whether Lines was explicitly provided
 	LineOrRange   string                 // For basicDelete (e.g., "10" or "10-50")
 	VarName       string                 // For basicVar
+	Atascii       bool                   // For basicList
+	Start         *int                   // For basicRenumber
+	Step          *int                   // For basicRenumber
+	Filename      string                 // For basicSave, basicLoad, DOS commands
+	Pattern       string                 // For dosDirectory
+	Source        string                 // For dosCopy
+	Destination   string                 // For dosCopy
+	OldName       string                 // For dosRename
+	NewName       string                 // For dosRename
+	HostPath      string                 // For dosExport, dosImport
+	DiskType      string                 // For dosNewDisk (sd, ed, dd)
 }
 
 // Command constructors - these provide a clean API for creating commands.
@@ -212,6 +245,16 @@ func NewAssembleLineCommand(address uint16, instruction string) Command {
 	return Command{Type: CmdAssembleLine, Address: address, AddressSet: true, Instruction: instruction}
 }
 
+// NewAssembleInputCommand creates a command to feed an instruction to an active assembly session.
+func NewAssembleInputCommand(instruction string) Command {
+	return Command{Type: CmdAssembleInput, Instruction: instruction}
+}
+
+// NewAssembleEndCommand creates a command to end an interactive assembly session.
+func NewAssembleEndCommand() Command {
+	return Command{Type: CmdAssembleEnd}
+}
+
 // NewDisassembleCommand creates a disassemble command.
 // If address is nil, disassembles from current PC.
 // If lines is nil, defaults to 16 lines.
@@ -280,6 +323,11 @@ func NewScreenshotCommand(path string) Command {
 	return Command{Type: CmdScreenshot, Path: path}
 }
 
+// NewScreenTextCommand creates a command to read the GRAPHICS 0 screen text.
+func NewScreenTextCommand() Command {
+	return Command{Type: CmdScreenText}
+}
+
 // NewInjectBasicCommand creates a command to inject BASIC data.
 func NewInjectBasicCommand(base64Data string) Command {
 	return Command{Type: CmdInjectBasic, Base64Data: base64Data}
@@ -306,8 +354,10 @@ func NewBasicRunCommand() Command {
 }
 
 // NewBasicListCommand creates a BASIC LIST command.
-func NewBasicListCommand() Command {
-	return Command{Type: CmdBasicList}
+// If atascii is true, the listing uses ANSI reverse video and Unicode glyphs
+// for ATASCII graphics characters.
+func NewBasicListCommand(atascii bool) Command {
+	return Command{Type: CmdBasicList, Atascii: atascii}
 }
 
 // NewBasicDeleteCommand creates a command to delete a BASIC line or range.
@@ -360,6 +410,116 @@ func NewBasicDirCommand(drive *int) Command {
 		cmd.AddressSet = true // Reuse AddressSet to indicate drive was set
 	}
 	return cmd
+}
+
+// NewBasicRenumberCommand creates a command to renumber BASIC program lines.
+// If start is nil, defaults to 10. If step is nil, defaults to 10.
+func NewBasicRenumberCommand(start, step *int) Command {
+	return Command{Type: CmdBasicRenumber, Start: start, Step: step}
+}
+
+// NewBasicSaveCommand creates a command to save tokenized BASIC to disk.
+// Drive is optional (nil means default drive). Filename is required.
+func NewBasicSaveCommand(drive *int, filename string) Command {
+	cmd := Command{Type: CmdBasicSave, Filename: filename}
+	if drive != nil {
+		cmd.Drive = *drive
+		cmd.AddressSet = true
+	}
+	return cmd
+}
+
+// NewBasicLoadCommand creates a command to load tokenized BASIC from disk.
+// Drive is optional (nil means default drive). Filename is required.
+func NewBasicLoadCommand(drive *int, filename string) Command {
+	cmd := Command{Type: CmdBasicLoad, Filename: filename}
+	if drive != nil {
+		cmd.Drive = *drive
+		cmd.AddressSet = true
+	}
+	return cmd
+}
+
+// DOS mode command constructors
+
+// NewDosChangeDriveCommand creates a command to change the current drive.
+func NewDosChangeDriveCommand(drive int) Command {
+	return Command{Type: CmdDosChangeDrive, Drive: drive}
+}
+
+// NewDosDirectoryCommand creates a command to list directory contents.
+// Pattern is optional wildcard filter (nil means all files).
+func NewDosDirectoryCommand(pattern *string) Command {
+	cmd := Command{Type: CmdDosDirectory}
+	if pattern != nil {
+		cmd.Pattern = *pattern
+	}
+	return cmd
+}
+
+// NewDosFileInfoCommand creates a command to show detailed file information.
+func NewDosFileInfoCommand(filename string) Command {
+	return Command{Type: CmdDosFileInfo, Filename: filename}
+}
+
+// NewDosTypeCommand creates a command to display a text file's contents.
+func NewDosTypeCommand(filename string) Command {
+	return Command{Type: CmdDosType, Filename: filename}
+}
+
+// NewDosDumpCommand creates a command to display a hex dump of a file.
+func NewDosDumpCommand(filename string) Command {
+	return Command{Type: CmdDosDump, Filename: filename}
+}
+
+// NewDosCopyCommand creates a command to copy a file between drives.
+func NewDosCopyCommand(source, destination string) Command {
+	return Command{Type: CmdDosCopy, Source: source, Destination: destination}
+}
+
+// NewDosRenameCommand creates a command to rename a file.
+func NewDosRenameCommand(oldName, newName string) Command {
+	return Command{Type: CmdDosRename, OldName: oldName, NewName: newName}
+}
+
+// NewDosDeleteCommand creates a command to delete a file.
+func NewDosDeleteCommand(filename string) Command {
+	return Command{Type: CmdDosDelete, Filename: filename}
+}
+
+// NewDosLockCommand creates a command to lock a file (set read-only).
+func NewDosLockCommand(filename string) Command {
+	return Command{Type: CmdDosLock, Filename: filename}
+}
+
+// NewDosUnlockCommand creates a command to unlock a file (clear read-only).
+func NewDosUnlockCommand(filename string) Command {
+	return Command{Type: CmdDosUnlock, Filename: filename}
+}
+
+// NewDosExportCommand creates a command to export a file from ATR to host filesystem.
+func NewDosExportCommand(filename, hostPath string) Command {
+	return Command{Type: CmdDosExport, Filename: filename, HostPath: hostPath}
+}
+
+// NewDosImportCommand creates a command to import a file from host to ATR disk.
+func NewDosImportCommand(hostPath, filename string) Command {
+	return Command{Type: CmdDosImport, HostPath: hostPath, Filename: filename}
+}
+
+// NewDosNewDiskCommand creates a command to create a new blank ATR disk.
+// diskType is optional: "sd" (default), "ed", or "dd".
+func NewDosNewDiskCommand(path string, diskType *string) Command {
+	cmd := Command{Type: CmdDosNewDisk, Path: path}
+	if diskType != nil {
+		cmd.DiskType = *diskType
+	}
+	return cmd
+}
+
+// NewDosFormatCommand creates a command to format the current drive.
+func NewDosFormatCommand() Command {
+	return Command{Type: CmdDosFormat}
 }
 
 // Format returns the command formatted for transmission over the protocol.
@@ -419,6 +579,10 @@ func (c Command) Format() string {
 		return fmt.Sprintf("assemble $%04X", c.Address)
 	case CmdAssembleLine:
 		return fmt.Sprintf("assemble $%04X %s", c.Address, c.Instruction)
+	case CmdAssembleInput:
+		return fmt.Sprintf("asm input %s", c.Instruction)
+	case CmdAssembleEnd:
+		return "asm end"
 	case CmdDisassemble:
 		cmd := "disassemble"
 		if c.AddressSet {
@@ -454,6 +618,8 @@ func (c Command) Format() string {
 			return "screenshot"
 		}
 		return fmt.Sprintf("screenshot %s", c.Path)
+	case CmdScreenText:
+		return "screen"
 	case CmdInjectBasic:
 		return fmt.Sprintf("inject basic %s", c.Base64Data)
 	case CmdInjectKeys:
@@ -472,6 +638,9 @@ func (c Command) Format() string {
 	case CmdBasicRun:
 		return "basic RUN"
 	case CmdBasicList:
+		if c.Atascii {
+			return "basic LIST ATASCII"
+		}
 		return "basic LIST"
 	case CmdBasicDelete:
 		return fmt.Sprintf("basic DEL %s", c.LineOrRange)
@@ -494,6 +663,61 @@ func (c Command) Format() string {
 			return fmt.Sprintf("basic DIR %d", c.Drive)
 		}
 		return "basic DIR"
+	case CmdBasicRenumber:
+		cmd := "basic RENUM"
+		if c.Start != nil {
+			cmd += fmt.Sprintf(" %d", *c.Start)
+		}
+		if c.Step != nil {
+			cmd += fmt.Sprintf(" %d", *c.Step)
+		}
+		return cmd
+	case CmdBasicSave:
+		if c.AddressSet {
+			return fmt.Sprintf("basic SAVE D%d:%s", c.Drive, c.Filename)
+		}
+		return fmt.Sprintf("basic SAVE D:%s", c.Filename)
+	case CmdBasicLoad:
+		if c.AddressSet {
+			return fmt.Sprintf("basic LOAD D%d:%s", c.Drive, c.Filename)
+		}
+		return fmt.Sprintf("basic LOAD D:%s", c.Filename)
+
+	// DOS mode commands
+	case CmdDosChangeDrive:
+		return fmt.Sprintf("dos cd %d", c.Drive)
+	case CmdDosDirectory:
+		if c.Pattern != "" {
+			return fmt.Sprintf("dos dir %s", c.Pattern)
+		}
+		return "dos dir"
+	case CmdDosFileInfo:
+		return fmt.Sprintf("dos info %s", c.Filename)
+	case CmdDosType:
+		return fmt.Sprintf("dos type %s", c.Filename)
+	case CmdDosDump:
+		return fmt.Sprintf("dos dump %s", c.Filename)
+	case CmdDosCopy:
+		return fmt.Sprintf("dos copy %s %s", c.Source, c.Destination)
+	case CmdDosRename:
+		return fmt.Sprintf("dos rename %s %s", c.OldName, c.NewName)
+	case CmdDosDelete:
+		return fmt.Sprintf("dos delete %s", c.Filename)
+	case CmdDosLock:
+		return fmt.Sprintf("dos lock %s", c.Filename)
+	case CmdDosUnlock:
+		return fmt.Sprintf("dos unlock %s", c.Filename)
+	case CmdDosExport:
+		return fmt.Sprintf("dos export %s %s", c.Filename, c.HostPath)
+	case CmdDosImport:
+		return fmt.Sprintf("dos import %s %s", c.HostPath, c.Filename)
+	case CmdDosNewDisk:
+		if c.DiskType != "" {
+			return fmt.Sprintf("dos newdisk %s %s", c.Path, c.DiskType)
+		}
+		return fmt.Sprintf("dos newdisk %s", c.Path)
+	case CmdDosFormat:
+		return "dos format"
 	default:
 		return ""
 	}

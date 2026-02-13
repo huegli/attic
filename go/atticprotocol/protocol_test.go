@@ -96,7 +96,13 @@ func TestCommandFormatting(t *testing.T) {
 		{"BasicLine", NewBasicLineCommand("10 PRINT HELLO"), "basic 10 PRINT HELLO"},
 		{"BasicNew", NewBasicNewCommand(), "basic NEW"},
 		{"BasicRun", NewBasicRunCommand(), "basic RUN"},
-		{"BasicList", NewBasicListCommand(), "basic LIST"},
+		{"BasicList", NewBasicListCommand(false), "basic LIST"},
+		{"BasicList ATASCII", NewBasicListCommand(true), "basic LIST ATASCII"},
+		// Assembly session commands
+		{"AssembleInput", NewAssembleInputCommand("LDA #$00"), "asm input LDA #$00"},
+		{"AssembleEnd", NewAssembleEndCommand(), "asm end"},
+		// Screen text command
+		{"ScreenText", NewScreenTextCommand(), "screen"},
 		// BASIC editing commands
 		{"BasicDelete", NewBasicDeleteCommand("10"), "basic DEL 10"},
 		{"BasicDelete range", NewBasicDeleteCommand("10-50"), "basic DEL 10-50"},
@@ -112,6 +118,50 @@ func TestCommandFormatting(t *testing.T) {
 			d := 1
 			return NewBasicDirCommand(&d)
 		}(), "basic DIR 1"},
+		// BasicRenumber, BasicSave, BasicLoad
+		{"BasicRenumber (no args)", NewBasicRenumberCommand(nil, nil), "basic RENUM"},
+		{"BasicRenumber (start only)", func() Command {
+			start := 100
+			return NewBasicRenumberCommand(&start, nil)
+		}(), "basic RENUM 100"},
+		{"BasicRenumber (start and step)", func() Command {
+			start := 100
+			step := 20
+			return NewBasicRenumberCommand(&start, &step)
+		}(), "basic RENUM 100 20"},
+		{"BasicSave (no drive)", NewBasicSaveCommand(nil, "PROGRAM"), "basic SAVE D:PROGRAM"},
+		{"BasicSave (with drive)", func() Command {
+			d := 2
+			return NewBasicSaveCommand(&d, "MYPROG")
+		}(), "basic SAVE D2:MYPROG"},
+		{"BasicLoad (no drive)", NewBasicLoadCommand(nil, "PROGRAM"), "basic LOAD D:PROGRAM"},
+		{"BasicLoad (with drive)", func() Command {
+			d := 1
+			return NewBasicLoadCommand(&d, "GAME")
+		}(), "basic LOAD D1:GAME"},
+		// DOS mode commands
+		{"DosChangeDrive", NewDosChangeDriveCommand(2), "dos cd 2"},
+		{"DosDirectory (no pattern)", NewDosDirectoryCommand(nil), "dos dir"},
+		{"DosDirectory (with pattern)", func() Command {
+			pattern := "*.BAS"
+			return NewDosDirectoryCommand(&pattern)
+		}(), "dos dir *.BAS"},
+		{"DosFileInfo", NewDosFileInfoCommand("PROGRAM.BAS"), "dos info PROGRAM.BAS"},
+		{"DosType", NewDosTypeCommand("README.TXT"), "dos type README.TXT"},
+		{"DosDump", NewDosDumpCommand("DATA.DAT"), "dos dump DATA.DAT"},
+		{"DosCopy", NewDosCopyCommand("D1:FILE.BAS", "D2:FILE.BAS"), "dos copy D1:FILE.BAS D2:FILE.BAS"},
+		{"DosRename", NewDosRenameCommand("OLDNAME", "NEWNAME"), "dos rename OLDNAME NEWNAME"},
+		{"DosDelete", NewDosDeleteCommand("JUNK.TMP"), "dos delete JUNK.TMP"},
+		{"DosLock", NewDosLockCommand("PROTECT.BAS"), "dos lock PROTECT.BAS"},
+		{"DosUnlock", NewDosUnlockCommand("PROTECT.BAS"), "dos unlock PROTECT.BAS"},
+		{"DosExport", NewDosExportCommand("PROGRAM.BAS", "/host/path/program.bas"), "dos export PROGRAM.BAS /host/path/program.bas"},
+		{"DosImport", NewDosImportCommand("/host/path/file.bas", "FILE.BAS"), "dos import /host/path/file.bas FILE.BAS"},
+		{"DosNewDisk (no type)", NewDosNewDiskCommand("/path/to/disk.atr", nil), "dos newdisk /path/to/disk.atr"},
+		{"DosNewDisk (with type)", func() Command {
+			diskType := "dd"
+			return NewDosNewDiskCommand("/path/to/disk.atr", &diskType)
+		}(), "dos newdisk /path/to/disk.atr dd"},
+		{"DosFormat", NewDosFormatCommand(), "dos format"},
 	}
 
 	for _, tt := range tests {
@@ -243,6 +293,65 @@ func TestCommandParsing(t *testing.T) {
 			d := 1
 			return NewBasicDirCommand(&d)
 		}()},
+		// New assembly session commands
+		{"Asm input", "asm input LDA #$00", NewAssembleInputCommand("LDA #$00")},
+		{"Asm end", "asm end", NewAssembleEndCommand()},
+		// Screen text command
+		{"Screen", "screen", NewScreenTextCommand()},
+		// Basic LIST with ATASCII
+		{"Basic LIST", "basic LIST", NewBasicListCommand(false)},
+		{"Basic LIST ATASCII", "basic LIST ATASCII", NewBasicListCommand(true)},
+		// Basic RENUM
+		{"Basic RENUM", "basic RENUM", NewBasicRenumberCommand(nil, nil)},
+		{"Basic RENUM with start", "basic RENUM 100", func() Command {
+			start := 100
+			return NewBasicRenumberCommand(&start, nil)
+		}()},
+		{"Basic RENUM with start and step", "basic RENUM 100 20", func() Command {
+			start := 100
+			step := 20
+			return NewBasicRenumberCommand(&start, &step)
+		}()},
+		{"Basic RENUMBER alias", "basic RENUMBER 50 10", func() Command {
+			start := 50
+			step := 10
+			return NewBasicRenumberCommand(&start, &step)
+		}()},
+		// Basic SAVE/LOAD
+		{"Basic SAVE no drive", "basic SAVE D:PROGRAM", NewBasicSaveCommand(nil, "PROGRAM")},
+		{"Basic SAVE with drive", "basic SAVE D2:MYPROG", func() Command {
+			d := 2
+			return NewBasicSaveCommand(&d, "MYPROG")
+		}()},
+		{"Basic LOAD no drive", "basic LOAD D:PROGRAM", NewBasicLoadCommand(nil, "PROGRAM")},
+		{"Basic LOAD with drive", "basic LOAD D1:GAME", func() Command {
+			d := 1
+			return NewBasicLoadCommand(&d, "GAME")
+		}()},
+		// DOS mode commands
+		{"DOS cd", "dos cd 2", NewDosChangeDriveCommand(2)},
+		{"DOS dir", "dos dir", NewDosDirectoryCommand(nil)},
+		{"DOS dir with pattern", "dos dir *.BAS", func() Command {
+			pattern := "*.BAS"
+			return NewDosDirectoryCommand(&pattern)
+		}()},
+		{"DOS info", "dos info PROGRAM.BAS", NewDosFileInfoCommand("PROGRAM.BAS")},
+		{"DOS type", "dos type README.TXT", NewDosTypeCommand("README.TXT")},
+		{"DOS dump", "dos dump DATA.DAT", NewDosDumpCommand("DATA.DAT")},
+		{"DOS copy", "dos copy SOURCE DEST", NewDosCopyCommand("SOURCE", "DEST")},
+		{"DOS rename", "dos rename OLD NEW", NewDosRenameCommand("OLD", "NEW")},
+		{"DOS delete", "dos delete FILE.TMP", NewDosDeleteCommand("FILE.TMP")},
+		{"DOS del alias", "dos del FILE.TMP", NewDosDeleteCommand("FILE.TMP")},
+		{"DOS lock", "dos lock FILE.BAS", NewDosLockCommand("FILE.BAS")},
+		{"DOS unlock", "dos unlock FILE.BAS", NewDosUnlockCommand("FILE.BAS")},
+		{"DOS export", "dos export FILE.BAS /host/file.bas", NewDosExportCommand("FILE.BAS", "/host/file.bas")},
+		{"DOS import", "dos import /host/file.bas FILE.BAS", NewDosImportCommand("/host/file.bas", "FILE.BAS")},
+		{"DOS newdisk", "dos newdisk /path/disk.atr", NewDosNewDiskCommand("/path/disk.atr", nil)},
+		{"DOS newdisk with type", "dos newdisk /path/disk.atr dd", func() Command {
+			dt := "dd"
+			return NewDosNewDiskCommand("/path/disk.atr", &dt)
+		}()},
+		{"DOS format", "dos format", NewDosFormatCommand()},
 	}
 
 	for _, tt := range tests {
@@ -273,6 +382,20 @@ func TestCommandParsingErrors(t *testing.T) {
 		{"Invalid reset type", "reset invalid"},
 		{"Invalid drive", "mount 99 /path"},
 		{"Empty command", ""},
+		// DOS command errors
+		{"DOS no subcommand", "dos"},
+		{"DOS invalid subcommand", "dos invalid"},
+		{"DOS cd no drive", "dos cd"},
+		{"DOS cd invalid drive", "dos cd 99"},
+		{"DOS info no filename", "dos info"},
+		{"DOS copy no args", "dos copy"},
+		{"DOS copy one arg", "dos copy source"},
+		{"DOS newdisk invalid type", "dos newdisk /path/disk.atr invalid"},
+		// BASIC save/load errors
+		{"Basic SAVE empty", "basic SAVE"},
+		{"Basic LOAD empty", "basic LOAD"},
+		// Asm input error
+		{"Asm input no instruction", "asm input"},
 	}
 
 	for _, tt := range tests {
