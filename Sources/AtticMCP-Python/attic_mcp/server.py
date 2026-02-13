@@ -43,7 +43,6 @@ from mcp.server.fastmcp import FastMCP, Image
 
 from .cli_client import (
     CLIConnectionError,
-    CLIError,
     CLISocketClient,
     MULTI_LINE_SEP,
     escape_for_inject,

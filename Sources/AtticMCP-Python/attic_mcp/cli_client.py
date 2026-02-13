@@ -28,9 +28,7 @@ from __future__ import annotations
 import glob
 import logging
 import os
-import re
 import socket
-import sys
 
 # ---------------------------------------------------------------------------
 # Protocol constants — must match Sources/AtticCore/CLIProtocol.swift
