@@ -539,6 +539,10 @@ public actor CLISocketClient {
             return "assemble $\(String(format: "%04X", address))"
         case .assembleLine(let address, let instruction):
             return "assemble $\(String(format: "%04X", address)) \(instruction)"
+        case .assembleInput(let instruction):
+            return "asm input \(instruction)"
+        case .assembleEnd:
+            return "asm end"
         case .stepOver:
             return "stepover"
         case .runUntil(let address):

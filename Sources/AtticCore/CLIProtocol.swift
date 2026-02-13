@@ -124,6 +124,10 @@ public enum CLICommand: Sendable {
     // Assembly
     case assemble(address: UInt16)
     case assembleLine(address: UInt16, instruction: String)
+    /// Feed an instruction to the active interactive assembly session.
+    case assembleInput(instruction: String)
+    /// End the active interactive assembly session.
+    case assembleEnd
 
     // Step over
     case stepOver
@@ -559,6 +563,22 @@ public struct CLICommandParser: Sendable {
         let parts = args.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
         guard !parts.isEmpty else {
             throw CLIProtocolError.missingArgument("assemble requires address")
+        }
+
+        let firstWord = String(parts[0]).lowercased()
+
+        // Check for interactive assembly session subcommands.
+        // "input" and "end" are not valid hex addresses so there's no ambiguity
+        // with the existing address-based parsing.
+        if firstWord == "input" {
+            guard parts.count > 1 else {
+                throw CLIProtocolError.missingArgument("asm input requires an instruction")
+            }
+            return .assembleInput(instruction: String(parts[1]))
+        }
+
+        if firstWord == "end" {
+            return .assembleEnd
         }
 
         guard let address = parseAddress(String(parts[0])) else {

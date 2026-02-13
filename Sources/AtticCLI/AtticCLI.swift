@@ -169,7 +169,8 @@ struct AtticCLI {
     /// Runs the REPL loop over a socket connection.
     ///
     /// This function reads commands from stdin, sends them to the server,
-    /// and displays responses. It handles the socket protocol.
+    /// and displays responses. It handles the socket protocol and the
+    /// interactive assembly sub-mode.
     ///
     /// - Parameter client: The connected socket client.
     @MainActor
@@ -181,6 +182,12 @@ struct AtticCLI {
         var currentMode = SocketREPLMode.basic
         var shouldContinue = true
 
+        // Interactive assembly sub-mode state.
+        // When active, user input is routed to "asm input" / "asm end"
+        // instead of being interpreted as normal REPL commands.
+        var inAssemblyMode = false
+        var assemblyAddress: UInt16 = 0
+
         // Print initial prompt
         print(currentMode.prompt, terminator: " ")
         fflush(stdout)
@@ -188,14 +195,71 @@ struct AtticCLI {
         // Read lines from stdin
         while shouldContinue {
             guard let line = readLine() else {
-                // EOF (Ctrl-D)
+                // EOF (Ctrl-D) — end assembly session if active
+                if inAssemblyMode {
+                    _ = try? await client.sendRaw("asm end")
+                    inAssemblyMode = false
+                }
                 print("\nGoodbye")
                 break
             }
 
             let trimmed = line.trimmingCharacters(in: .whitespaces)
 
-            // Skip empty lines
+            // --- Interactive assembly sub-mode ---
+            // Empty line or "." exits assembly mode; anything else is assembled.
+            if inAssemblyMode {
+                if trimmed.isEmpty || trimmed == "." {
+                    // End the assembly session
+                    do {
+                        let response = try await client.sendRaw("asm end")
+                        switch response {
+                        case .ok(let data):
+                            print(data)
+                        case .error(let message):
+                            printError(message)
+                        }
+                    } catch {
+                        printError("Communication error: \(error.localizedDescription)")
+                    }
+                    inAssemblyMode = false
+                    print(currentMode.prompt, terminator: " ")
+                    fflush(stdout)
+                    continue
+                }
+
+                // Feed instruction to the active assembly session
+                do {
+                    let response = try await client.sendRaw("asm input \(trimmed)")
+                    switch response {
+                    case .ok(let data):
+                        // Response format: "formatted line\x1E$XXXX"
+                        let parts = data.split(
+                            separator: Character("\u{1E}"),
+                            maxSplits: 1,
+                            omittingEmptySubsequences: false
+                        )
+                        // Print the assembled line
+                        print(parts[0])
+                        // Extract next address for the prompt
+                        if parts.count > 1, let addr = parseHexAddress(String(parts[1])) {
+                            assemblyAddress = addr
+                        }
+                    case .error(let message):
+                        printError(message)
+                        // Session stays alive on error — user can retry
+                    }
+                } catch {
+                    printError("Communication error: \(error.localizedDescription)")
+                }
+
+                // Show next assembly prompt
+                print("$\(String(format: "%04X", assemblyAddress)): ", terminator: "")
+                fflush(stdout)
+                continue
+            }
+
+            // Skip empty lines (normal mode)
             guard !trimmed.isEmpty else {
                 print(currentMode.prompt, terminator: " ")
                 fflush(stdout)
@@ -294,6 +358,19 @@ struct AtticCLI {
                 // Display response
                 switch response {
                 case .ok(let data):
+                    // Check if the server started an interactive assembly session.
+                    // Response format: "ASM $XXXX"
+                    if data.hasPrefix("ASM $") {
+                        if let addr = parseHexAddress(String(data.dropFirst(4))) {
+                            inAssemblyMode = true
+                            assemblyAddress = addr
+                            // Show first assembly prompt instead of normal prompt
+                            print("$\(String(format: "%04X", assemblyAddress)): ", terminator: "")
+                            fflush(stdout)
+                            continue
+                        }
+                    }
+
                     // Handle multi-line responses
                     let lines = data.split(separator: "\u{1E}", omittingEmptySubsequences: false)
                     for line in lines {
@@ -520,6 +597,16 @@ struct AtticCLI {
         }
     }
 
+    /// Parses a hex address string like "$0600" into a UInt16.
+    ///
+    /// - Parameter str: The hex address string (must have "$" prefix).
+    /// - Returns: The parsed address, or nil if invalid.
+    static func parseHexAddress(_ str: String) -> UInt16? {
+        let trimmed = str.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasPrefix("$") else { return nil }
+        return UInt16(trimmed.dropFirst(), radix: 16)
+    }
+
     /// Prints help for the current mode.
     static func printHelp(mode: SocketREPLMode) {
         print("""
@@ -550,6 +637,8 @@ struct AtticCLI {
               r [reg=val...]    Display/set registers
               m <addr> <len>    Memory dump
               > <addr> <bytes>  Write memory
+              a <addr>          Interactive assembly (enter instructions line by line)
+              a <addr> <instr>  Assemble single instruction
               b set <addr>      Set breakpoint
               b clear <addr>    Clear breakpoint
               b list            List breakpoints

@@ -961,6 +961,110 @@ final class CLIProtocolTests: XCTestCase {
     }
 
     // =========================================================================
+    // MARK: - CLICommandParser Tests - Assembly Input/End
+    // =========================================================================
+
+    func testParseAsmInput() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("asm input LDA #$00")
+        guard case .assembleInput(let instruction) = command else {
+            XCTFail("Expected .assembleInput, got \(command)")
+            return
+        }
+        XCTAssertEqual(instruction, "LDA #$00")
+    }
+
+    func testParseAsmInputComplex() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("asm input STA $D400")
+        guard case .assembleInput(let instruction) = command else {
+            XCTFail("Expected .assembleInput, got \(command)")
+            return
+        }
+        XCTAssertEqual(instruction, "STA $D400")
+    }
+
+    func testParseAsmInputAssembleAlias() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("assemble input LDA #$FF")
+        guard case .assembleInput(let instruction) = command else {
+            XCTFail("Expected .assembleInput, got \(command)")
+            return
+        }
+        XCTAssertEqual(instruction, "LDA #$FF")
+    }
+
+    func testParseAsmInputAAlias() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("a input JMP $0600")
+        guard case .assembleInput(let instruction) = command else {
+            XCTFail("Expected .assembleInput, got \(command)")
+            return
+        }
+        XCTAssertEqual(instruction, "JMP $0600")
+    }
+
+    func testParseAsmInputMissingInstruction() {
+        let parser = CLICommandParser()
+        XCTAssertThrowsError(try parser.parse("asm input")) { error in
+            guard case CLIProtocolError.missingArgument = error else {
+                XCTFail("Expected missingArgument error, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testParseAsmEnd() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("asm end")
+        guard case .assembleEnd = command else {
+            XCTFail("Expected .assembleEnd, got \(command)")
+            return
+        }
+    }
+
+    func testParseAsmEndAssembleAlias() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("assemble end")
+        guard case .assembleEnd = command else {
+            XCTFail("Expected .assembleEnd, got \(command)")
+            return
+        }
+    }
+
+    func testParseAsmEndAAlias() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("a end")
+        guard case .assembleEnd = command else {
+            XCTFail("Expected .assembleEnd, got \(command)")
+            return
+        }
+    }
+
+    /// Regression: existing single-line assembly still works
+    func testParseAssembleLineStillWorks() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("a $0600 LDA #$00")
+        guard case .assembleLine(let address, let instruction) = command else {
+            XCTFail("Expected .assembleLine, got \(command)")
+            return
+        }
+        XCTAssertEqual(address, 0x0600)
+        XCTAssertEqual(instruction, "LDA #$00")
+    }
+
+    /// Regression: interactive assembly start still works
+    func testParseAssembleInteractiveStillWorks() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("a $0600")
+        guard case .assemble(let address) = command else {
+            XCTFail("Expected .assemble, got \(command)")
+            return
+        }
+        XCTAssertEqual(address, 0x0600)
+    }
+
+    // =========================================================================
     // MARK: - CLICommandParser Tests - Disassembly
     // =========================================================================
 

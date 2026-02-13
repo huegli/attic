@@ -341,6 +341,18 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
     /// Lock for thread-safe access.
     private let lock = NSLock()
 
+    /// Tracks active interactive assembly sessions per connected CLI client.
+    /// Each session holds an `InteractiveAssembler` that auto-advances the
+    /// address and a record of the starting address and total bytes written.
+    private var assemblySessions: [UUID: AssemblySession] = [:]
+
+    /// State for an active interactive assembly session.
+    private struct AssemblySession {
+        let assembler: InteractiveAssembler
+        let startAddress: UInt16
+        var totalBytes: Int = 0
+    }
+
     init(emulator: EmulatorEngine) {
         self.emulator = emulator
         self.diskManager = DiskManager(emulator: emulator)
@@ -544,13 +556,18 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
         case .disassemble(let address, let lines):
             return await handleDisassemble(address: address, lines: lines)
 
-        // Phase 11: Monitor mode commands (not fully implemented yet)
-        case .assemble:
-            // Interactive assembly mode - not supported via CLI protocol
-            return .error("Interactive assembly not supported via protocol. Use assembleLine for single instructions.")
+        // Phase 11: Monitor mode commands
+        case .assemble(let address):
+            // Start an interactive assembly session for this client.
+            let assembler = InteractiveAssembler(startAddress: address)
+            assemblySessions[clientId] = AssemblySession(
+                assembler: assembler,
+                startAddress: address
+            )
+            return .ok("ASM $\(String(format: "%04X", address))")
 
         case .assembleLine(let address, let instruction):
-            // Single-line assembly
+            // Single-line assembly (no session needed)
             let assembler = Assembler()
             do {
                 let result = try assembler.assembleLine(instruction, at: address)
@@ -563,6 +580,37 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
             } catch {
                 return .error("Assembly error: \(error)")
             }
+
+        case .assembleInput(let instruction):
+            // Feed an instruction to the active assembly session.
+            guard var session = assemblySessions[clientId] else {
+                return .error("No active assembly session. Start one with: assemble $<address>")
+            }
+            do {
+                let result = try session.assembler.assembleLine(instruction)
+                // Write assembled bytes to emulator memory
+                await emulator.writeMemoryBlock(at: result.address, bytes: result.bytes)
+                session.totalBytes += result.bytes.count
+                assemblySessions[clientId] = session
+                // Format: assembled line + record separator + next address
+                let formatted = session.assembler.format(result)
+                let nextAddr = "$\(String(format: "%04X", session.assembler.currentAddress))"
+                return .ok("\(formatted)\(CLIProtocolConstants.multiLineSeparator)\(nextAddr)")
+            } catch {
+                // Return error but keep session alive so the user can retry
+                return .error("Assembly error: \(error)")
+            }
+
+        case .assembleEnd:
+            // End the active assembly session and return summary.
+            guard let session = assemblySessions.removeValue(forKey: clientId) else {
+                return .error("No active assembly session")
+            }
+            if session.totalBytes == 0 {
+                return .ok("Assembly complete: 0 bytes")
+            }
+            let endAddr = session.startAddress &+ UInt16(session.totalBytes) &- 1
+            return .ok("Assembly complete: \(session.totalBytes) bytes at $\(String(format: "%04X", session.startAddress))-$\(String(format: "%04X", endAddr))")
 
         case .stepOver:
             // Step over (treat JSR as single step)
@@ -1209,6 +1257,10 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
     }
 
     func server(_ server: CLISocketServer, clientDidDisconnect clientId: UUID) async {
+        // Clean up any active assembly session for this client
+        if assemblySessions.removeValue(forKey: clientId) != nil {
+            print("[CLISocket] Cleaned up assembly session for \(clientId)")
+        }
         print("[CLISocket] Client disconnected: \(clientId)")
     }
 
