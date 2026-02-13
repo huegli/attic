@@ -1177,10 +1177,21 @@ final class CLIProtocolTests: XCTestCase {
     func testParseBasicList() throws {
         let parser = CLICommandParser()
         let command = try parser.parse("basic list")
-        guard case .basicList = command else {
+        guard case .basicList(let atascii) = command else {
             XCTFail("Expected .basicList, got \(command)")
             return
         }
+        XCTAssertFalse(atascii, "plain list should have atascii=false")
+    }
+
+    func testParseBasicListAtascii() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("basic list atascii")
+        guard case .basicList(let atascii) = command else {
+            XCTFail("Expected .basicList, got \(command)")
+            return
+        }
+        XCTAssertTrue(atascii, "list atascii should have atascii=true")
     }
 
     func testParseBasicLine() throws {

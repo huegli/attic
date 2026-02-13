@@ -559,8 +559,8 @@ public actor CLISocketClient {
             return "basic NEW"
         case .basicRun:
             return "basic RUN"
-        case .basicList:
-            return "basic LIST"
+        case .basicList(let atascii):
+            return atascii ? "basic LIST ATASCII" : "basic LIST"
 
         // BASIC editing commands
         case .basicDelete(let lineOrRange):

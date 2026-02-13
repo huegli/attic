@@ -52,6 +52,11 @@ struct AtticCLI {
         /// Path to socket for connecting to existing GUI.
         var socketPath: String?
 
+        /// Enable rich ATASCII rendering in program listings.
+        /// When true, ANSI escape codes are used for inverse video and
+        /// ATASCII graphics characters are mapped to Unicode equivalents.
+        var atascii: Bool = false
+
         /// Show help and exit.
         var showHelp: Bool = false
 
@@ -74,6 +79,9 @@ struct AtticCLI {
 
             case "--silent":
                 args.silent = true
+
+            case "--atascii":
+                args.atascii = true
 
             case "--socket":
                 if let path = arguments.popFirst() {
@@ -111,6 +119,7 @@ struct AtticCLI {
         OPTIONS:
           --headless          Run without launching GUI
           --silent            Disable audio output (headless mode only)
+          --atascii           Rich ATASCII rendering (ANSI inverse + Unicode graphics)
           --socket <path>     Connect to GUI at specific socket path
           --help, -h          Show this help
           --version, -v       Show version
@@ -501,7 +510,7 @@ struct AtticCLI {
         switch keyword {
         // Read-only listing via protocol (detokenizer, not screen scrape)
         case "LIST":
-            return "basic list"
+            return atasciiMode ? "basic list atascii" : "basic list"
 
         // BASIC editing commands - routed to protocol handlers
         case "DEL", "DELETE":
@@ -709,6 +718,10 @@ struct AtticCLI {
     /// Access is sequential: set during launch (before REPL), read on shutdown.
     nonisolated(unsafe) static var launchedServerPid: Int32?
 
+    /// Whether rich ATASCII rendering is enabled for this session.
+    /// Set once during argument parsing (before REPL), read during command translation.
+    nonisolated(unsafe) static var atasciiMode: Bool = false
+
     /// Connects to AtticServer via Unix socket.
     ///
     /// - Parameter path: Path to the Unix socket.
@@ -783,6 +796,9 @@ struct AtticCLI {
             printVersion()
             return
         }
+
+        // Store session-wide ATASCII rendering preference
+        atasciiMode = args.atascii
 
         // Determine socket path and connection mode
         var socketPath: String?

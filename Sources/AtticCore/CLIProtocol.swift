@@ -171,7 +171,9 @@ public enum CLICommand: Sendable {
     case basicLine(line: String)
     case basicNew
     case basicRun
-    case basicList
+    /// List the BASIC program. When `atascii` is true, the listing uses
+    /// ANSI reverse video and Unicode glyphs for ATASCII graphics characters.
+    case basicList(atascii: Bool)
 
     // BASIC editing commands
     /// Delete a BASIC line or range of lines (e.g., "10" or "10-50").
@@ -773,7 +775,8 @@ public struct CLICommandParser: Sendable {
         case "RUN":
             return .basicRun
         case "LIST":
-            return .basicList
+            let atascii = rest.uppercased() == "ATASCII"
+            return .basicList(atascii: atascii)
         case "DEL":
             guard !rest.isEmpty else {
                 throw CLIProtocolError.missingArgument("basic del requires a line number or range (e.g., 10 or 10-50)")

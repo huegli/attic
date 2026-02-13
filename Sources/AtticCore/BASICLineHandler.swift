@@ -660,11 +660,17 @@ public actor BASICLineHandler {
     /// This method reads the tokenized program from emulator memory,
     /// detokenizes it, and returns a formatted listing.
     ///
-    /// - Parameter range: Optional line number range (start, end).
-    ///                    nil means list all lines.
-    ///                    Partial values filter accordingly.
+    /// - Parameters:
+    ///   - range: Optional line number range (start, end).
+    ///            nil means list all lines.
+    ///            Partial values filter accordingly.
+    ///   - renderMode: How to render ATASCII graphics and inverse video.
+    ///                 Defaults to `.plain` for clean ASCII output.
     /// - Returns: The formatted program listing, or empty string if no program.
-    public func listProgram(range: (start: Int?, end: Int?)?) async -> String {
+    public func listProgram(
+        range: (start: Int?, end: Int?)?,
+        renderMode: ATASCIIRenderMode = .plain
+    ) async -> String {
         let state = await readMemoryState()
 
         // Read the program bytes
@@ -679,8 +685,8 @@ public actor BASICLineHandler {
         // Read variable names for detokenization
         let variableNames = await readVariableNames(state: state)
 
-        // Detokenize the program
-        let detokenizer = BASICDetokenizer()
+        // Detokenize the program using the requested ATASCII rendering mode
+        let detokenizer = BASICDetokenizer(renderMode: renderMode)
         let listing = detokenizer.formatListing(
             programBytes,
             variables: variableNames,

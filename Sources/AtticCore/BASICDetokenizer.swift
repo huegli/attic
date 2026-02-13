@@ -39,6 +39,24 @@
 import Foundation
 
 // =============================================================================
+// MARK: - ATASCII Render Mode
+// =============================================================================
+
+/// Controls how ATASCII bytes outside the printable ASCII range are rendered.
+///
+/// - ``plain``: Baseline mode — strips inverse video (bit 7) and substitutes
+///   graphics characters (0x00-0x1F) with `"."`. Produces clean ASCII output
+///   readable in any terminal.
+/// - ``rich``: Full ATASCII rendering — uses ANSI terminal escape codes for
+///   inverse video characters and maps the 32 ATASCII graphics glyphs to their
+///   closest Unicode equivalents (box-drawing, card suits, arrows, etc.).
+///   Requires a Unicode-capable terminal with ANSI support.
+public enum ATASCIIRenderMode: Sendable {
+    case plain
+    case rich
+}
+
+// =============================================================================
 // MARK: - Detokenized Line Result
 // =============================================================================
 
@@ -94,8 +112,19 @@ public struct DetokenizedLine: Sendable, Equatable {
 /// ```
 public struct BASICDetokenizer: Sendable {
 
+    /// The ATASCII rendering mode for text output.
+    ///
+    /// When `.plain`, non-printable ATASCII bytes are stripped or dot-substituted.
+    /// When `.rich`, ANSI escape codes and Unicode glyphs are used instead.
+    public let renderMode: ATASCIIRenderMode
+
     /// Creates a new detokenizer instance.
-    public init() {}
+    ///
+    /// - Parameter renderMode: How to render ATASCII graphics and inverse
+    ///   video characters. Defaults to `.plain` for maximum compatibility.
+    public init(renderMode: ATASCIIRenderMode = .plain) {
+        self.renderMode = renderMode
+    }
 
     // =========================================================================
     // MARK: - Single Line Detokenization
@@ -441,11 +470,25 @@ public struct BASICDetokenizer: Sendable {
         return variables[index].fullName
     }
 
-    /// Decodes raw bytes as text (ATASCII to ASCII).
+    /// Decodes raw bytes as text (ATASCII to displayable characters).
+    ///
+    /// In `.plain` mode, inverse video bytes have bit 7 stripped and graphics
+    /// characters are replaced with `"."`. In `.rich` mode, ANSI escape codes
+    /// wrap inverse video characters and ATASCII graphics are mapped to Unicode.
     ///
     /// - Parameter bytes: The raw bytes to decode.
     /// - Returns: The decoded text string.
     private func decodeRawText(_ bytes: [UInt8]) -> String {
+        switch renderMode {
+        case .plain:
+            return decodeRawTextPlain(bytes)
+        case .rich:
+            return decodeRawTextRich(bytes)
+        }
+    }
+
+    /// Plain-mode ATASCII decoding: strips inverse, dot-substitutes graphics.
+    private func decodeRawTextPlain(_ bytes: [UInt8]) -> String {
         var text = ""
         for byte in bytes {
             // Standard printable ASCII range
@@ -471,6 +514,105 @@ public struct BASICDetokenizer: Sendable {
         }
         return text
     }
+
+    /// Rich-mode ATASCII decoding: ANSI inverse video + Unicode graphics.
+    ///
+    /// Uses `\e[7m` (ANSI reverse video) around inverse characters and maps
+    /// ATASCII graphics bytes to their closest Unicode equivalents via the
+    /// `atasciiGraphicsTable`.
+    private func decodeRawTextRich(_ bytes: [UInt8]) -> String {
+        var text = ""
+        for byte in bytes {
+            if byte == 0x9B {
+                // ATASCII EOL
+                text.append("\n")
+            } else if byte >= 0x80 {
+                // Inverse video character — wrap the base glyph with ANSI reverse
+                let base = byte & 0x7F
+                let glyph = Self.atasciiToUnicode(base)
+                text.append("\u{1B}[7m")   // ANSI: enable reverse video
+                text.append(glyph)
+                text.append("\u{1B}[27m")  // ANSI: disable reverse video
+            } else {
+                // Normal character (0x00-0x7F except 0x9B)
+                text.append(Self.atasciiToUnicode(byte))
+            }
+        }
+        return text
+    }
+
+    /// Maps a single ATASCII byte (0x00-0x7F) to its Unicode representation.
+    ///
+    /// - Parameter byte: An ATASCII byte value in the range 0-127.
+    /// - Returns: A string containing the corresponding Unicode character.
+    private static func atasciiToUnicode(_ byte: UInt8) -> String {
+        // Graphics characters (0x00-0x1F) — use the lookup table
+        if byte <= 0x1F {
+            return String(atasciiGraphicsTable[Int(byte)])
+        }
+        // Standard printable range (0x20-0x5F) — same as ASCII
+        if byte >= 0x20 && byte <= 0x5F {
+            return String(Character(UnicodeScalar(byte)))
+        }
+        // Lower range with a few ATASCII-specific characters
+        switch byte {
+        case 0x60: return "\u{2666}"  // ♦ BLACK DIAMOND SUIT (not backtick)
+        case 0x7B: return "\u{2660}"  // ♠ BLACK SPADE SUIT (not {)
+        case 0x7D: return "\u{25B8}"  // ▸ RIGHT-POINTING SMALL TRIANGLE (not })
+        case 0x7E: return "\u{25C0}"  // ◀ LEFT-POINTING TRIANGLE (not ~)
+        case 0x7F: return "\u{25B6}"  // ▶ RIGHT-POINTING TRIANGLE (not DEL)
+        default:
+            // Lowercase a-z and pipe — same as ASCII
+            return String(Character(UnicodeScalar(byte)))
+        }
+    }
+
+    // =========================================================================
+    // MARK: - ATASCII Graphics Lookup Table
+    // =========================================================================
+
+    /// Unicode equivalents for the 32 ATASCII graphics characters (0x00-0x1F).
+    ///
+    /// These characters occupy the control-code range in standard ASCII but
+    /// display as graphical glyphs on the Atari 800 XL. The mapping uses the
+    /// closest Unicode equivalents from box-drawing, block-element, geometric,
+    /// and miscellaneous-symbol blocks.
+    ///
+    /// Reference: https://www.kreativekorp.com/charset/map/atascii/
+    private static let atasciiGraphicsTable: [Character] = [
+        "\u{2665}",  // $00  ♥  BLACK HEART SUIT
+        "\u{251C}",  // $01  ├  BOX DRAWINGS LIGHT VERTICAL AND RIGHT
+        "\u{23B9}",  // $02  ⎹  RIGHT VERTICAL BOX LINE
+        "\u{2518}",  // $03  ┘  BOX DRAWINGS LIGHT UP AND LEFT
+        "\u{2524}",  // $04  ┤  BOX DRAWINGS LIGHT VERTICAL AND LEFT
+        "\u{2510}",  // $05  ┐  BOX DRAWINGS LIGHT DOWN AND LEFT
+        "\u{2571}",  // $06  ╱  BOX DRAWINGS LIGHT DIAGONAL UPPER RIGHT TO LOWER LEFT
+        "\u{2572}",  // $07  ╲  BOX DRAWINGS LIGHT DIAGONAL UPPER LEFT TO LOWER RIGHT
+        "\u{25E2}",  // $08  ◢  BLACK LOWER RIGHT TRIANGLE
+        "\u{2597}",  // $09  ▗  QUADRANT LOWER RIGHT
+        "\u{25E3}",  // $0A  ◣  BLACK LOWER LEFT TRIANGLE
+        "\u{259D}",  // $0B  ▝  QUADRANT UPPER RIGHT
+        "\u{2598}",  // $0C  ▘  QUADRANT UPPER LEFT
+        "\u{23BA}",  // $0D  ⎺  HORIZONTAL SCAN LINE-1
+        "\u{23BD}",  // $0E  ⎽  HORIZONTAL SCAN LINE-9
+        "\u{2596}",  // $0F  ▖  QUADRANT LOWER LEFT
+        "\u{2663}",  // $10  ♣  BLACK CLUB SUIT
+        "\u{250C}",  // $11  ┌  BOX DRAWINGS LIGHT DOWN AND RIGHT
+        "\u{2500}",  // $12  ─  BOX DRAWINGS LIGHT HORIZONTAL
+        "\u{253C}",  // $13  ┼  BOX DRAWINGS LIGHT VERTICAL AND HORIZONTAL
+        "\u{2022}",  // $14  •  BULLET
+        "\u{2584}",  // $15  ▄  LOWER HALF BLOCK
+        "\u{23B8}",  // $16  ⎸  LEFT VERTICAL BOX LINE
+        "\u{252C}",  // $17  ┬  BOX DRAWINGS LIGHT DOWN AND HORIZONTAL
+        "\u{2534}",  // $18  ┴  BOX DRAWINGS LIGHT UP AND HORIZONTAL
+        "\u{258C}",  // $19  ▌  LEFT HALF BLOCK
+        "\u{2514}",  // $1A  └  BOX DRAWINGS LIGHT UP AND RIGHT
+        "\u{241B}",  // $1B  ␛  SYMBOL FOR ESCAPE
+        "\u{2191}",  // $1C  ↑  UPWARDS ARROW
+        "\u{2193}",  // $1D  ↓  DOWNWARDS ARROW
+        "\u{2190}",  // $1E  ←  LEFTWARDS ARROW
+        "\u{2192}",  // $1F  →  RIGHTWARDS ARROW
+    ]
 }
 
 // =============================================================================
