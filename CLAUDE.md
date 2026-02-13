@@ -169,6 +169,7 @@ When working in this repository, Claude Code has access to these emulator tools:
 | `emulator_set_breakpoint` | Set breakpoint |
 | `emulator_clear_breakpoint` | Clear breakpoint |
 | `emulator_list_breakpoints` | List all breakpoints |
+| `emulator_assemble_block` | Assemble multiple instructions as a block |
 | `emulator_press_key` | Simulate key press |
 | `emulator_screenshot` | Capture display as PNG screenshot |
 | `emulator_list_basic` | List BASIC program in memory |

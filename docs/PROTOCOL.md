@@ -779,6 +779,92 @@ OK:$0600  A9 00     LDA #$00
 - `CMD:d xyz\n` → `ERR:Invalid address 'xyz'`
 - `CMD:d $0600 0\n` → `ERR:Invalid line count '0'`
 
+### Assembly
+
+The assembler supports single-line and interactive (multi-line) modes. All
+instructions use standard 6502 mnemonics with MAC65-style syntax.
+
+#### assemble (single-line)
+Assemble one instruction at a specific address.
+```
+CMD:assemble $0600 LDA #$00
+OK:$0600: A9 00     LDA #$00
+```
+
+Alias: `asm`, `a`.
+
+**Test Cases**:
+- `CMD:a $0600 NOP\n` - assemble NOP, verify byte EA at $0600
+- `CMD:a $0600 INVALID\n` → `ERR:Assembly error: ...`
+
+#### assemble (start interactive session)
+Start an interactive assembly session at the given address. Subsequent
+instructions are fed with `assemble input` and the address advances
+automatically.
+```
+CMD:assemble $0600
+OK:ASM $0600
+```
+
+**Test Case**: Start session, verify `ASM $0600` response.
+
+#### assemble input
+Feed an instruction to the active interactive assembly session. The
+server assembles the instruction at the current address, writes the
+bytes to memory, and returns the formatted line plus the next address
+(separated by the record separator `\x1E`).
+```
+CMD:asm input LDA #$00
+OK:$0600: A9 00     LDA #$00\x1E$0602
+
+CMD:asm input STA $D400
+OK:$0602: 8D 00 D4  STA $D400\x1E$0605
+```
+
+If no session is active:
+```
+CMD:asm input NOP
+ERR:No active assembly session. Start one with: assemble $<address>
+```
+
+An invalid instruction returns an error but keeps the session alive so
+the caller can retry:
+```
+CMD:asm input INVALID
+ERR:Assembly error: Unknown mnemonic 'INVALID'
+```
+
+#### assemble end
+End the active interactive assembly session and return a summary.
+```
+CMD:asm end
+OK:Assembly complete: 5 bytes at $0600-$0604
+```
+
+If no session is active:
+```
+CMD:asm end
+ERR:No active assembly session
+```
+
+#### Complete interactive session example
+```
+CMD:assemble $0600
+OK:ASM $0600
+
+CMD:asm input LDA #$00
+OK:$0600: A9 00     LDA #$00\x1E$0602
+
+CMD:asm input STA $D400
+OK:$0602: 8D 00 D4  STA $D400\x1E$0605
+
+CMD:asm input RTS
+OK:$0605: 60        RTS\x1E$0606
+
+CMD:asm end
+OK:Assembly complete: 6 bytes at $0600-$0605
+```
+
 ### Breakpoints
 
 #### breakpoint set
@@ -1105,6 +1191,10 @@ class SocketHandler {
 | reset | ✓ | Invalid type |
 | status | ✓ | - |
 | disassemble | ✓ | Invalid address, Invalid line count |
+| assemble (single) | ✓ | Invalid instruction |
+| assemble (session) | ✓ | - |
+| assemble input | ✓ | No session, Invalid instruction |
+| assemble end | ✓ | No session |
 | read | ✓ | Invalid address, Missing count |
 | write | ✓ | Invalid address, Invalid byte, Missing data |
 | registers (get) | ✓ | - |

@@ -603,6 +603,54 @@ async def emulator_assemble(
 
 
 @mcp.tool()
+async def emulator_assemble_block(
+    address: Annotated[int, Field(
+        ge=0, le=0xFFFF,
+        description="Starting memory address to assemble at (0x0000-0xFFFF)",
+    )],
+    instructions: Annotated[list[str], Field(
+        min_length=1,
+        description=(
+            "List of 6502 assembly instructions to assemble sequentially, "
+            "e.g. ['LDA #$00', 'STA $D400', 'RTS']. Each instruction is "
+            "assembled at the next available address after the previous one."
+        ),
+    )],
+) -> str:
+    """Assemble multiple 6502 instructions as a block and write them to memory.
+
+    Starts an interactive assembly session at the given address, feeds each
+    instruction in order, then ends the session.  This is more efficient
+    than calling emulator_assemble repeatedly because the address advances
+    automatically.  Returns each assembled line and a summary.
+    """
+    # Start the interactive assembly session.
+    await _send(f"assemble ${address:04X}")
+
+    assembled_lines: list[str] = []
+    try:
+        for instr in instructions:
+            result = await _send(f"assemble input {instr}")
+            # The server returns "<formatted-line>\x1e<next-addr>".
+            # We keep the formatted line (before the separator).
+            line = result.split(MULTI_LINE_SEP)[0] if MULTI_LINE_SEP in result else result
+            assembled_lines.append(line)
+    except Exception:
+        # Clean up the session on error so the server isn't left with
+        # a dangling assembly session for this client.
+        try:
+            await _send("assemble end")
+        except Exception:
+            pass
+        raise
+
+    # End the session and capture the summary.
+    summary = await _send("assemble end")
+
+    return "\n".join(assembled_lines) + "\n" + summary
+
+
+@mcp.tool()
 async def emulator_fill_memory(
     start: Annotated[int, Field(
         ge=0, le=0xFFFF,

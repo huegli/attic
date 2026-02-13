@@ -177,6 +177,7 @@ Result: Unmounted D1:
 | `emulator_step_over` | Step over JSR subroutines |
 | `emulator_run_until` | Run until PC reaches a specific address |
 | `emulator_assemble` | Assemble a single 6502 instruction to memory |
+| `emulator_assemble_block` | Assemble multiple instructions as a block |
 | `emulator_fill_memory` | Fill a memory range with a byte value |
 
 **Example - Disassemble at PC:**
@@ -210,11 +211,22 @@ Arguments: { "address": 58457 }
 Result: Reached $E459
 ```
 
-**Example - Assemble Instruction:**
+**Example - Assemble Single Instruction:**
 ```
 Tool: emulator_assemble
 Arguments: { "address": 1536, "instruction": "LDA #$00" }
 Result: Assembled 2 bytes at $0600
+```
+
+**Example - Assemble a Block of Instructions:**
+```
+Tool: emulator_assemble_block
+Arguments: { "address": 1536, "instructions": ["LDA #$00", "STA $D400", "RTS"] }
+Result:
+$0600: A9 00     LDA #$00
+$0602: 8D 00 D4  STA $D400
+$0605: 60        RTS
+Assembly complete: 6 bytes at $0600-$0605
 ```
 
 **Example - Fill Memory:**
