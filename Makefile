@@ -13,7 +13,7 @@
 # See docs/TESTING.md for detailed test categorization.
 
 .PHONY: test test-smoke test-unit \
-        test-protocol test-cli test-basic test-asm test-atr test-core test-state test-server test-perf test-error
+        test-protocol test-cli test-basic test-asm test-atr test-core test-state test-server test-perf test-error test-multiclient
 
 # ---------------------------------------------------------------------------
 # Full suite
@@ -27,7 +27,7 @@ test:
 # Smoke / unit targets
 # ---------------------------------------------------------------------------
 
-## Fast smoke tests – skip the 13 slowest integration suites (~3s)
+## Fast smoke tests – skip the 15 slowest integration suites (~3s)
 test-smoke:
 	swift test \
 		--skip CLISocketIntegrationTests \
@@ -42,7 +42,9 @@ test-smoke:
 		--skip AESPClientInputTests \
 		--skip AESPControlChannelE2ETests \
 		--skip AESPAudioChannelE2ETests \
-		--skip AESPVideoChannelE2ETests
+		--skip AESPVideoChannelE2ETests \
+		--skip AESPMultipleGUIClientTests \
+		--skip AESPCLIAndGUITogetherTests
 
 ## Pure unit tests only – skip ALL integration & E2E suites (~2s)
 test-unit:
@@ -70,7 +72,9 @@ test-unit:
 		--skip AESPMessageBroadcastTests \
 		--skip AESPServerDelegateTests \
 		--skip AESPChannelTests \
-		--skip AtticCLISubprocessTests
+		--skip AtticCLISubprocessTests \
+		--skip AESPMultipleGUIClientTests \
+		--skip AESPCLIAndGUITogetherTests
 
 # ---------------------------------------------------------------------------
 # Feature-area targets
@@ -115,3 +119,7 @@ test-perf:
 ## Error handling tests – missing ROMs, invalid files, network errors (<1s)
 test-error:
 	swift test --filter 'MissingROMs|InvalidFiles|NetworkErrors'
+
+## Multi-client tests – multiple GUI clients and CLI+GUI together (~12s)
+test-multiclient:
+	swift test --filter 'AESPMultipleGUIClient|AESPCLIAndGUITogether'
