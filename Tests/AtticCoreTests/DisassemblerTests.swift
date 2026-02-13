@@ -1441,3 +1441,1269 @@ final class CLIDisassembleCommandTests: XCTestCase {
         }
     }
 }
+
+// =============================================================================
+// MARK: - 7.1 Basic Disassembly Tests
+// =============================================================================
+
+/// Tests for basic disassembly output format, verifying that address, bytes,
+/// mnemonic, operand, and known labels all appear correctly in output.
+///
+/// These tests simulate disassembling realistic ROM-like code at $E000 and
+/// verify the complete output pipeline from raw bytes through formatted strings.
+final class BasicDisassemblyTests: XCTestCase {
+
+    var disasm: Disassembler!
+
+    override func setUp() {
+        super.setUp()
+        disasm = Disassembler(labels: AddressLabels.atariStandard)
+    }
+
+    // MARK: - Output Format Tests
+
+    /// Test that formatted output contains address prefix "$XXXX".
+    func test_formattedOutput_containsAddress() {
+        let data: [UInt8] = [0xA9, 0x00]  // LDA #$00
+        let memory = ArrayMemoryBus(data: data, baseAddress: 0xE000)
+
+        let inst = disasm.disassemble(at: 0xE000, memory: memory)
+
+        XCTAssertTrue(inst.formatted.hasPrefix("$E000"))
+    }
+
+    /// Test that formatted output contains the raw hex bytes.
+    func test_formattedOutput_containsBytes() {
+        let data: [UInt8] = [0x8D, 0x0A, 0xD4]  // STA $D40A
+        let memory = ArrayMemoryBus(data: data, baseAddress: 0xE000)
+
+        let inst = disasm.disassemble(at: 0xE000, memory: memory)
+        let output = inst.formatted
+
+        XCTAssertTrue(output.contains("8D 0A D4"))
+    }
+
+    /// Test that formatted output contains the mnemonic.
+    func test_formattedOutput_containsMnemonic() {
+        let data: [UInt8] = [0xA2, 0xFF]  // LDX #$FF
+        let memory = ArrayMemoryBus(data: data, baseAddress: 0xE000)
+
+        let inst = disasm.disassemble(at: 0xE000, memory: memory)
+
+        XCTAssertTrue(inst.formatted.contains("LDX"))
+    }
+
+    /// Test that formatted output contains the operand.
+    func test_formattedOutput_containsOperand() {
+        let data: [UInt8] = [0xA2, 0xFF]  // LDX #$FF
+        let memory = ArrayMemoryBus(data: data, baseAddress: 0xE000)
+
+        let inst = disasm.disassemble(at: 0xE000, memory: memory)
+
+        XCTAssertTrue(inst.formatted.contains("#$FF"))
+    }
+
+    /// Test that formattedWithLabel output shows known labels for JSR targets.
+    func test_formattedWithLabel_showsKnownLabel_JSR() {
+        // JSR $E456 (CIOV - Central I/O vector)
+        let data: [UInt8] = [0x20, 0x56, 0xE4]
+        let memory = ArrayMemoryBus(data: data, baseAddress: 0xE000)
+
+        let inst = disasm.disassemble(at: 0xE000, memory: memory)
+        let output = inst.formattedWithLabel
+
+        XCTAssertTrue(output.contains("CIOV"), "Expected CIOV label in output: \(output)")
+    }
+
+    /// Test that formattedWithLabel shows known labels for JMP targets.
+    func test_formattedWithLabel_showsKnownLabel_JMP() {
+        // JMP to RESET vector address $FFFC
+        let data: [UInt8] = [0x4C, 0xFC, 0xFF]  // JMP $FFFC
+        let memory = ArrayMemoryBus(data: data, baseAddress: 0xE000)
+
+        let inst = disasm.disassemble(at: 0xE000, memory: memory)
+        let output = inst.formattedWithLabel
+
+        XCTAssertTrue(output.contains("RESET"), "Expected RESET label in output: \(output)")
+    }
+
+    /// Test that branch instructions show labels when target matches a known address.
+    func test_formattedWithLabel_branchToKnownAddress() {
+        // BNE that branches to CIOV ($E456) from $E454
+        // offset = $E456 - ($E454 + 2) = 0
+        let data: [UInt8] = [0xD0, 0x00]  // BNE to self+2 = $E456
+        let memory = ArrayMemoryBus(data: data, baseAddress: 0xE454)
+
+        let inst = disasm.disassemble(at: 0xE454, memory: memory)
+        let output = inst.formattedWithLabel
+
+        XCTAssertTrue(output.contains("CIOV"), "Expected CIOV label in branch output: \(output)")
+    }
+
+    // MARK: - ROM-Like Code Sequence Tests
+
+    /// Test disassembling a realistic ROM initialization sequence.
+    func test_romInitSequence() {
+        // Typical 6502 initialization: SEI, CLD, LDX #$FF, TXS
+        let data: [UInt8] = [
+            0x78,             // SEI
+            0xD8,             // CLD
+            0xA2, 0xFF,       // LDX #$FF
+            0x9A,             // TXS
+        ]
+        let memory = ArrayMemoryBus(data: data, baseAddress: 0xE000)
+
+        let instructions = disasm.disassembleRange(from: 0xE000, lines: 4, memory: memory)
+
+        XCTAssertEqual(instructions.count, 4)
+        XCTAssertEqual(instructions[0].mnemonic, "SEI")
+        XCTAssertEqual(instructions[0].address, 0xE000)
+        XCTAssertEqual(instructions[1].mnemonic, "CLD")
+        XCTAssertEqual(instructions[1].address, 0xE001)
+        XCTAssertEqual(instructions[2].mnemonic, "LDX")
+        XCTAssertEqual(instructions[2].operand, "#$FF")
+        XCTAssertEqual(instructions[2].address, 0xE002)
+        XCTAssertEqual(instructions[3].mnemonic, "TXS")
+        XCTAssertEqual(instructions[3].address, 0xE004)
+    }
+
+    /// Test disassembling a subroutine with JSR and RTS.
+    func test_subroutineCallAndReturn() {
+        let data: [UInt8] = [
+            0x20, 0x56, 0xE4, // JSR $E456 (CIOV)
+            0xA9, 0x00,       // LDA #$00
+            0x60,             // RTS
+        ]
+        let memory = ArrayMemoryBus(data: data, baseAddress: 0xE100)
+
+        let instructions = disasm.disassembleRange(from: 0xE100, lines: 3, memory: memory)
+
+        XCTAssertEqual(instructions[0].mnemonic, "JSR")
+        XCTAssertEqual(instructions[0].targetAddress, 0xE456)
+        XCTAssertEqual(instructions[0].targetLabel, "CIOV")
+        XCTAssertEqual(instructions[1].mnemonic, "LDA")
+        XCTAssertEqual(instructions[2].mnemonic, "RTS")
+    }
+
+    /// Test disassembling a loop with backward branch.
+    func test_loopWithBackwardBranch() {
+        // A simple loop: LDA $80, BNE back to LDA
+        let data: [UInt8] = [
+            0xA5, 0x80,       // LDA $80
+            0xD0, 0xFC,       // BNE $0600 (-4, back to LDA)
+        ]
+        let memory = ArrayMemoryBus(data: data, baseAddress: 0x0600)
+
+        let instructions = disasm.disassembleRange(from: 0x0600, lines: 2, memory: memory)
+
+        XCTAssertEqual(instructions[0].mnemonic, "LDA")
+        XCTAssertEqual(instructions[1].mnemonic, "BNE")
+        XCTAssertEqual(instructions[1].targetAddress, 0x0600)
+        XCTAssertEqual(instructions[1].relativeOffset, -4)
+    }
+
+    /// Test formatRange produces properly separated multi-line output.
+    func test_formatRange_multiLine() {
+        let data: [UInt8] = [
+            0xA9, 0x42,       // LDA #$42
+            0x8D, 0x0A, 0xD4, // STA $D40A
+            0xEA,             // NOP
+            0x60,             // RTS
+        ]
+        let memory = ArrayMemoryBus(data: data, baseAddress: 0xE000)
+
+        let output = disasm.formatRange(from: 0xE000, lines: 4, memory: memory)
+        let lines = output.split(separator: "\n")
+
+        XCTAssertEqual(lines.count, 4)
+        XCTAssertTrue(lines[0].hasPrefix("$E000"))
+        XCTAssertTrue(lines[0].contains("LDA #$42"))
+        XCTAssertTrue(lines[1].hasPrefix("$E002"))
+        XCTAssertTrue(lines[1].contains("STA"))
+        XCTAssertTrue(lines[2].hasPrefix("$E005"))
+        XCTAssertTrue(lines[2].contains("NOP"))
+        XCTAssertTrue(lines[3].hasPrefix("$E006"))
+        XCTAssertTrue(lines[3].contains("RTS"))
+    }
+
+    /// Test that addresses increment correctly for mixed instruction sizes.
+    func test_addressIncrement_mixedSizes() {
+        let data: [UInt8] = [
+            0xEA,             // NOP       (1 byte)
+            0xA9, 0x00,       // LDA #$00  (2 bytes)
+            0x8D, 0x00, 0xD4, // STA $D400 (3 bytes)
+            0x60,             // RTS       (1 byte)
+        ]
+        let memory = ArrayMemoryBus(data: data, baseAddress: 0xE000)
+
+        let instructions = disasm.disassembleRange(from: 0xE000, lines: 4, memory: memory)
+
+        XCTAssertEqual(instructions[0].address, 0xE000)  // 1-byte NOP
+        XCTAssertEqual(instructions[1].address, 0xE001)  // 2-byte LDA
+        XCTAssertEqual(instructions[2].address, 0xE003)  // 3-byte STA
+        XCTAssertEqual(instructions[3].address, 0xE006)  // 1-byte RTS
+    }
+
+    /// Test the detailed multi-line format output.
+    func test_detailedOutput() {
+        let data: [UInt8] = [0x20, 0x56, 0xE4]  // JSR $E456
+        let memory = ArrayMemoryBus(data: data, baseAddress: 0xE000)
+
+        let inst = disasm.disassemble(at: 0xE000, memory: memory)
+        let detailed = inst.detailed
+
+        XCTAssertTrue(detailed.contains("Address: $E000"))
+        XCTAssertTrue(detailed.contains("Bytes: 20 56 E4"))
+        XCTAssertTrue(detailed.contains("Instruction: JSR $E456"))
+        XCTAssertTrue(detailed.contains("Mode: Absolute"))
+        XCTAssertTrue(detailed.contains("Cycles: 6"))
+        XCTAssertTrue(detailed.contains("Target: $E456 (CIOV)"))
+    }
+
+    /// Test padded bytes string alignment across different instruction sizes.
+    func test_paddedBytesAlignment() {
+        let oneByte = DisassembledInstruction(
+            address: 0, bytes: [0xEA], mnemonic: "NOP", operand: "",
+            addressingMode: .implied, cycles: 2
+        )
+        let twoBytes = DisassembledInstruction(
+            address: 0, bytes: [0xA9, 0x42], mnemonic: "LDA", operand: "#$42",
+            addressingMode: .immediate, cycles: 2
+        )
+        let threeBytes = DisassembledInstruction(
+            address: 0, bytes: [0x8D, 0x00, 0xD4], mnemonic: "STA", operand: "$D400",
+            addressingMode: .absolute, cycles: 4
+        )
+
+        // All should be exactly 8 characters for column alignment
+        XCTAssertEqual(oneByte.paddedBytesString.count, 8)
+        XCTAssertEqual(twoBytes.paddedBytesString.count, 8)
+        XCTAssertEqual(threeBytes.paddedBytesString.count, 8)
+    }
+}
+
+// =============================================================================
+// MARK: - 7.2 Addressing Mode Disassembly Tests
+// =============================================================================
+
+/// Comprehensive tests for disassembly of all 6502 addressing modes.
+///
+/// These tests verify end-to-end disassembly through the Disassembler for each
+/// addressing mode, checking that the correct mnemonic, operand format, and
+/// addressing mode enum value are produced from raw bytes.
+final class AddressingModeDisassemblyTests: XCTestCase {
+
+    var disasm: Disassembler!
+
+    override func setUp() {
+        super.setUp()
+        disasm = Disassembler(labels: AddressLabels())  // No labels for clean operand testing
+    }
+
+    // MARK: - Implied Addressing
+
+    /// Test implied addressing: no operand (e.g., NOP, RTS, SEI, CLD, TXS).
+    func test_implied_NOP() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xEA])
+        XCTAssertEqual(inst.mnemonic, "NOP")
+        XCTAssertEqual(inst.operand, "")
+        XCTAssertEqual(inst.addressingMode, .implied)
+        XCTAssertEqual(inst.byteCount, 1)
+    }
+
+    func test_implied_RTS() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x60])
+        XCTAssertEqual(inst.mnemonic, "RTS")
+        XCTAssertEqual(inst.operand, "")
+        XCTAssertEqual(inst.addressingMode, .implied)
+    }
+
+    func test_implied_RTI() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x40])
+        XCTAssertEqual(inst.mnemonic, "RTI")
+        XCTAssertEqual(inst.addressingMode, .implied)
+    }
+
+    func test_implied_SEI() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x78])
+        XCTAssertEqual(inst.mnemonic, "SEI")
+        XCTAssertEqual(inst.addressingMode, .implied)
+    }
+
+    func test_implied_CLD() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xD8])
+        XCTAssertEqual(inst.mnemonic, "CLD")
+        XCTAssertEqual(inst.addressingMode, .implied)
+    }
+
+    func test_implied_PHA() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x48])
+        XCTAssertEqual(inst.mnemonic, "PHA")
+        XCTAssertEqual(inst.addressingMode, .implied)
+    }
+
+    func test_implied_PLA() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x68])
+        XCTAssertEqual(inst.mnemonic, "PLA")
+        XCTAssertEqual(inst.addressingMode, .implied)
+    }
+
+    // MARK: - Accumulator Addressing
+
+    /// Test accumulator addressing: operand is "A" (e.g., ASL A, LSR A, ROL A, ROR A).
+    func test_accumulator_ASL() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x0A])
+        XCTAssertEqual(inst.mnemonic, "ASL")
+        XCTAssertEqual(inst.operand, "A")
+        XCTAssertEqual(inst.addressingMode, .accumulator)
+        XCTAssertEqual(inst.byteCount, 1)
+    }
+
+    func test_accumulator_LSR() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x4A])
+        XCTAssertEqual(inst.mnemonic, "LSR")
+        XCTAssertEqual(inst.operand, "A")
+        XCTAssertEqual(inst.addressingMode, .accumulator)
+    }
+
+    func test_accumulator_ROL() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x2A])
+        XCTAssertEqual(inst.mnemonic, "ROL")
+        XCTAssertEqual(inst.operand, "A")
+        XCTAssertEqual(inst.addressingMode, .accumulator)
+    }
+
+    func test_accumulator_ROR() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x6A])
+        XCTAssertEqual(inst.mnemonic, "ROR")
+        XCTAssertEqual(inst.operand, "A")
+        XCTAssertEqual(inst.addressingMode, .accumulator)
+    }
+
+    // MARK: - Immediate Addressing
+
+    /// Test immediate addressing: #$xx format (e.g., LDA #$42, LDX #$00, CPX #$FF).
+    func test_immediate_LDA() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xA9, 0x42])
+        XCTAssertEqual(inst.mnemonic, "LDA")
+        XCTAssertEqual(inst.operand, "#$42")
+        XCTAssertEqual(inst.addressingMode, .immediate)
+        XCTAssertEqual(inst.byteCount, 2)
+    }
+
+    func test_immediate_LDX() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xA2, 0x00])
+        XCTAssertEqual(inst.mnemonic, "LDX")
+        XCTAssertEqual(inst.operand, "#$00")
+        XCTAssertEqual(inst.addressingMode, .immediate)
+    }
+
+    func test_immediate_LDY() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xA0, 0xFF])
+        XCTAssertEqual(inst.mnemonic, "LDY")
+        XCTAssertEqual(inst.operand, "#$FF")
+        XCTAssertEqual(inst.addressingMode, .immediate)
+    }
+
+    func test_immediate_CPX() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xE0, 0x80])
+        XCTAssertEqual(inst.mnemonic, "CPX")
+        XCTAssertEqual(inst.operand, "#$80")
+        XCTAssertEqual(inst.addressingMode, .immediate)
+    }
+
+    func test_immediate_AND() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x29, 0x0F])
+        XCTAssertEqual(inst.mnemonic, "AND")
+        XCTAssertEqual(inst.operand, "#$0F")
+        XCTAssertEqual(inst.addressingMode, .immediate)
+    }
+
+    // MARK: - Zero Page Addressing
+
+    /// Test zero page addressing: $xx format (8-bit address).
+    func test_zeroPage_LDA() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xA5, 0x80])
+        XCTAssertEqual(inst.mnemonic, "LDA")
+        XCTAssertEqual(inst.operand, "$80")
+        XCTAssertEqual(inst.addressingMode, .zeroPage)
+        XCTAssertEqual(inst.byteCount, 2)
+    }
+
+    func test_zeroPage_STA() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x85, 0x42])
+        XCTAssertEqual(inst.mnemonic, "STA")
+        XCTAssertEqual(inst.operand, "$42")
+        XCTAssertEqual(inst.addressingMode, .zeroPage)
+    }
+
+    func test_zeroPage_BIT() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x24, 0x10])
+        XCTAssertEqual(inst.mnemonic, "BIT")
+        XCTAssertEqual(inst.operand, "$10")
+        XCTAssertEqual(inst.addressingMode, .zeroPage)
+    }
+
+    // MARK: - Zero Page,X Addressing
+
+    /// Test zero page indexed by X: $xx,X format.
+    func test_zeroPageX_LDA() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xB5, 0x80])
+        XCTAssertEqual(inst.mnemonic, "LDA")
+        XCTAssertEqual(inst.operand, "$80,X")
+        XCTAssertEqual(inst.addressingMode, .zeroPageX)
+        XCTAssertEqual(inst.byteCount, 2)
+    }
+
+    func test_zeroPageX_STA() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x95, 0x80])
+        XCTAssertEqual(inst.mnemonic, "STA")
+        XCTAssertEqual(inst.operand, "$80,X")
+        XCTAssertEqual(inst.addressingMode, .zeroPageX)
+    }
+
+    func test_zeroPageX_INC() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xF6, 0x10])
+        XCTAssertEqual(inst.mnemonic, "INC")
+        XCTAssertEqual(inst.operand, "$10,X")
+        XCTAssertEqual(inst.addressingMode, .zeroPageX)
+    }
+
+    // MARK: - Zero Page,Y Addressing
+
+    /// Test zero page indexed by Y: $xx,Y format (used by LDX/STX).
+    func test_zeroPageY_LDX() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xB6, 0x80])
+        XCTAssertEqual(inst.mnemonic, "LDX")
+        XCTAssertEqual(inst.operand, "$80,Y")
+        XCTAssertEqual(inst.addressingMode, .zeroPageY)
+        XCTAssertEqual(inst.byteCount, 2)
+    }
+
+    func test_zeroPageY_STX() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x96, 0x80])
+        XCTAssertEqual(inst.mnemonic, "STX")
+        XCTAssertEqual(inst.operand, "$80,Y")
+        XCTAssertEqual(inst.addressingMode, .zeroPageY)
+    }
+
+    // MARK: - Absolute Addressing
+
+    /// Test absolute addressing: $xxxx format (16-bit address).
+    func test_absolute_LDA() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xAD, 0x34, 0x12])
+        XCTAssertEqual(inst.mnemonic, "LDA")
+        XCTAssertEqual(inst.operand, "$1234")
+        XCTAssertEqual(inst.addressingMode, .absolute)
+        XCTAssertEqual(inst.byteCount, 3)
+    }
+
+    func test_absolute_STA() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x8D, 0x00, 0xD4])
+        XCTAssertEqual(inst.mnemonic, "STA")
+        XCTAssertEqual(inst.operand, "$D400")
+        XCTAssertEqual(inst.addressingMode, .absolute)
+    }
+
+    func test_absolute_JMP() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x4C, 0x00, 0x07])
+        XCTAssertEqual(inst.mnemonic, "JMP")
+        XCTAssertEqual(inst.operand, "$0700")
+        XCTAssertEqual(inst.addressingMode, .absolute)
+        XCTAssertEqual(inst.targetAddress, 0x0700)
+    }
+
+    func test_absolute_JSR() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x20, 0x00, 0x07])
+        XCTAssertEqual(inst.mnemonic, "JSR")
+        XCTAssertEqual(inst.operand, "$0700")
+        XCTAssertEqual(inst.addressingMode, .absolute)
+        XCTAssertEqual(inst.targetAddress, 0x0700)
+    }
+
+    /// Test little-endian byte ordering for absolute addresses.
+    func test_absolute_littleEndian() {
+        // $ABCD stored as CD AB in memory
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xAD, 0xCD, 0xAB])
+        XCTAssertEqual(inst.operand, "$ABCD")
+    }
+
+    // MARK: - Absolute,X Addressing
+
+    /// Test absolute indexed by X: $xxxx,X format.
+    func test_absoluteX_LDA() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xBD, 0x00, 0x10])
+        XCTAssertEqual(inst.mnemonic, "LDA")
+        XCTAssertEqual(inst.operand, "$1000,X")
+        XCTAssertEqual(inst.addressingMode, .absoluteX)
+        XCTAssertEqual(inst.byteCount, 3)
+    }
+
+    func test_absoluteX_STA() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x9D, 0x00, 0x10])
+        XCTAssertEqual(inst.mnemonic, "STA")
+        XCTAssertEqual(inst.operand, "$1000,X")
+        XCTAssertEqual(inst.addressingMode, .absoluteX)
+    }
+
+    func test_absoluteX_INC() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xFE, 0x00, 0x04])
+        XCTAssertEqual(inst.mnemonic, "INC")
+        XCTAssertEqual(inst.operand, "$0400,X")
+        XCTAssertEqual(inst.addressingMode, .absoluteX)
+    }
+
+    // MARK: - Absolute,Y Addressing
+
+    /// Test absolute indexed by Y: $xxxx,Y format.
+    func test_absoluteY_LDA() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xB9, 0x00, 0x10])
+        XCTAssertEqual(inst.mnemonic, "LDA")
+        XCTAssertEqual(inst.operand, "$1000,Y")
+        XCTAssertEqual(inst.addressingMode, .absoluteY)
+        XCTAssertEqual(inst.byteCount, 3)
+    }
+
+    func test_absoluteY_STA() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x99, 0x00, 0x10])
+        XCTAssertEqual(inst.mnemonic, "STA")
+        XCTAssertEqual(inst.operand, "$1000,Y")
+        XCTAssertEqual(inst.addressingMode, .absoluteY)
+    }
+
+    func test_absoluteY_LDX() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xBE, 0x00, 0x10])
+        XCTAssertEqual(inst.mnemonic, "LDX")
+        XCTAssertEqual(inst.operand, "$1000,Y")
+        XCTAssertEqual(inst.addressingMode, .absoluteY)
+    }
+
+    // MARK: - Indirect Addressing
+
+    /// Test indirect addressing: ($xxxx) format (JMP only).
+    func test_indirect_JMP() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x6C, 0x00, 0x02])
+        XCTAssertEqual(inst.mnemonic, "JMP")
+        XCTAssertEqual(inst.operand, "($0200)")
+        XCTAssertEqual(inst.addressingMode, .indirect)
+        XCTAssertEqual(inst.byteCount, 3)
+    }
+
+    /// Test indirect addressing with high address.
+    func test_indirect_JMP_highAddress() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x6C, 0xFC, 0xFF])
+        XCTAssertEqual(inst.mnemonic, "JMP")
+        XCTAssertEqual(inst.operand, "($FFFC)")
+        XCTAssertEqual(inst.addressingMode, .indirect)
+    }
+
+    // MARK: - Indexed Indirect (X) Addressing
+
+    /// Test indexed indirect: ($xx,X) format - pointer in zero page + X.
+    func test_indexedIndirectX_LDA() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xA1, 0x80])
+        XCTAssertEqual(inst.mnemonic, "LDA")
+        XCTAssertEqual(inst.operand, "($80,X)")
+        XCTAssertEqual(inst.addressingMode, .indexedIndirectX)
+        XCTAssertEqual(inst.byteCount, 2)
+    }
+
+    func test_indexedIndirectX_STA() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x81, 0x40])
+        XCTAssertEqual(inst.mnemonic, "STA")
+        XCTAssertEqual(inst.operand, "($40,X)")
+        XCTAssertEqual(inst.addressingMode, .indexedIndirectX)
+    }
+
+    func test_indexedIndirectX_EOR() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x41, 0x20])
+        XCTAssertEqual(inst.mnemonic, "EOR")
+        XCTAssertEqual(inst.operand, "($20,X)")
+        XCTAssertEqual(inst.addressingMode, .indexedIndirectX)
+    }
+
+    // MARK: - Indirect Indexed (Y) Addressing
+
+    /// Test indirect indexed: ($xx),Y format - pointer in zero page, then + Y.
+    func test_indirectIndexedY_LDA() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xB1, 0x80])
+        XCTAssertEqual(inst.mnemonic, "LDA")
+        XCTAssertEqual(inst.operand, "($80),Y")
+        XCTAssertEqual(inst.addressingMode, .indirectIndexedY)
+        XCTAssertEqual(inst.byteCount, 2)
+    }
+
+    func test_indirectIndexedY_STA() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x91, 0x40])
+        XCTAssertEqual(inst.mnemonic, "STA")
+        XCTAssertEqual(inst.operand, "($40),Y")
+        XCTAssertEqual(inst.addressingMode, .indirectIndexedY)
+    }
+
+    func test_indirectIndexedY_CMP() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xD1, 0x10])
+        XCTAssertEqual(inst.mnemonic, "CMP")
+        XCTAssertEqual(inst.operand, "($10),Y")
+        XCTAssertEqual(inst.addressingMode, .indirectIndexedY)
+    }
+
+    // MARK: - Relative Addressing (Branches)
+
+    /// Test relative addressing with positive (forward) offset.
+    func test_relative_forward() {
+        // BNE +5: from $0600, target = $0600 + 2 + 5 = $0607
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xD0, 0x05])
+        XCTAssertEqual(inst.mnemonic, "BNE")
+        XCTAssertEqual(inst.operand, "$0607")
+        XCTAssertEqual(inst.addressingMode, .relative)
+        XCTAssertEqual(inst.targetAddress, 0x0607)
+        XCTAssertEqual(inst.relativeOffset, 5)
+        XCTAssertEqual(inst.byteCount, 2)
+    }
+
+    /// Test relative addressing with negative (backward) offset.
+    func test_relative_backward() {
+        // BNE -4: from $0610, target = $0610 + 2 + (-4) = $060E
+        let inst = disassembleBytes(at: 0x0610, bytes: [0xD0, 0xFC])
+        XCTAssertEqual(inst.mnemonic, "BNE")
+        XCTAssertEqual(inst.targetAddress, 0x060E)
+        XCTAssertEqual(inst.relativeOffset, -4)
+    }
+
+    /// Test relative addressing with offset of zero (branch to next instruction).
+    func test_relative_zeroOffset() {
+        // BEQ 0: from $0600, target = $0600 + 2 + 0 = $0602
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xF0, 0x00])
+        XCTAssertEqual(inst.mnemonic, "BEQ")
+        XCTAssertEqual(inst.targetAddress, 0x0602)
+        XCTAssertEqual(inst.relativeOffset, 0)
+    }
+
+    /// Test relative addressing with maximum forward offset (+127).
+    func test_relative_maxForward() {
+        // BCC +127: from $0600, target = $0600 + 2 + 127 = $0681
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x90, 0x7F])
+        XCTAssertEqual(inst.mnemonic, "BCC")
+        XCTAssertEqual(inst.targetAddress, 0x0681)
+        XCTAssertEqual(inst.relativeOffset, 127)
+    }
+
+    /// Test relative addressing with maximum backward offset (-128).
+    func test_relative_maxBackward() {
+        // BCS -128: from $0680, target = $0680 + 2 + (-128) = $0602
+        let inst = disassembleBytes(at: 0x0680, bytes: [0xB0, 0x80])
+        XCTAssertEqual(inst.mnemonic, "BCS")
+        XCTAssertEqual(inst.targetAddress, 0x0602)
+        XCTAssertEqual(inst.relativeOffset, -128)
+    }
+
+    /// Test all eight branch instructions use relative addressing.
+    func test_allBranches_relative() {
+        let branches: [(UInt8, String)] = [
+            (0x10, "BPL"), (0x30, "BMI"),
+            (0x50, "BVC"), (0x70, "BVS"),
+            (0x90, "BCC"), (0xB0, "BCS"),
+            (0xD0, "BNE"), (0xF0, "BEQ"),
+        ]
+
+        for (opcode, mnemonic) in branches {
+            let inst = disassembleBytes(at: 0x0600, bytes: [opcode, 0x10])
+            XCTAssertEqual(inst.mnemonic, mnemonic, "Mnemonic mismatch for opcode $\(String(format: "%02X", opcode))")
+            XCTAssertEqual(inst.addressingMode, .relative, "\(mnemonic) should be relative mode")
+            XCTAssertTrue(inst.isBranch, "\(mnemonic) should be classified as branch")
+        }
+    }
+
+    /// Test formattedWithOffset shows correct annotation for branches.
+    func test_relative_formattedWithOffset_forward() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xD0, 0x05])
+        let output = inst.formattedWithOffset
+
+        XCTAssertTrue(output.contains("(+5)"), "Forward branch should show (+5)")
+    }
+
+    func test_relative_formattedWithOffset_backward() {
+        let inst = disassembleBytes(at: 0x0610, bytes: [0xD0, 0xF0])
+        let output = inst.formattedWithOffset
+
+        XCTAssertTrue(output.contains("(-16)"), "Backward branch should show (-16)")
+    }
+
+    // MARK: - Helper
+
+    /// Convenience helper to disassemble bytes through the full pipeline.
+    private func disassembleBytes(at address: UInt16, bytes: [UInt8]) -> DisassembledInstruction {
+        let memory = ArrayMemoryBus(data: bytes, baseAddress: address)
+        return disasm.disassemble(at: address, memory: memory)
+    }
+}
+
+// =============================================================================
+// MARK: - 7.3 Illegal Opcode Disassembly Tests
+// =============================================================================
+
+/// Comprehensive tests for illegal/undocumented 6502 opcode disassembly.
+///
+/// Tests verify that all categories of illegal opcodes are correctly identified
+/// with isIllegal flag, proper mnemonics, correct addressing modes, and
+/// accurate cycle counts.
+final class IllegalOpcodeDisassemblyTests: XCTestCase {
+
+    var disasm: Disassembler!
+
+    override func setUp() {
+        super.setUp()
+        disasm = Disassembler(labels: AddressLabels())
+    }
+
+    // MARK: - LAX (LDA + LDX combined)
+
+    /// Test LAX zero page.
+    func test_LAX_zeroPage() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xA7, 0x80])
+        XCTAssertEqual(inst.mnemonic, "LAX")
+        XCTAssertEqual(inst.operand, "$80")
+        XCTAssertEqual(inst.addressingMode, .zeroPage)
+        XCTAssertTrue(inst.isIllegal)
+        XCTAssertFalse(inst.halts)
+        XCTAssertEqual(inst.cycles, 3)
+    }
+
+    /// Test LAX absolute.
+    func test_LAX_absolute() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xAF, 0x00, 0x10])
+        XCTAssertEqual(inst.mnemonic, "LAX")
+        XCTAssertEqual(inst.operand, "$1000")
+        XCTAssertEqual(inst.addressingMode, .absolute)
+        XCTAssertTrue(inst.isIllegal)
+        XCTAssertEqual(inst.cycles, 4)
+    }
+
+    /// Test LAX zero page,Y.
+    func test_LAX_zeroPageY() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xB7, 0x80])
+        XCTAssertEqual(inst.mnemonic, "LAX")
+        XCTAssertEqual(inst.operand, "$80,Y")
+        XCTAssertEqual(inst.addressingMode, .zeroPageY)
+        XCTAssertTrue(inst.isIllegal)
+    }
+
+    /// Test LAX absolute,Y with page cross cycles.
+    func test_LAX_absoluteY() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xBF, 0x00, 0x10])
+        XCTAssertEqual(inst.mnemonic, "LAX")
+        XCTAssertEqual(inst.addressingMode, .absoluteY)
+        XCTAssertTrue(inst.isIllegal)
+        XCTAssertEqual(inst.pageCrossCycles, 1)
+    }
+
+    /// Test LAX (indirect,X).
+    func test_LAX_indexedIndirectX() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xA3, 0x80])
+        XCTAssertEqual(inst.mnemonic, "LAX")
+        XCTAssertEqual(inst.operand, "($80,X)")
+        XCTAssertEqual(inst.addressingMode, .indexedIndirectX)
+        XCTAssertTrue(inst.isIllegal)
+    }
+
+    /// Test LAX (indirect),Y.
+    func test_LAX_indirectIndexedY() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xB3, 0x80])
+        XCTAssertEqual(inst.mnemonic, "LAX")
+        XCTAssertEqual(inst.operand, "($80),Y")
+        XCTAssertEqual(inst.addressingMode, .indirectIndexedY)
+        XCTAssertTrue(inst.isIllegal)
+    }
+
+    // MARK: - SAX (Store A AND X)
+
+    /// Test SAX zero page.
+    func test_SAX_zeroPage() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x87, 0x80])
+        XCTAssertEqual(inst.mnemonic, "SAX")
+        XCTAssertEqual(inst.operand, "$80")
+        XCTAssertEqual(inst.addressingMode, .zeroPage)
+        XCTAssertTrue(inst.isIllegal)
+        XCTAssertEqual(inst.cycles, 3)
+    }
+
+    /// Test SAX absolute.
+    func test_SAX_absolute() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x8F, 0x00, 0x10])
+        XCTAssertEqual(inst.mnemonic, "SAX")
+        XCTAssertEqual(inst.operand, "$1000")
+        XCTAssertEqual(inst.addressingMode, .absolute)
+        XCTAssertTrue(inst.isIllegal)
+    }
+
+    /// Test SAX (indirect,X).
+    func test_SAX_indexedIndirectX() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x83, 0x80])
+        XCTAssertEqual(inst.mnemonic, "SAX")
+        XCTAssertEqual(inst.operand, "($80,X)")
+        XCTAssertEqual(inst.addressingMode, .indexedIndirectX)
+        XCTAssertTrue(inst.isIllegal)
+    }
+
+    /// Test SAX zero page,Y.
+    func test_SAX_zeroPageY() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x97, 0x80])
+        XCTAssertEqual(inst.mnemonic, "SAX")
+        XCTAssertEqual(inst.operand, "$80,Y")
+        XCTAssertEqual(inst.addressingMode, .zeroPageY)
+        XCTAssertTrue(inst.isIllegal)
+    }
+
+    // MARK: - DCP (DEC + CMP)
+
+    /// Test DCP zero page.
+    func test_DCP_zeroPage() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xC7, 0x80])
+        XCTAssertEqual(inst.mnemonic, "DCP")
+        XCTAssertEqual(inst.operand, "$80")
+        XCTAssertEqual(inst.addressingMode, .zeroPage)
+        XCTAssertTrue(inst.isIllegal)
+        XCTAssertEqual(inst.cycles, 5)
+    }
+
+    /// Test DCP absolute.
+    func test_DCP_absolute() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xCF, 0x00, 0x10])
+        XCTAssertEqual(inst.mnemonic, "DCP")
+        XCTAssertEqual(inst.operand, "$1000")
+        XCTAssertEqual(inst.addressingMode, .absolute)
+        XCTAssertTrue(inst.isIllegal)
+    }
+
+    /// Test DCP absolute,X.
+    func test_DCP_absoluteX() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xDF, 0x00, 0x10])
+        XCTAssertEqual(inst.mnemonic, "DCP")
+        XCTAssertEqual(inst.addressingMode, .absoluteX)
+        XCTAssertTrue(inst.isIllegal)
+    }
+
+    /// Test DCP (indirect),Y.
+    func test_DCP_indirectIndexedY() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xD3, 0x80])
+        XCTAssertEqual(inst.mnemonic, "DCP")
+        XCTAssertEqual(inst.addressingMode, .indirectIndexedY)
+        XCTAssertTrue(inst.isIllegal)
+    }
+
+    // MARK: - ISC (INC + SBC)
+
+    /// Test ISC zero page.
+    func test_ISC_zeroPage() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xE7, 0x80])
+        XCTAssertEqual(inst.mnemonic, "ISC")
+        XCTAssertEqual(inst.operand, "$80")
+        XCTAssertEqual(inst.addressingMode, .zeroPage)
+        XCTAssertTrue(inst.isIllegal)
+    }
+
+    /// Test ISC absolute.
+    func test_ISC_absolute() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xEF, 0x00, 0x10])
+        XCTAssertEqual(inst.mnemonic, "ISC")
+        XCTAssertEqual(inst.operand, "$1000")
+        XCTAssertEqual(inst.addressingMode, .absolute)
+        XCTAssertTrue(inst.isIllegal)
+    }
+
+    /// Test ISC absolute,X.
+    func test_ISC_absoluteX() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xFF, 0x00, 0x10])
+        XCTAssertEqual(inst.mnemonic, "ISC")
+        XCTAssertEqual(inst.addressingMode, .absoluteX)
+        XCTAssertTrue(inst.isIllegal)
+    }
+
+    // MARK: - SLO (ASL + ORA)
+
+    /// Test SLO zero page.
+    func test_SLO_zeroPage() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x07, 0x80])
+        XCTAssertEqual(inst.mnemonic, "SLO")
+        XCTAssertEqual(inst.operand, "$80")
+        XCTAssertEqual(inst.addressingMode, .zeroPage)
+        XCTAssertTrue(inst.isIllegal)
+    }
+
+    /// Test SLO absolute.
+    func test_SLO_absolute() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x0F, 0x00, 0x10])
+        XCTAssertEqual(inst.mnemonic, "SLO")
+        XCTAssertEqual(inst.operand, "$1000")
+        XCTAssertEqual(inst.addressingMode, .absolute)
+        XCTAssertTrue(inst.isIllegal)
+    }
+
+    // MARK: - RLA (ROL + AND)
+
+    /// Test RLA zero page.
+    func test_RLA_zeroPage() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x27, 0x80])
+        XCTAssertEqual(inst.mnemonic, "RLA")
+        XCTAssertEqual(inst.operand, "$80")
+        XCTAssertEqual(inst.addressingMode, .zeroPage)
+        XCTAssertTrue(inst.isIllegal)
+    }
+
+    /// Test RLA absolute.
+    func test_RLA_absolute() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x2F, 0x00, 0x10])
+        XCTAssertEqual(inst.mnemonic, "RLA")
+        XCTAssertEqual(inst.operand, "$1000")
+        XCTAssertEqual(inst.addressingMode, .absolute)
+        XCTAssertTrue(inst.isIllegal)
+    }
+
+    // MARK: - SRE (LSR + EOR)
+
+    /// Test SRE zero page.
+    func test_SRE_zeroPage() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x47, 0x80])
+        XCTAssertEqual(inst.mnemonic, "SRE")
+        XCTAssertEqual(inst.operand, "$80")
+        XCTAssertEqual(inst.addressingMode, .zeroPage)
+        XCTAssertTrue(inst.isIllegal)
+    }
+
+    /// Test SRE absolute.
+    func test_SRE_absolute() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x4F, 0x00, 0x10])
+        XCTAssertEqual(inst.mnemonic, "SRE")
+        XCTAssertEqual(inst.operand, "$1000")
+        XCTAssertEqual(inst.addressingMode, .absolute)
+        XCTAssertTrue(inst.isIllegal)
+    }
+
+    // MARK: - RRA (ROR + ADC)
+
+    /// Test RRA zero page.
+    func test_RRA_zeroPage() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x67, 0x80])
+        XCTAssertEqual(inst.mnemonic, "RRA")
+        XCTAssertEqual(inst.operand, "$80")
+        XCTAssertEqual(inst.addressingMode, .zeroPage)
+        XCTAssertTrue(inst.isIllegal)
+    }
+
+    /// Test RRA absolute.
+    func test_RRA_absolute() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x6F, 0x00, 0x10])
+        XCTAssertEqual(inst.mnemonic, "RRA")
+        XCTAssertEqual(inst.operand, "$1000")
+        XCTAssertEqual(inst.addressingMode, .absolute)
+        XCTAssertTrue(inst.isIllegal)
+    }
+
+    // MARK: - Immediate Illegal Opcodes
+
+    /// Test ANC immediate.
+    func test_ANC_immediate() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x0B, 0x42])
+        XCTAssertEqual(inst.mnemonic, "ANC")
+        XCTAssertEqual(inst.operand, "#$42")
+        XCTAssertEqual(inst.addressingMode, .immediate)
+        XCTAssertTrue(inst.isIllegal)
+        XCTAssertEqual(inst.cycles, 2)
+    }
+
+    /// Test second ANC encoding.
+    func test_ANC_alternate() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x2B, 0x42])
+        XCTAssertEqual(inst.mnemonic, "ANC")
+        XCTAssertTrue(inst.isIllegal)
+    }
+
+    /// Test ALR (AND + LSR) immediate.
+    func test_ALR_immediate() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x4B, 0x0F])
+        XCTAssertEqual(inst.mnemonic, "ALR")
+        XCTAssertEqual(inst.operand, "#$0F")
+        XCTAssertEqual(inst.addressingMode, .immediate)
+        XCTAssertTrue(inst.isIllegal)
+    }
+
+    /// Test ARR (AND + ROR) immediate.
+    func test_ARR_immediate() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x6B, 0x42])
+        XCTAssertEqual(inst.mnemonic, "ARR")
+        XCTAssertEqual(inst.operand, "#$42")
+        XCTAssertEqual(inst.addressingMode, .immediate)
+        XCTAssertTrue(inst.isIllegal)
+    }
+
+    /// Test XAA (unstable) immediate.
+    func test_XAA_immediate() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x8B, 0x42])
+        XCTAssertEqual(inst.mnemonic, "XAA")
+        XCTAssertEqual(inst.addressingMode, .immediate)
+        XCTAssertTrue(inst.isIllegal)
+    }
+
+    /// Test illegal SBC duplicate ($EB).
+    func test_SBC_illegalDuplicate() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xEB, 0x42])
+        XCTAssertEqual(inst.mnemonic, "SBC")
+        XCTAssertEqual(inst.operand, "#$42")
+        XCTAssertEqual(inst.addressingMode, .immediate)
+        XCTAssertTrue(inst.isIllegal)
+    }
+
+    // MARK: - Unstable Store Instructions
+
+    /// Test AHX (indirect),Y.
+    func test_AHX_indirectIndexedY() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x93, 0x80])
+        XCTAssertEqual(inst.mnemonic, "AHX")
+        XCTAssertEqual(inst.addressingMode, .indirectIndexedY)
+        XCTAssertTrue(inst.isIllegal)
+    }
+
+    /// Test AHX absolute,Y.
+    func test_AHX_absoluteY() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x9F, 0x00, 0x10])
+        XCTAssertEqual(inst.mnemonic, "AHX")
+        XCTAssertEqual(inst.addressingMode, .absoluteY)
+        XCTAssertTrue(inst.isIllegal)
+    }
+
+    /// Test SHY absolute,X.
+    func test_SHY_absoluteX() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x9C, 0x00, 0x10])
+        XCTAssertEqual(inst.mnemonic, "SHY")
+        XCTAssertEqual(inst.operand, "$1000,X")
+        XCTAssertEqual(inst.addressingMode, .absoluteX)
+        XCTAssertTrue(inst.isIllegal)
+    }
+
+    /// Test SHX absolute,Y.
+    func test_SHX_absoluteY() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x9E, 0x00, 0x10])
+        XCTAssertEqual(inst.mnemonic, "SHX")
+        XCTAssertEqual(inst.operand, "$1000,Y")
+        XCTAssertEqual(inst.addressingMode, .absoluteY)
+        XCTAssertTrue(inst.isIllegal)
+    }
+
+    /// Test TAS absolute,Y.
+    func test_TAS_absoluteY() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x9B, 0x00, 0x10])
+        XCTAssertEqual(inst.mnemonic, "TAS")
+        XCTAssertEqual(inst.addressingMode, .absoluteY)
+        XCTAssertTrue(inst.isIllegal)
+    }
+
+    /// Test LAS absolute,Y.
+    func test_LAS_absoluteY() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xBB, 0x00, 0x10])
+        XCTAssertEqual(inst.mnemonic, "LAS")
+        XCTAssertEqual(inst.addressingMode, .absoluteY)
+        XCTAssertTrue(inst.isIllegal)
+        XCTAssertEqual(inst.pageCrossCycles, 1)
+    }
+
+    // MARK: - JAM/KIL (CPU Halt)
+
+    /// Test JAM opcode ($02) halts CPU.
+    func test_JAM_0x02() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x02])
+        XCTAssertEqual(inst.mnemonic, "JAM")
+        XCTAssertEqual(inst.addressingMode, .implied)
+        XCTAssertTrue(inst.isIllegal)
+        XCTAssertTrue(inst.halts)
+        XCTAssertEqual(inst.byteCount, 1)
+    }
+
+    /// Test all JAM opcodes are recognized.
+    func test_allJAM_opcodes() {
+        let jamOpcodes: [UInt8] = [
+            0x02, 0x12, 0x22, 0x32, 0x42, 0x52,
+            0x62, 0x72, 0x92, 0xB2, 0xD2, 0xF2,
+        ]
+
+        for opcode in jamOpcodes {
+            let inst = disassembleBytes(at: 0x0600, bytes: [opcode])
+            XCTAssertEqual(inst.mnemonic, "JAM",
+                "Opcode $\(String(format: "%02X", opcode)) should be JAM")
+            XCTAssertTrue(inst.isIllegal,
+                "JAM $\(String(format: "%02X", opcode)) should be illegal")
+            XCTAssertTrue(inst.halts,
+                "JAM $\(String(format: "%02X", opcode)) should halt")
+        }
+    }
+
+    // MARK: - Illegal NOPs
+
+    /// Test 1-byte illegal NOP (implied mode).
+    func test_illegalNOP_implied() {
+        let impliedNops: [UInt8] = [0x1A, 0x3A, 0x5A, 0x7A, 0xDA, 0xFA]
+
+        for opcode in impliedNops {
+            let inst = disassembleBytes(at: 0x0600, bytes: [opcode])
+            XCTAssertEqual(inst.mnemonic, "NOP",
+                "Opcode $\(String(format: "%02X", opcode)) should be NOP")
+            XCTAssertEqual(inst.addressingMode, .implied,
+                "Illegal NOP $\(String(format: "%02X", opcode)) should be implied")
+            XCTAssertTrue(inst.isIllegal,
+                "NOP $\(String(format: "%02X", opcode)) should be illegal")
+            XCTAssertEqual(inst.byteCount, 1)
+        }
+    }
+
+    /// Test 2-byte illegal NOP (zero page or immediate mode).
+    func test_illegalNOP_2byte() {
+        // Zero page NOPs
+        let inst1 = disassembleBytes(at: 0x0600, bytes: [0x04, 0x80])
+        XCTAssertEqual(inst1.mnemonic, "NOP")
+        XCTAssertEqual(inst1.addressingMode, .zeroPage)
+        XCTAssertTrue(inst1.isIllegal)
+        XCTAssertEqual(inst1.byteCount, 2)
+
+        // Immediate NOPs
+        let inst2 = disassembleBytes(at: 0x0600, bytes: [0x80, 0x42])
+        XCTAssertEqual(inst2.mnemonic, "NOP")
+        XCTAssertEqual(inst2.addressingMode, .immediate)
+        XCTAssertTrue(inst2.isIllegal)
+        XCTAssertEqual(inst2.byteCount, 2)
+    }
+
+    /// Test 3-byte illegal NOP (absolute and absolute,X modes).
+    func test_illegalNOP_3byte() {
+        // Absolute NOP
+        let inst1 = disassembleBytes(at: 0x0600, bytes: [0x0C, 0x00, 0x10])
+        XCTAssertEqual(inst1.mnemonic, "NOP")
+        XCTAssertEqual(inst1.addressingMode, .absolute)
+        XCTAssertTrue(inst1.isIllegal)
+        XCTAssertEqual(inst1.byteCount, 3)
+
+        // Absolute,X NOP
+        let inst2 = disassembleBytes(at: 0x0600, bytes: [0x1C, 0x00, 0x10])
+        XCTAssertEqual(inst2.mnemonic, "NOP")
+        XCTAssertEqual(inst2.addressingMode, .absoluteX)
+        XCTAssertTrue(inst2.isIllegal)
+        XCTAssertEqual(inst2.byteCount, 3)
+        XCTAssertEqual(inst2.pageCrossCycles, 1)
+    }
+
+    // MARK: - Legal vs Illegal Distinction
+
+    /// Test that legal NOP ($EA) is NOT marked illegal.
+    func test_legalNOP_notIllegal() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xEA])
+        XCTAssertEqual(inst.mnemonic, "NOP")
+        XCTAssertFalse(inst.isIllegal, "Legal NOP $EA should not be illegal")
+    }
+
+    /// Test that legal SBC ($E9) is NOT marked illegal.
+    func test_legalSBC_notIllegal() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xE9, 0x42])
+        XCTAssertEqual(inst.mnemonic, "SBC")
+        XCTAssertFalse(inst.isIllegal, "Legal SBC $E9 should not be illegal")
+    }
+
+    /// Test that illegal SBC ($EB) IS marked illegal.
+    func test_illegalSBC_isIllegal() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xEB, 0x42])
+        XCTAssertEqual(inst.mnemonic, "SBC")
+        XCTAssertTrue(inst.isIllegal, "Illegal SBC $EB should be illegal")
+    }
+
+    // MARK: - Mixed Legal and Illegal Sequence
+
+    /// Test disassembling a sequence mixing legal and illegal opcodes.
+    func test_mixedLegalIllegalSequence() {
+        let data: [UInt8] = [
+            0xA9, 0x42,       // LDA #$42     (legal)
+            0x07, 0x80,       // SLO $80      (illegal)
+            0x8D, 0x00, 0xD4, // STA $D400    (legal)
+            0xA7, 0x90,       // LAX $90      (illegal)
+        ]
+        let memory = ArrayMemoryBus(data: data, baseAddress: 0x0600)
+
+        let instructions = disasm.disassembleRange(from: 0x0600, lines: 4, memory: memory)
+
+        XCTAssertEqual(instructions.count, 4)
+
+        // LDA - legal
+        XCTAssertEqual(instructions[0].mnemonic, "LDA")
+        XCTAssertFalse(instructions[0].isIllegal)
+
+        // SLO - illegal
+        XCTAssertEqual(instructions[1].mnemonic, "SLO")
+        XCTAssertTrue(instructions[1].isIllegal)
+
+        // STA - legal
+        XCTAssertEqual(instructions[2].mnemonic, "STA")
+        XCTAssertFalse(instructions[2].isIllegal)
+
+        // LAX - illegal
+        XCTAssertEqual(instructions[3].mnemonic, "LAX")
+        XCTAssertTrue(instructions[3].isIllegal)
+    }
+
+    /// Test that illegal opcodes show "Illegal/undocumented" in detailed output.
+    func test_illegalOpcode_detailedOutput() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0xA7, 0x80])
+        let detailed = inst.detailed
+
+        XCTAssertTrue(detailed.contains("Illegal/undocumented opcode"),
+            "Detailed output should note illegal opcode")
+    }
+
+    /// Test that JAM shows halt warning in detailed output.
+    func test_JAM_detailedOutput() {
+        let inst = disassembleBytes(at: 0x0600, bytes: [0x02])
+        let detailed = inst.detailed
+
+        XCTAssertTrue(detailed.contains("halts the CPU"),
+            "Detailed output should warn about CPU halt")
+    }
+
+    // MARK: - Read-Modify-Write Illegal Opcodes
+
+    /// Test that RMW illegal opcodes are classified as writing memory.
+    func test_illegalRMW_writesMemory() {
+        // SLO zero page (ASL + ORA)
+        let slo = disassembleBytes(at: 0x0600, bytes: [0x07, 0x80])
+        XCTAssertTrue(slo.writesMemory, "SLO should write memory")
+
+        // RLA zero page (ROL + AND)
+        let rla = disassembleBytes(at: 0x0600, bytes: [0x27, 0x80])
+        XCTAssertTrue(rla.writesMemory, "RLA should write memory")
+
+        // SRE zero page (LSR + EOR)
+        let sre = disassembleBytes(at: 0x0600, bytes: [0x47, 0x80])
+        XCTAssertTrue(sre.writesMemory, "SRE should write memory")
+
+        // RRA zero page (ROR + ADC)
+        let rra = disassembleBytes(at: 0x0600, bytes: [0x67, 0x80])
+        XCTAssertTrue(rra.writesMemory, "RRA should write memory")
+
+        // DCP zero page (DEC + CMP)
+        let dcp = disassembleBytes(at: 0x0600, bytes: [0xC7, 0x80])
+        XCTAssertTrue(dcp.writesMemory, "DCP should write memory")
+
+        // ISC zero page (INC + SBC)
+        let isc = disassembleBytes(at: 0x0600, bytes: [0xE7, 0x80])
+        XCTAssertTrue(isc.writesMemory, "ISC should write memory")
+    }
+
+    /// Test that illegal store opcodes are classified as writing memory.
+    func test_illegalStore_writesMemory() {
+        // SAX zero page
+        let sax = disassembleBytes(at: 0x0600, bytes: [0x87, 0x80])
+        XCTAssertTrue(sax.writesMemory, "SAX should write memory")
+    }
+
+    // MARK: - Helper
+
+    /// Convenience helper to disassemble bytes through the full pipeline.
+    private func disassembleBytes(at address: UInt16, bytes: [UInt8]) -> DisassembledInstruction {
+        let memory = ArrayMemoryBus(data: bytes, baseAddress: address)
+        return disasm.disassemble(at: address, memory: memory)
+    }
+}
