@@ -454,9 +454,19 @@ public struct BASICDetokenizer: Sendable {
             } else if byte == 0x9B {
                 // ATASCII EOL - convert to newline (shouldn't appear in strings)
                 text.append("\n")
+            } else if byte >= 0x80 && byte != 0x9B {
+                // Inverse video characters (bit 7 set) - strip bit 7
+                // to map back to the base ASCII character.
+                let base = byte & 0x7F
+                if base >= 0x20 && base < 0x7F {
+                    text.append(Character(UnicodeScalar(base)))
+                } else {
+                    // Inverse of a graphics char (0x80-0x9A) — no ASCII equivalent
+                    text.append(".")
+                }
             } else {
-                // Non-printable - keep as-is for compatibility
-                text.append(Character(UnicodeScalar(byte)))
+                // ATASCII graphics characters (0x00-0x1F) — no ASCII equivalent
+                text.append(".")
             }
         }
         return text
