@@ -4,12 +4,14 @@ This document describes how to use the AtticMCP server to interact with the Atar
 
 ## Overview
 
-AtticMCP is a Model Context Protocol (MCP) server that exposes the Atari 800 XL emulator's functionality as tools. It communicates via JSON-RPC 2.0 over stdin/stdout and connects to a running AtticServer instance via Unix domain sockets.
+AtticMCP is a Model Context Protocol (MCP) server that exposes the Atari 800 XL emulator's functionality as tools. It is implemented in Python using [FastMCP](https://github.com/modelcontextprotocol/python-sdk) (the official MCP Python SDK), which provides automatic JSON schema generation from type hints and Pydantic input validation. The server communicates via JSON-RPC 2.0 over stdin/stdout and connects to a running AtticServer instance via Unix domain sockets.
+
+The source code lives in `Sources/AtticMCP-Python/`.
 
 ## Prerequisites
 
 1. **AtticServer must be running** - The MCP server connects to AtticServer via CLI socket protocol
-2. **Swift toolchain** - Required to build and run the MCP server
+2. **Python 3.10+** and **uv** - Required to run the MCP server
 3. **Claude Code** - Or any MCP-compatible client
 
 ### Starting AtticServer
@@ -28,20 +30,18 @@ The server will create a socket at `/tmp/attic-<pid>.sock`. AtticMCP automatical
 
 ### Project-Level Configuration (Recommended)
 
-Create a `.mcp.json` file in your project root:
+The project already includes a `.mcp.json` in the repository root:
 
 ```json
 {
   "mcpServers": {
     "attic": {
-      "command": "swift",
-      "args": ["run", "--package-path", "/path/to/attic", "AtticMCP"]
+      "command": "uv",
+      "args": ["run", "--directory", "Sources/AtticMCP-Python", "attic-mcp"]
     }
   }
 }
 ```
-
-Replace `/path/to/attic` with the absolute path to your Attic repository.
 
 ### User-Level Configuration
 
@@ -51,12 +51,14 @@ Add to `~/.claude/claude_desktop_config.json`:
 {
   "mcpServers": {
     "attic": {
-      "command": "swift",
-      "args": ["run", "--package-path", "/path/to/attic", "AtticMCP"]
+      "command": "uv",
+      "args": ["run", "--directory", "/path/to/attic/Sources/AtticMCP-Python", "attic-mcp"]
     }
   }
 }
 ```
+
+Replace `/path/to/attic` with the absolute path to your Attic repository.
 
 ## Available Tools
 

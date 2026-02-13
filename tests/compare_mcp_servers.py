@@ -277,8 +277,9 @@ class MCPProcess:
                     msg = json.loads(line_str)
                 except json.JSONDecodeError:
                     continue
-                # Skip notifications (no id field).
-                if "id" in msg:
+                # Skip notifications (no id field) and error responses
+                # to notifications (id is null).
+                if "id" in msg and msg["id"] is not None:
                     return msg
 
         raise RuntimeError(f"{self.name}: timed out waiting for response after {timeout}s")

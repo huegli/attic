@@ -1,5 +1,10 @@
 # Plan: Reimplement AtticMCP in Python with FastMCP
 
+> **Status: COMPLETED** — The Python FastMCP implementation is active in
+> `Sources/AtticMCP-Python/`. The Swift version in `Sources/AtticMCP/` has been
+> removed from `Package.swift` and archived. Schema and tool-call equivalence
+> verified via `tests/compare_mcp_servers.py`.
+
 ## Overview
 
 Reimplement the AtticMCP server (currently 5 Swift files, ~1500 LOC in `Sources/AtticMCP/`) as a

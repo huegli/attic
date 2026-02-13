@@ -475,7 +475,7 @@ async def emulator_screenshot(
         "saves to a default location (~/Desktop/Attic-<timestamp>.png). "
         "Supports ~ for home directory."
     ))] = None,
-) -> str | Image:
+):
     """Capture the current emulator display as a PNG screenshot.
 
     Returns the screenshot as an image if the file can be read,
