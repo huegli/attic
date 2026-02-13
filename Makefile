@@ -13,13 +13,13 @@
 # See docs/TESTING.md for detailed test categorization.
 
 .PHONY: test test-smoke test-unit \
-        test-protocol test-cli test-basic test-asm test-atr test-core test-server
+        test-protocol test-cli test-basic test-asm test-atr test-core test-state test-server
 
 # ---------------------------------------------------------------------------
 # Full suite
 # ---------------------------------------------------------------------------
 
-## Run the complete test suite (~61s, 1120 tests)
+## Run the complete test suite (~61s, 1170+ tests)
 test:
 	swift test
 
@@ -98,7 +98,11 @@ test-atr:
 
 ## Core emulator types and frame rate (<1s)
 test-core:
-	swift test --filter 'AtticCoreTests|CPURegisters|REPLMode|CommandParser|AtticError|AtariScreen|InputState|FrameResult|AudioConfiguration|StateTags|StateFlags|EmulatorState|LibAtari800Wrapper|EmulatorEngine|FrameRate|StatePersistence'
+	swift test --filter 'AtticCoreTests|CPURegisters|REPLMode|CommandParser|AtticError|AtariScreen|InputState|FrameResult|AudioConfiguration|StateTags|StateFlags|EmulatorState|LibAtari800Wrapper|EmulatorEngine|FrameRate|StatePersistence|StateSaveIntegration|StateLoadIntegration|StateIntegrityIntegration|StateCommandParsing'
+
+## State persistence save/load/integrity (<1s)
+test-state:
+	swift test --filter 'StatePersistence|StateSaveIntegration|StateLoadIntegration|StateIntegrityIntegration|StateCommandParsing'
 
 ## AtticServer subprocess tests (~7s)
 test-server:
