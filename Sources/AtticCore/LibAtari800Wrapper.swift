@@ -298,6 +298,12 @@ public final class LibAtari800Wrapper: @unchecked Sendable {
     /// stops a running BASIC program. The break is triggered through the
     /// input system by setting `special = 1` in the input template.
     /// libatari800 negates this value to produce `AKEY_BREAK` (-1).
+    ///
+    /// After sending the break input, we manually clear the BRKKEY flag
+    /// at address $0011. On real hardware the POKEY IRQ handler does this,
+    /// but libatari800 does not set BRKKEY when processing AKEY_BREAK via
+    /// the special input mechanism. BASIC checks BRKKEY ($0011) after each
+    /// statement — a value of $00 signals "break pressed".
     public func sendBreak() {
         guard isInitialized else { return }
         stateIsCached = false
@@ -305,6 +311,9 @@ public final class LibAtari800Wrapper: @unchecked Sendable {
         var input = InputState()
         input.special = 1
         executeFrame(input: &input)
+        // Force the BRKKEY OS flag — libatari800 doesn't set it via special input.
+        // Address $0011 (BRKKEY): $00 = break pressed, $FF = no break.
+        writeMemory(at: 0x0011, value: 0x00)
     }
 
     // =========================================================================
