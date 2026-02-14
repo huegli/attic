@@ -320,7 +320,7 @@ struct AtticCLI {
                     continue
 
                 case ".help":
-                    printHelp(mode: currentMode)
+                    printHelp(mode: currentMode, topic: nil)
                     print(currentMode.prompt, terminator: " ")
                     fflush(stdout)
                     continue
@@ -334,8 +334,19 @@ struct AtticCLI {
                     break
 
                 default:
-                    // Handle commands that forward to server
                     let lowerTrimmed = trimmed.lowercased()
+
+                    // Handle .help <topic> — show help for a specific command
+                    if lowerTrimmed.hasPrefix(".help ") {
+                        let topic = String(trimmed.dropFirst(6))
+                            .trimmingCharacters(in: .whitespaces)
+                        printHelp(mode: currentMode, topic: topic)
+                        print(currentMode.prompt, terminator: " ")
+                        fflush(stdout)
+                        continue
+                    }
+
+                    // Handle commands that forward to server
                     if lowerTrimmed.hasPrefix(".state ") ||
                        lowerTrimmed == ".reset" ||
                        lowerTrimmed == ".warmstart" ||
@@ -627,14 +638,40 @@ struct AtticCLI {
         return UInt16(trimmed.dropFirst(), radix: 16)
     }
 
-    /// Prints help for the current mode.
-    static func printHelp(mode: SocketREPLMode) {
+    /// Prints help for the current mode, or detailed help for a specific command.
+    ///
+    /// When `topic` is nil, prints the full command listing for the mode.
+    /// When a topic is given, looks it up in the global and mode-specific help
+    /// dictionaries and prints the detailed text.
+    static func printHelp(mode: SocketREPLMode, topic: String?) {
+        // If no topic, show the full listing
+        guard let topic = topic, !topic.isEmpty else {
+            printHelpOverview(mode: mode)
+            return
+        }
+
+        // Normalize: strip leading dot for global commands, lowercase
+        let key = topic.lowercased().hasPrefix(".") ?
+            String(topic.lowercased().dropFirst()) : topic.lowercased()
+
+        // Check global commands first, then mode-specific
+        if let text = globalHelp[key] {
+            print(text)
+        } else if let text = modeHelp(for: mode)[key] {
+            print(text)
+        } else {
+            printError("No help for '\(topic)'. Type .help to see available commands.")
+        }
+    }
+
+    /// Prints the full command listing (original .help behavior).
+    private static func printHelpOverview(mode: SocketREPLMode) {
         print("""
         Global Commands:
           .monitor          Switch to monitor mode
           .basic            Switch to BASIC mode
           .dos              Switch to DOS mode
-          .help             Show help
+          .help [cmd]       Show help (or help for a specific command)
           .status           Show emulator status
           .screenshot [p]   Save screenshot (default: ~/Desktop/Attic-<time>.png)
           .screen           Read screen text (GRAPHICS 0 only)
@@ -710,6 +747,413 @@ struct AtticCLI {
             """)
         }
     }
+
+    // =========================================================================
+    // MARK: - Topic-Specific Help Text
+    // =========================================================================
+
+    /// Detailed help for global dot-commands (keys without leading dot).
+    private static let globalHelp: [String: String] = [
+        "monitor": """
+          .monitor
+            Switch to monitor mode for 6502 debugging.
+            Provides disassembly, breakpoints, memory inspection, and
+            register manipulation.
+          """,
+        "basic": """
+          .basic
+            Switch to BASIC mode for writing and running Atari BASIC programs.
+            Numbered lines are tokenized and injected into emulator memory.
+            Non-numbered input is typed into the emulator as keystrokes.
+          """,
+        "dos": """
+          .dos
+            Switch to DOS mode for disk image management.
+            Mount, browse, and manipulate ATR disk images and their files.
+          """,
+        "help": """
+          .help [command]
+            Show help for all commands, or detailed help for a specific command.
+            Examples:
+              .help           Show full command listing for current mode
+              .help mount     Show detailed help for the mount command
+              .help g         Show detailed help for the go command
+              .help .boot     Show detailed help for the .boot command
+          """,
+        "status": """
+          .status
+            Show emulator status including running state, program counter,
+            mounted disk drives, and active breakpoints.
+          """,
+        "screenshot": """
+          .screenshot [path]
+            Capture the emulator display as a PNG screenshot.
+            If no path is given, saves to ~/Desktop/Attic-<timestamp>.png.
+            Examples:
+              .screenshot
+              .screenshot ~/captures/screen.png
+          """,
+        "screen": """
+          .screen
+            Read the text currently displayed on the Atari GRAPHICS 0 screen.
+            Returns the 40x24 character text screen as plain text.
+            Only works when the emulator is in text mode (GRAPHICS 0).
+          """,
+        "boot": """
+          .boot <path>
+            Boot the emulator with a file. Supported formats:
+              .ATR  - Disk image (mounted to D1: and booted)
+              .XEX  - Executable (loaded and run)
+              .BAS  - BASIC program (loaded into BASIC)
+              .CAS  - Cassette image
+              .ROM  - Cartridge ROM
+            Example:
+              .boot ~/games/StarRaiders.atr
+          """,
+        "reset": """
+          .reset
+            Perform a cold reset of the emulator. Reinitializes all hardware
+            and clears memory. Equivalent to powering off and on.
+          """,
+        "warmstart": """
+          .warmstart
+            Perform a warm reset. Equivalent to pressing the RESET key on
+            the Atari. Preserves memory contents but resets the CPU.
+          """,
+        "state": """
+          .state save <path>
+          .state load <path>
+            Save or load the complete emulator state (CPU, memory, hardware).
+            Examples:
+              .state save ~/saves/game.state
+              .state load ~/saves/game.state
+          """,
+        "quit": """
+          .quit
+            Disconnect from the server and exit the CLI.
+            If the server was launched by this CLI session, it keeps running.
+          """,
+        "shutdown": """
+          .shutdown
+            Disconnect and stop the server. If this CLI session launched
+            the server, sends SIGTERM to terminate it. If the server was
+            already running, only disconnects (leaves the server running).
+          """,
+    ]
+
+    /// Returns the help dictionary for mode-specific commands.
+    private static func modeHelp(for mode: SocketREPLMode) -> [String: String] {
+        switch mode {
+        case .monitor: return monitorHelp
+        case .basic: return basicHelp
+        case .dos: return dosHelp
+        }
+    }
+
+    /// Detailed help for monitor mode commands.
+    private static let monitorHelp: [String: String] = [
+        "g": """
+          g [addr]
+            Resume execution from the current PC, or from a specified address.
+            If an address is given, sets PC before resuming.
+            Examples:
+              g             Resume from current PC
+              g $E000       Set PC to $E000 and resume
+          """,
+        "s": """
+          s [n]
+            Step the emulator by n frames (default: 1).
+            After stepping, displays the current register state.
+            Examples:
+              s             Step 1 frame
+              s 10          Step 10 frames
+          """,
+        "step": """
+          step [n]
+            Alias for 's'. Step the emulator by n frames (default: 1).
+          """,
+        "p": """
+          p
+            Pause emulation. The emulator must be paused before writing
+            memory or modifying CPU registers.
+          """,
+        "pause": """
+          pause
+            Alias for 'p'. Pause emulation.
+          """,
+        "r": """
+          r [reg=val ...]
+            Display CPU registers, or set one or more register values.
+            Register names: A, X, Y, S (stack pointer), P (flags), PC.
+            Examples:
+              r                 Show all registers
+              r a=42            Set accumulator to $42
+              r pc=E000 a=00    Set PC and A
+          """,
+        "registers": """
+          registers [reg=val ...]
+            Alias for 'r'. Display or set CPU registers.
+          """,
+        "m": """
+          m <addr> [len]
+            Dump memory starting at addr for len bytes (default: 16).
+            Address must be prefixed with $.
+            Examples:
+              m $0600           Dump 16 bytes at $0600
+              m $D000 64        Dump 64 bytes at $D000
+          """,
+        "memory": """
+          memory <addr> [len]
+            Alias for 'm'. Dump memory contents.
+          """,
+        ">": """
+          > <addr> <bytes>
+            Write bytes to memory. Emulator must be paused first.
+            Bytes are comma-separated hex values.
+            Examples:
+              > $0600 A9,00,8D,00,D4    Write 5 bytes at $0600
+          """,
+        "a": """
+          a <addr> [instruction]
+            Assemble 6502 code. Two modes:
+              a $0600             Enter interactive assembly (line by line)
+              a $0600 LDA #$42   Assemble a single instruction
+            In interactive mode, enter one instruction per line.
+            Enter a blank line to exit.
+            Examples:
+              a $0600
+              a $0600 NOP
+              a $0600 JMP $E459
+          """,
+        "b": """
+          b <set|clear|list> [addr]
+            Manage breakpoints using the 6502 BRK instruction.
+            Examples:
+              b set $0600       Set breakpoint at $0600
+              b clear $0600     Clear breakpoint at $0600
+              b list            List all active breakpoints
+          """,
+        "breakpoint": """
+          breakpoint <set|clear|list> [addr]
+            Alias for 'b'. Manage breakpoints.
+          """,
+        "d": """
+          d [addr] [lines]
+            Disassemble 6502 code starting at addr.
+            If no address given, disassembles from current PC.
+            Examples:
+              d                 Disassemble 16 lines from PC
+              d $E000           Disassemble from $E000
+              d $E000 32        Disassemble 32 lines from $E000
+          """,
+        "disassemble": """
+          disassemble [addr] [lines]
+            Alias for 'd'. Disassemble 6502 code.
+          """,
+    ]
+
+    /// Detailed help for BASIC mode commands.
+    private static let basicHelp: [String: String] = [
+        "list": """
+          list [range]
+            List the BASIC program in memory using the detokenizer.
+            Optionally specify a line range.
+            Examples:
+              list              List entire program
+              list 10-50        List lines 10 through 50
+          """,
+        "del": """
+          del <line|range>
+            Delete a single line or a range of lines.
+            Examples:
+              del 30            Delete line 30
+              del 10-50         Delete lines 10 through 50
+          """,
+        "renum": """
+          renum [start] [step]
+            Renumber all program lines. Default start is 10, step is 10.
+            Updates GOTO/GOSUB references automatically.
+            Examples:
+              renum             Renumber 10, 20, 30, ...
+              renum 100 5       Renumber 100, 105, 110, ...
+          """,
+        "info": """
+          info
+            Show program statistics: number of lines, total bytes used,
+            and variable count.
+          """,
+        "vars": """
+          vars
+            List all BASIC variables with their current values.
+            Shows variable name, type (numeric, string, array), and value.
+          """,
+        "var": """
+          var <name>
+            Show a single variable's value.
+            Examples:
+              var X             Show numeric variable X
+              var A$            Show string variable A$
+          """,
+        "stop": """
+          stop
+            Send BREAK to stop a running BASIC program.
+            The program can be continued with 'cont'.
+          """,
+        "cont": """
+          cont
+            Continue execution after a BREAK or STOP statement.
+          """,
+        "save": """
+          save D:FILE
+            Save the current BASIC program to a mounted ATR disk.
+            The file spec must include the drive prefix (D: or D1: etc).
+            Examples:
+              save D:TEST       Save as TEST on current drive
+              save D2:GAME      Save as GAME on drive 2
+          """,
+        "load": """
+          load D:FILE
+            Load a BASIC program from a mounted ATR disk.
+            Examples:
+              load D:TEST       Load TEST from current drive
+              load D2:GAME      Load GAME from drive 2
+          """,
+        "export": """
+          export <path>
+            Export the current BASIC listing to a host filesystem file.
+            Example:
+              export ~/programs/myprog.bas
+          """,
+        "import": """
+          import <path>
+            Import a BASIC listing from a host filesystem file.
+            Lines are tokenized and loaded into emulator memory.
+            Example:
+              import ~/programs/myprog.bas
+          """,
+        "dir": """
+          dir [drive]
+            List the directory of a mounted disk. Defaults to current drive.
+            Examples:
+              dir               List current drive
+              dir 2             List drive 2
+          """,
+    ]
+
+    /// Detailed help for DOS mode commands.
+    private static let dosHelp: [String: String] = [
+        "mount": """
+          mount <n> <path>
+            Mount an ATR disk image to drive n (1-8).
+            Examples:
+              mount 1 ~/disks/dos.atr
+              mount 2 ~/disks/game.atr
+          """,
+        "unmount": """
+          unmount <n>
+            Unmount the disk image from drive n.
+            Example:
+              unmount 2
+          """,
+        "drives": """
+          drives
+            List all drive slots (D1: through D8:) and their mounted images.
+          """,
+        "cd": """
+          cd <n>
+            Change the current working drive (1-8).
+            Subsequent commands like dir, type, etc. use this drive.
+            Example:
+              cd 2
+          """,
+        "dir": """
+          dir [pattern]
+            List the directory of the current drive.
+            Optional glob pattern filters results.
+            Examples:
+              dir               List all files
+              dir *.COM         List only .COM files
+          """,
+        "info": """
+          info <file>
+            Show detailed information about a file: size in bytes,
+            sector count, and whether it's locked.
+            Example:
+              info AUTORUN.SYS
+          """,
+        "type": """
+          type <file>
+            Display the contents of a text file.
+            Example:
+              type README.TXT
+          """,
+        "dump": """
+          dump <file>
+            Show a hex dump of a file's contents, with both hex bytes
+            and ASCII representation.
+            Example:
+              dump GAME.COM
+          """,
+        "copy": """
+          copy <source> <dest>
+            Copy a file. Use drive prefixes for cross-drive copies.
+            Examples:
+              copy D1:FILE.COM D2:FILE.COM
+              copy GAME.BAS BACKUP.BAS
+          """,
+        "rename": """
+          rename <old> <new>
+            Rename a file on the current drive.
+            Example:
+              rename OLDNAME.BAS NEWNAME.BAS
+          """,
+        "delete": """
+          delete <file>
+            Delete a file from the current drive.
+            Example:
+              delete TEMP.DAT
+          """,
+        "lock": """
+          lock <file>
+            Lock a file (make it read-only).
+            Example:
+              lock IMPORTANT.DAT
+          """,
+        "unlock": """
+          unlock <file>
+            Unlock a previously locked file.
+            Example:
+              unlock IMPORTANT.DAT
+          """,
+        "export": """
+          export <file> <path>
+            Export a file from the ATR disk to the host filesystem.
+            Example:
+              export GAME.BAS ~/exports/game.bas
+          """,
+        "import": """
+          import <path> <file>
+            Import a file from the host filesystem into the ATR disk.
+            Example:
+              import ~/programs/game.bas GAME.BAS
+          """,
+        "newdisk": """
+          newdisk <path> [type]
+            Create a new blank ATR disk image. Type can be:
+              sd   Single density (90KB, 720 sectors)
+              ed   Enhanced density (130KB, 1040 sectors)
+              dd   Double density (180KB, 720 sectors)
+            Default is single density.
+            Example:
+              newdisk ~/disks/blank.atr dd
+          """,
+        "format": """
+          format
+            Format the current drive, erasing all data.
+            This writes a fresh directory and VTOC to the disk.
+            WARNING: All existing data on the disk will be lost!
+          """,
+    ]
 
     // =========================================================================
     // MARK: - Socket Connection
