@@ -59,14 +59,18 @@ struct ContentView: View {
             }
         }
         // Alert shown when the heartbeat monitor detects server loss.
-        // The only option is to quit, since the emulator can't function
-        // without a server connection.
+        // Offers reconnection (re-establishes the AESP connection) or quit.
         .alert("Server Connection Lost", isPresented: $viewModel.showServerLostAlert) {
-            Button("Quit") {
+            Button("Reconnect") {
+                Task {
+                    await viewModel.reconnect()
+                }
+            }
+            Button("Quit", role: .destructive) {
                 NSApplication.shared.terminate(nil)
             }
         } message: {
-            Text("The connection to AtticServer was lost.")
+            Text("The connection to AtticServer was lost. You can try to reconnect or quit the application.")
         }
     }
 }

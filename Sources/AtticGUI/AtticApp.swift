@@ -192,6 +192,12 @@ class AtticViewModel: ObservableObject {
     /// Detects server loss and triggers the "Server Connection Lost" alert.
     private var heartbeatTask: Task<Void, Never>?
 
+    /// Observer token for system wake notifications.
+    /// On wake from sleep, sends an immediate PING to refresh the PONG
+    /// timestamp before the heartbeat monitor's next staleness check.
+    /// Stored so we can remove the observer during cleanup.
+    private var wakeObserver: NSObjectProtocol?
+
     /// PID of the AtticServer process if we launched it.
     /// Used for process lifecycle management (SIGTERM shutdown).
     private var serverPID: Int32?
@@ -439,6 +445,7 @@ class AtticViewModel: ObservableObject {
             startAudioReceiver()
             startStatusPolling()
             startHeartbeat()
+            observeWakeNotifications()
 
             isInitialized = true
             isRunning = true
@@ -504,8 +511,13 @@ class AtticViewModel: ObservableObject {
     /// Starts the heartbeat monitor that detects server loss.
     ///
     /// Every 5 seconds, sends a PING to the server and checks whether a PONG
-    /// has been received within the last 10 seconds. If the server stops
-    /// responding, sets `showServerLostAlert` to trigger a user-facing alert.
+    /// has been received within the last 10 seconds. If the PONG appears stale
+    /// (e.g. after system sleep causes a wall-clock jump), retries up to 3 times
+    /// with 2-second intervals before concluding the server is truly gone.
+    ///
+    /// This retry logic naturally handles system sleep: after wake, the first
+    /// retry PING produces a fresh PONG from the still-alive server, and the
+    /// heartbeat loop continues normally without triggering a false alert.
     private func startHeartbeat() {
         heartbeatTask = Task { [weak self] in
             // Wait 5 seconds before the first check to let the connection settle
@@ -521,7 +533,9 @@ class AtticViewModel: ObservableObject {
                 try? await Task.sleep(nanoseconds: 5_000_000_000)
                 guard !Task.isCancelled else { break }
 
-                // Check if we received a PONG recently (within last 10 seconds)
+                // Check if we received a PONG recently (within last 10 seconds).
+                // Uses wall-clock time (Date()), which can jump forward after
+                // system sleep. The retry loop below handles that case.
                 let lastPong = await client.lastPongReceived
                 let stale: Bool
                 if let lastPong = lastPong {
@@ -532,10 +546,60 @@ class AtticViewModel: ObservableObject {
                 }
 
                 if stale {
-                    print("[AtticGUI] Heartbeat: server not responding, showing alert")
-                    self.showServerLostAlert = true
-                    break
+                    // PONG is stale — could be sleep/wake or real server loss.
+                    // Retry up to 3 times with 2-second intervals before giving up.
+                    // After system wake, the server is still alive and the first
+                    // retry PING will get an immediate PONG response.
+                    var serverConfirmedDead = true
+                    for attempt in 1...3 {
+                        print("[AtticGUI] Heartbeat: stale PONG, retry \(attempt)/3")
+                        await client.ping()
+                        try? await Task.sleep(nanoseconds: 2_000_000_000)  // 2 seconds
+                        guard !Task.isCancelled else { return }
+
+                        // Check if a fresh PONG arrived (within last 5 seconds,
+                        // since we just sent the PING 2 seconds ago)
+                        let retryPong = await client.lastPongReceived
+                        if let retryPong = retryPong,
+                           Date().timeIntervalSince(retryPong) <= 5.0 {
+                            // Got a fresh PONG — server is alive after all
+                            serverConfirmedDead = false
+                            print("[AtticGUI] Heartbeat: server responded on retry \(attempt)")
+                            break
+                        }
+                    }
+
+                    if serverConfirmedDead {
+                        print("[AtticGUI] Heartbeat: server not responding after 3 retries, showing alert")
+                        self.showServerLostAlert = true
+                        break
+                    }
+                    // Server recovered (e.g. after sleep/wake) — continue normal heartbeat
                 }
+            }
+        }
+    }
+
+    /// Observes system wake notifications to proactively refresh heartbeat timing.
+    ///
+    /// When the system wakes from sleep, wall-clock time may have jumped forward
+    /// significantly, making the last PONG timestamp look stale. By sending an
+    /// immediate PING on wake, the server's PONG response updates the timestamp
+    /// before the heartbeat monitor's next staleness check.
+    ///
+    /// This complements the retry logic in `startHeartbeat()` — the retry handles
+    /// sleep even without this observer, but this provides faster recovery by
+    /// pre-loading a fresh PONG before the heartbeat checks.
+    private func observeWakeNotifications() {
+        wakeObserver = NotificationCenter.default.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            print("[AtticGUI] System wake detected, sending heartbeat PING")
+            guard let self = self else { return }
+            Task { @MainActor in
+                await self.client?.ping()
             }
         }
     }
@@ -872,7 +936,7 @@ class AtticViewModel: ObservableObject {
     // MARK: - Cleanup
     // =========================================================================
 
-    /// Cleans up resources.
+    /// Cleans up resources including receiver tasks, wake observer, and client connection.
     private func cleanup() async {
         // Cancel receiver tasks
         frameReceiverTask?.cancel()
@@ -884,12 +948,50 @@ class AtticViewModel: ObservableObject {
         statusPollingTask = nil
         heartbeatTask = nil
 
+        // Remove system wake notification observer
+        if let observer = wakeObserver {
+            NotificationCenter.default.removeObserver(observer)
+            wakeObserver = nil
+        }
+
         // Disconnect client
         await client?.disconnect()
         client = nil
 
         // Stop audio
         audioEngine.stop()
+    }
+
+    /// Attempts to reconnect to the AtticServer after a connection loss.
+    ///
+    /// Tears down the existing (dead) connection and its receiver tasks,
+    /// then tries to establish a fresh connection. If the server is still
+    /// running (or has been restarted), this will succeed and restore full
+    /// operation including video, audio, status polling, and heartbeat.
+    /// If the server is unreachable, the alert will reappear so the user
+    /// can retry (e.g. after manually restarting the server) or quit.
+    func reconnect() async {
+        print("[AtticGUI] Attempting reconnection...")
+        statusMessage = "Reconnecting..."
+        isInitialized = false
+
+        // Tear down existing (dead) connection state
+        await cleanup()
+
+        // Try to connect to the (hopefully still running) server.
+        // tryConnectToServer() creates a new AESPClient, connects all three
+        // channels, sets up streams, and starts all background tasks.
+        let connected = await tryConnectToServer()
+
+        if !connected {
+            // Server is truly gone — show the alert again so the user
+            // can retry (after restarting the server) or quit
+            print("[AtticGUI] Reconnection failed — server not reachable")
+            statusMessage = "Connection Failed"
+            showServerLostAlert = true
+        } else {
+            print("[AtticGUI] Reconnection successful")
+        }
     }
 
     /// Called to clean up when the view model is deallocated.
