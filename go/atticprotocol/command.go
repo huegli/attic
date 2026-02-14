@@ -324,8 +324,10 @@ func NewScreenshotCommand(path string) Command {
 }
 
 // NewScreenTextCommand creates a command to read the GRAPHICS 0 screen text.
-func NewScreenTextCommand() Command {
-	return Command{Type: CmdScreenText}
+// If atascii is true, the output uses ANSI reverse video and Unicode glyphs
+// for ATASCII graphics characters.
+func NewScreenTextCommand(atascii bool) Command {
+	return Command{Type: CmdScreenText, Atascii: atascii}
 }
 
 // NewInjectBasicCommand creates a command to inject BASIC data.
@@ -619,6 +621,9 @@ func (c Command) Format() string {
 		}
 		return fmt.Sprintf("screenshot %s", c.Path)
 	case CmdScreenText:
+		if c.Atascii {
+			return "screen atascii"
+		}
 		return "screen"
 	case CmdInjectBasic:
 		return fmt.Sprintf("inject basic %s", c.Base64Data)

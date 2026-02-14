@@ -113,7 +113,8 @@ func (p *CommandParser) Parse(line string) (Command, error) {
 		path := strings.TrimSpace(argsString)
 		return NewScreenshotCommand(path), nil
 	case "screen":
-		return NewScreenTextCommand(), nil
+		atascii := strings.ToUpper(argsString) == "ATASCII"
+		return NewScreenTextCommand(atascii), nil
 
 	// Injection
 	case "inject":

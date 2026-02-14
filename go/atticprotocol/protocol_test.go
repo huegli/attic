@@ -102,7 +102,8 @@ func TestCommandFormatting(t *testing.T) {
 		{"AssembleInput", NewAssembleInputCommand("LDA #$00"), "asm input LDA #$00"},
 		{"AssembleEnd", NewAssembleEndCommand(), "asm end"},
 		// Screen text command
-		{"ScreenText", NewScreenTextCommand(), "screen"},
+		{"ScreenText", NewScreenTextCommand(false), "screen"},
+		{"ScreenText ATASCII", NewScreenTextCommand(true), "screen atascii"},
 		// BASIC editing commands
 		{"BasicDelete", NewBasicDeleteCommand("10"), "basic DEL 10"},
 		{"BasicDelete range", NewBasicDeleteCommand("10-50"), "basic DEL 10-50"},
@@ -297,7 +298,8 @@ func TestCommandParsing(t *testing.T) {
 		{"Asm input", "asm input LDA #$00", NewAssembleInputCommand("LDA #$00")},
 		{"Asm end", "asm end", NewAssembleEndCommand()},
 		// Screen text command
-		{"Screen", "screen", NewScreenTextCommand()},
+		{"Screen", "screen", NewScreenTextCommand(false)},
+		{"Screen ATASCII", "screen atascii", NewScreenTextCommand(true)},
 		// Basic LIST with ATASCII
 		{"Basic LIST", "basic LIST", NewBasicListCommand(false)},
 		{"Basic LIST ATASCII", "basic LIST ATASCII", NewBasicListCommand(true)},
