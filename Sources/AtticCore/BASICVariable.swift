@@ -240,10 +240,11 @@ public struct BASICVariable: Sendable, Equatable {
 
 /// Represents the 8-byte value stored in the Variable Value Table.
 ///
-/// All variables use exactly 8 bytes in the VVT, regardless of type:
-/// - Numeric: 6-byte BCD float + 2 unused bytes
-/// - String: 2-byte length + 2-byte address + 4 unused bytes
-/// - Array: 2-byte offset from STARP + 6 bytes dimension info
+/// Each VVT entry is 8 bytes. Bytes 0-1 are a header (variable number
+/// and type flags); the remaining bytes 2-7 hold type-specific data:
+/// - Numeric: bytes 0-1 = header, bytes 2-7 = 6-byte BCD float
+/// - String: bytes 0-1 = header, 2-3 = buffer address, 4-5 = DIM capacity, 6-7 = current length
+/// - Array: bytes 0-1 = header, 2-3 = offset from STARP, 4-7 = dimension info
 public struct BASICVariableValue: Sendable {
     /// The raw 8 bytes of the value.
     public var bytes: [UInt8]
@@ -261,39 +262,50 @@ public struct BASICVariableValue: Sendable {
         BASICVariableValue(bytes: [0, 0, 0, 0, 0, 0, 0, 0])
     }
 
-    /// Creates a numeric variable value from BCD bytes.
+    /// Creates a numeric variable value from a variable number and BCD bytes.
     ///
-    /// - Parameter bcd: 6-byte BCD floating-point representation.
-    /// - Returns: An 8-byte variable value.
-    public static func numeric(bcd: [UInt8]) -> BASICVariableValue {
+    /// - Parameters:
+    ///   - varNum: Variable number (index in VNT).
+    ///   - bcd: 6-byte BCD floating-point representation.
+    /// - Returns: An 8-byte VVT entry.
+    public static func numeric(varNum: UInt8 = 0, bcd: [UInt8]) -> BASICVariableValue {
         precondition(bcd.count == 6, "BCD must be exactly 6 bytes")
-        return BASICVariableValue(bytes: bcd + [0, 0])
+        return BASICVariableValue(bytes: [varNum, 0] + bcd)
     }
 
     /// Creates a string variable value.
     ///
     /// - Parameters:
-    ///   - length: The string length (0-32767).
+    ///   - varNum: Variable number (index in VNT).
     ///   - address: The address where string data is stored.
-    /// - Returns: An 8-byte variable value.
-    public static func string(length: UInt16, address: UInt16) -> BASICVariableValue {
+    ///   - capacity: The DIM'd capacity of the string.
+    ///   - length: The current string length.
+    /// - Returns: An 8-byte VVT entry.
+    public static func string(varNum: UInt8 = 0, address: UInt16, capacity: UInt16 = 0, length: UInt16) -> BASICVariableValue {
         BASICVariableValue(bytes: [
-            UInt8(length & 0xFF),
-            UInt8(length >> 8),
+            varNum, 0x80,
             UInt8(address & 0xFF),
             UInt8(address >> 8),
-            0, 0, 0, 0
+            UInt8(capacity & 0xFF),
+            UInt8(capacity >> 8),
+            UInt8(length & 0xFF),
+            UInt8(length >> 8),
         ])
     }
 
-    /// Extracts the string length from a string variable value.
-    public var stringLength: UInt16 {
-        UInt16(bytes[0]) | (UInt16(bytes[1]) << 8)
-    }
-
-    /// Extracts the string address from a string variable value.
+    /// Extracts the string buffer address from a string VVT entry.
     public var stringAddress: UInt16 {
         UInt16(bytes[2]) | (UInt16(bytes[3]) << 8)
+    }
+
+    /// Extracts the DIM'd capacity from a string VVT entry.
+    public var stringCapacity: UInt16 {
+        UInt16(bytes[4]) | (UInt16(bytes[5]) << 8)
+    }
+
+    /// Extracts the current string length from a string VVT entry.
+    public var stringLength: UInt16 {
+        UInt16(bytes[6]) | (UInt16(bytes[7]) << 8)
     }
 }
 

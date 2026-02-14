@@ -730,11 +730,12 @@ public actor BASICLineHandler {
 
     /// Decodes a variable value from its 8-byte VVT entry.
     ///
-    /// The VVT stores different data depending on variable type:
-    /// - Numeric: 6-byte BCD float at bytes 0-5
-    /// - String: buffer address (0-1), DIM capacity (2-3), current length (4-5)
-    /// - Numeric array: offset (0-1), first dim+1 (2-3), second dim+1 (4-5)
-    /// - String array: offset (0-1), dim+1 (2-3), unused (4-7)
+    /// Each VVT entry is 8 bytes. Bytes 0-1 are a header (variable number
+    /// and type flags); the remaining bytes 2-7 hold type-specific data:
+    /// - Numeric: bytes 2-7 = 6-byte BCD floating-point value
+    /// - String: bytes 2-3 = buffer address, 4-5 = DIM capacity, 6-7 = current length
+    /// - Numeric array: bytes 2-3 = offset from STARP, 4-5 = dim1+1, 6-7 = dim2+1
+    /// - String array: bytes 2-3 = offset from STARP, 4-5 = dim+1, 6-7 = unused
     ///
     /// - Parameters:
     ///   - vvtEntry: The 8 raw bytes from the VVT for this variable.
@@ -745,16 +746,16 @@ public actor BASICLineHandler {
 
         switch type {
         case .numeric:
-            // First 6 bytes are the BCD floating-point representation
-            let bcdBytes = Array(vvtEntry[0..<6])
+            // Bytes 2-7 are the BCD floating-point representation (skip 2-byte header)
+            let bcdBytes = Array(vvtEntry[2..<8])
             let bcd = BCDFloat(bytes: bcdBytes)
             return bcd.decimalString
 
         case .string:
-            // Atari BASIC string VVT layout:
-            // bytes 0-1: buffer address, bytes 2-3: DIM capacity, bytes 4-5: current length
-            let address = UInt16(vvtEntry[0]) | (UInt16(vvtEntry[1]) << 8)
-            let currentLength = UInt16(vvtEntry[4]) | (UInt16(vvtEntry[5]) << 8)
+            // Atari BASIC string VVT layout (after 2-byte header):
+            // bytes 2-3: buffer address, bytes 4-5: DIM capacity, bytes 6-7: current length
+            let address = UInt16(vvtEntry[2]) | (UInt16(vvtEntry[3]) << 8)
+            let currentLength = UInt16(vvtEntry[6]) | (UInt16(vvtEntry[7]) << 8)
             if currentLength == 0 || address == 0 {
                 return "\"\""
             }
@@ -772,10 +773,10 @@ public actor BASICLineHandler {
             return "\"\(String(chars))\""
 
         case .numericArray:
-            // Atari BASIC stores dimensions as size+1
-            // bytes 0-1: offset from STARP, bytes 2-3: dim1+1, bytes 4-5: dim2+1
-            let dim1 = UInt16(vvtEntry[2]) | (UInt16(vvtEntry[3]) << 8)
-            let dim2 = UInt16(vvtEntry[4]) | (UInt16(vvtEntry[5]) << 8)
+            // Atari BASIC stores dimensions as size+1 (after 2-byte header):
+            // bytes 2-3: offset from STARP, bytes 4-5: dim1+1, bytes 6-7: dim2+1
+            let dim1 = UInt16(vvtEntry[4]) | (UInt16(vvtEntry[5]) << 8)
+            let dim2 = UInt16(vvtEntry[6]) | (UInt16(vvtEntry[7]) << 8)
             if dim2 <= 1 {
                 return "DIM(\(dim1 > 0 ? dim1 - 1 : 0))"
             } else {
@@ -783,8 +784,9 @@ public actor BASICLineHandler {
             }
 
         case .stringArray:
-            // String arrays use DIM for capacity
-            let dim1 = UInt16(vvtEntry[2]) | (UInt16(vvtEntry[3]) << 8)
+            // String arrays use DIM for capacity (after 2-byte header):
+            // bytes 2-3: offset from STARP, bytes 4-5: dim+1
+            let dim1 = UInt16(vvtEntry[4]) | (UInt16(vvtEntry[5]) << 8)
             return "DIM$(\(dim1 > 0 ? dim1 - 1 : 0))"
         }
     }
