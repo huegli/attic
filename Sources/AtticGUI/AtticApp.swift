@@ -973,20 +973,45 @@ struct AtticCommands: Commands {
 
         // About dialog: replaces the standard "About" menu item in the app menu
         // with a customized version showing the Attic application info.
+        // When running as an .app bundle, version info is read from Info.plist.
+        // When running via `swift run` (dev mode), falls back to hardcoded defaults.
         CommandGroup(replacing: .appInfo) {
             Button("About Attic") {
-                NSApplication.shared.orderFrontStandardAboutPanel(options: [
+                // Read version from bundle Info.plist, with fallbacks for dev mode
+                let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.5"
+                let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
+
+                // Build the about panel options
+                var options: [NSApplication.AboutPanelOptionKey: Any] = [
                     .applicationName: "Attic",
-                    .applicationVersion: "1.0",
-                    .version: "1",
-                    .credits: NSAttributedString(
+                    .applicationVersion: version,
+                    .version: build,
+                ]
+
+                // Load Credits.rtf from bundle resources if available.
+                // The standard about panel renders RTF credits below the version string.
+                if let creditsURL = Bundle.main.url(forResource: "Credits", withExtension: "rtf"),
+                   let credits = try? NSAttributedString(url: creditsURL, options: [:], documentAttributes: nil) {
+                    options[.credits] = credits
+                } else {
+                    // Fallback for dev mode (no bundle resources)
+                    options[.credits] = NSAttributedString(
                         string: "Atari 800 XL Emulator\nPowered by libatari800",
                         attributes: [
                             .font: NSFont.systemFont(ofSize: 11),
                             .foregroundColor: NSColor.secondaryLabelColor
                         ]
                     )
-                ])
+                }
+
+                // Load app icon from bundle resources if available.
+                // This overrides the default generic app icon in the about panel.
+                if let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+                   let icon = NSImage(contentsOf: iconURL) {
+                    options[.applicationIcon] = icon
+                }
+
+                NSApplication.shared.orderFrontStandardAboutPanel(options: options)
             }
         }
 

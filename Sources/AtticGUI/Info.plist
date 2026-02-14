@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Info.plist - Attic application bundle metadata
+
+  This file defines the macOS application bundle properties for Attic.
+  It is copied into Attic.app/Contents/ by the make-app.sh build script.
+
+  Key settings:
+  - Bundle identity and version information
+  - App icon reference (AppIcon.icns in Resources/)
+  - Document type associations (.atr, .xex, .bas, .cas, .attic)
+  - High-resolution display support
+-->
+<plist version="1.0">
+<dict>
+	<!-- Bundle identity -->
+	<key>CFBundleIdentifier</key>
+	<string>com.huegli.attic</string>
+	<key>CFBundleName</key>
+	<string>Attic</string>
+	<key>CFBundleDisplayName</key>
+	<string>Attic</string>
+	<key>CFBundleExecutable</key>
+	<string>AtticGUI</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+
+	<!-- Version info -->
+	<key>CFBundleShortVersionString</key>
+	<string>0.5</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+
+	<!-- App icon (references AppIcon.icns in Resources/) -->
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+
+	<!-- macOS requirements -->
+	<key>LSMinimumSystemVersion</key>
+	<string>15.0</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+
+	<!-- Suppress macOS App Translocation (Gatekeeper quarantine relocation) -->
+	<key>LSFileQuarantineEnabled</key>
+	<false/>
+
+	<!--
+	  Document types: file associations for Finder "Open With" and drag-and-drop.
+	  Each entry maps a file extension to a role so macOS knows Attic can open it.
+
+	  Roles:
+	    Editor - can open and modify
+	    Viewer - can open read-only
+	-->
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<!-- ATR disk images -->
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Atari Disk Image</string>
+			<key>CFBundleTypeExtensions</key>
+			<array>
+				<string>atr</string>
+			</array>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Default</string>
+		</dict>
+
+		<!-- XEX executables -->
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Atari Executable</string>
+			<key>CFBundleTypeExtensions</key>
+			<array>
+				<string>xex</string>
+			</array>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Default</string>
+		</dict>
+
+		<!-- BASIC programs -->
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Atari BASIC Program</string>
+			<key>CFBundleTypeExtensions</key>
+			<array>
+				<string>bas</string>
+			</array>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+		</dict>
+
+		<!-- Cassette images -->
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Atari Cassette Image</string>
+			<key>CFBundleTypeExtensions</key>
+			<array>
+				<string>cas</string>
+			</array>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Default</string>
+		</dict>
+
+		<!-- ROM cartridge files -->
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Atari ROM Cartridge</string>
+			<key>CFBundleTypeExtensions</key>
+			<array>
+				<string>rom</string>
+			</array>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+		</dict>
+
+		<!-- Attic saved states -->
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Attic Saved State</string>
+			<key>CFBundleTypeExtensions</key>
+			<array>
+				<string>attic</string>
+			</array>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+		</dict>
+	</array>
+</dict>
+</plist>

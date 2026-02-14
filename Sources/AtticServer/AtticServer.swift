@@ -149,11 +149,28 @@ struct ServerConfiguration {
 // MARK: - ROM Path Discovery
 
 /// Finds the ROM directory by searching standard locations.
+///
+/// When running inside an .app bundle, the ROMs are in Contents/Resources/ROM/.
+/// The executable lives at Contents/MacOS/AtticServer, so we navigate up to
+/// Contents/ and then into Resources/ROM/. This is checked first so bundled
+/// ROMs take priority.
 func findROMPath() -> URL? {
     let fileManager = FileManager.default
 
+    // Path to the running executable (e.g. .../Attic.app/Contents/MacOS/AtticServer)
+    let executableURL = URL(fileURLWithPath: CommandLine.arguments[0]).standardized
+
     // Search paths in order of preference
-    let searchPaths: [URL] = [
+    var searchPaths: [URL] = [
+        // App bundle: Contents/MacOS/../Resources/ROM
+        executableURL
+            .deletingLastPathComponent()           // Contents/MacOS/
+            .deletingLastPathComponent()           // Contents/
+            .appendingPathComponent("Resources/ROM"),
+        // Adjacent to executable (for non-bundle installs)
+        executableURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("ROM"),
         // Current working directory
         URL(fileURLWithPath: fileManager.currentDirectoryPath)
             .appendingPathComponent("Resources/ROM"),
@@ -170,6 +187,11 @@ func findROMPath() -> URL? {
         fileManager.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Attic/ROM"),
     ]
+
+    // Also check Bundle.main.resourceURL (works when loaded as a bundle)
+    if let bundleROM = Bundle.main.resourceURL?.appendingPathComponent("ROM") {
+        searchPaths.insert(bundleROM, at: 0)
+    }
 
     for path in searchPaths {
         let osRom = path.appendingPathComponent("ATARIXL.ROM")

@@ -1,5 +1,6 @@
 *.state
 .build
+build/
 UserInterfaceState.xcuserstate
 .swiftpm/
 .vscode/

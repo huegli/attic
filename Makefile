@@ -1,4 +1,4 @@
-# Makefile for Attic test suite
+# Makefile for Attic – build, test, and package targets
 #
 # The full test suite (~1120 tests) takes ~61s. Most of that time is spent in
 # integration tests that launch subprocesses or open network connections.
@@ -6,14 +6,29 @@
 # development and only run the full suite when needed.
 #
 # Usage:
+#   make app          # Build Attic.app bundle (release)
+#   make clean-app    # Remove build/ directory
 #   make test-smoke   # Fast feedback (~3s) – skips slow integration suites
 #   make test-basic   # Just BASIC tokenizer/detokenizer tests
 #   make test         # Full suite (~61s)
 #
 # See docs/TESTING.md for detailed test categorization.
 
-.PHONY: test test-smoke test-unit \
+.PHONY: app clean-app \
+        test test-smoke test-unit \
         test-protocol test-cli test-basic test-asm test-atr test-core test-state test-server test-perf test-error test-multiclient
+
+# ---------------------------------------------------------------------------
+# App bundle
+# ---------------------------------------------------------------------------
+
+## Build Attic.app in build/ (release configuration)
+app:
+	./scripts/make-app.sh
+
+## Remove the build/ directory (app bundle and generated icon)
+clean-app:
+	rm -rf build
 
 # ---------------------------------------------------------------------------
 # Full suite
