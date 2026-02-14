@@ -977,8 +977,9 @@ struct AtticCommands: Commands {
         // When running via `swift run` (dev mode), falls back to hardcoded defaults.
         CommandGroup(replacing: .appInfo) {
             Button("About Attic") {
-                // Read version from bundle Info.plist, with fallbacks for dev mode
-                let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.5"
+                // Use AtticCore.version as the authoritative version (single source of truth).
+                // Bundle Info.plist is kept in sync by make-app.sh at build time.
+                let version = AtticCore.version
                 let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
 
                 // Build the about panel options

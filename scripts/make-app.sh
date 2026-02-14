@@ -7,6 +7,8 @@
 # The bundle includes:
 #   - AtticGUI executable (the main app)
 #   - AtticServer executable (launched as subprocess by AtticGUI)
+#   - attic CLI executable (command-line REPL tool)
+#   - AtticMCP-Python source (MCP server for Claude Code integration)
 #   - App icon (generated from Attic-Logo.png)
 #   - Info.plist (bundle metadata and file associations)
 #   - Credits.rtf (shown in About dialog)
@@ -73,6 +75,11 @@ if [ ! -f "$BUILD_DIR/AtticServer" ]; then
     echo "Run 'swift build -c release' first."
     exit 1
 fi
+if [ ! -f "$BUILD_DIR/attic" ]; then
+    echo "Error: attic CLI not found at $BUILD_DIR/attic"
+    echo "Run 'swift build -c release' first."
+    exit 1
+fi
 
 # -------------------------------------------------------------------------
 # Step 2: Create bundle directory structure
@@ -86,10 +93,11 @@ rm -rf "$APP_DIR"
 # Create the standard macOS .app directory layout:
 #   Attic.app/
 #     Contents/
-#       MacOS/        <- executables
-#       Resources/    <- icons, credits, ROMs
-#       Info.plist    <- bundle metadata
-#       PkgInfo       <- legacy package type marker
+#       MacOS/                    <- executables (AtticGUI, AtticServer, attic)
+#       Resources/                <- icons, credits, ROMs, MCP server
+#         AtticMCP-Python/        <- Python MCP server source
+#       Info.plist                <- bundle metadata
+#       PkgInfo                   <- legacy package type marker
 mkdir -p "$MACOS_DIR"
 mkdir -p "$RESOURCES_DIR"
 
@@ -100,6 +108,7 @@ mkdir -p "$RESOURCES_DIR"
 echo "Copying executables..."
 cp "$BUILD_DIR/AtticGUI" "$MACOS_DIR/AtticGUI"
 cp "$BUILD_DIR/AtticServer" "$MACOS_DIR/AtticServer"
+cp "$BUILD_DIR/attic" "$MACOS_DIR/attic"
 
 # -------------------------------------------------------------------------
 # Step 4: Generate and copy app icon
@@ -116,12 +125,44 @@ echo "Copying bundle resources..."
 cp "$PROJECT_ROOT/Sources/AtticGUI/Info.plist" "$CONTENTS/Info.plist"
 cp "$PROJECT_ROOT/Sources/AtticGUI/Credits.rtf" "$RESOURCES_DIR/Credits.rtf"
 
+# Inject version from AtticCore.swift (single source of truth) into the bundle plist.
+# This ensures the .app bundle version always matches AtticCore.version even if
+# someone forgets to update Info.plist manually.
+ATTIC_VERSION=$(grep 'public static let version' "$PROJECT_ROOT/Sources/AtticCore/AtticCore.swift" \
+    | sed 's/.*"\(.*\)".*/\1/')
+if [ -n "$ATTIC_VERSION" ]; then
+    echo "Setting bundle version to $ATTIC_VERSION (from AtticCore.swift)"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $ATTIC_VERSION" "$CONTENTS/Info.plist"
+else
+    echo "Warning: Could not extract version from AtticCore.swift, using Info.plist as-is"
+fi
+
 # PkgInfo is a legacy file that helps the Finder identify the bundle type.
 # "APPL????" means: application, unknown creator code.
 printf 'APPL????' > "$CONTENTS/PkgInfo"
 
 # -------------------------------------------------------------------------
-# Step 6: Copy ROM files if present
+# Step 6: Copy AtticMCP-Python source (MCP server for Claude Code)
+# -------------------------------------------------------------------------
+# Only the source files are copied — the .venv/ and uv.lock are excluded.
+# Users run the MCP server with: uv run --directory <path> attic-mcp
+# which resolves dependencies from pyproject.toml at runtime.
+
+MCP_SRC="$PROJECT_ROOT/Sources/AtticMCP-Python"
+MCP_DST="$RESOURCES_DIR/AtticMCP-Python"
+if [ -d "$MCP_SRC/attic_mcp" ]; then
+    echo "Copying AtticMCP-Python source..."
+    mkdir -p "$MCP_DST/attic_mcp"
+    cp "$MCP_SRC/pyproject.toml" "$MCP_DST/"
+    cp "$MCP_SRC/attic_mcp/__init__.py" "$MCP_DST/attic_mcp/"
+    cp "$MCP_SRC/attic_mcp/server.py" "$MCP_DST/attic_mcp/"
+    cp "$MCP_SRC/attic_mcp/cli_client.py" "$MCP_DST/attic_mcp/"
+else
+    echo "Warning: AtticMCP-Python source not found at $MCP_SRC, skipping"
+fi
+
+# -------------------------------------------------------------------------
+# Step 7: Copy ROM files if present
 # -------------------------------------------------------------------------
 
 ROM_DIR="$PROJECT_ROOT/Resources/ROM"
@@ -133,7 +174,7 @@ if [ -d "$ROM_DIR" ] && [ "$(ls -A "$ROM_DIR" 2>/dev/null)" ]; then
 fi
 
 # -------------------------------------------------------------------------
-# Step 7: Summary
+# Step 8: Summary
 # -------------------------------------------------------------------------
 
 echo ""

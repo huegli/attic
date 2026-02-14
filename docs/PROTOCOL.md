@@ -1,5 +1,13 @@
 # Attic Communication Protocols
 
+> **Protocol Status: FROZEN**
+>
+> Both protocols defined in this document (AESP and CLI Protocol) are **frozen** as of
+> version 0.1.0. No changes will be made to message formats, opcodes, port assignments,
+> or wire encoding unless accompanied by a **major version** bump (per Semantic Versioning).
+> Bug fixes to protocol *implementations* do not require a version change as long as the
+> on-the-wire format remains identical.
+
 This document describes the two communication protocols used by the Attic Emulator:
 
 1. **AESP (Attic Emulator Server Protocol)** - Binary protocol for GUI/web clients

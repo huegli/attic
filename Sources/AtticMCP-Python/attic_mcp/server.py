@@ -128,16 +128,24 @@ def _try_launch_server() -> None:
 
     Searches for the ``AtticServer`` executable in:
       1. The PATH
-      2. Common Swift build output directories (``.build/release``, ``.build/debug``)
-      3. Standard install locations (``/usr/local/bin``, ``/opt/homebrew/bin``, ``~/.local/bin``)
+      2. The macOS .app bundle (``Contents/MacOS/`` relative to this file)
+      3. Common Swift build output directories (``.build/release``, ``.build/debug``)
+      4. Standard install locations (``/usr/local/bin``, ``/opt/homebrew/bin``, ``~/.local/bin``)
 
     After launching, polls up to 4 seconds for the socket file to appear.
     """
     exe = shutil.which("AtticServer")
 
     if exe is None:
-        # Check common Swift build directories relative to the working directory.
+        # Check common locations. The first entry is bundle-relative so the MCP
+        # server can find AtticServer when running from within Attic.app:
+        #   Contents/Resources/AtticMCP-Python/attic_mcp/server.py
+        #     -> ../../MacOS/AtticServer  (i.e. Contents/MacOS/AtticServer)
+        _bundle_path = os.path.normpath(
+            os.path.join(os.path.dirname(__file__), "..", "..", "MacOS", "AtticServer")
+        )
         candidates = [
+            _bundle_path,
             ".build/release/AtticServer",
             ".build/debug/AtticServer",
             "/usr/local/bin/AtticServer",

@@ -1,5 +1,39 @@
 # Complete Feature Specification
 
+## Versioning
+
+This project follows [Semantic Versioning](https://semver.org/) (SemVer). The current
+version is defined in `Sources/AtticCore/AtticCore.swift` and applies to all executables
+and libraries in the project.
+
+### Version Format
+
+**MAJOR.MINOR.PATCH** (e.g., `0.1.0`)
+
+- **PATCH** — Bug fixes and minor improvements that do not change behavior or add features.
+- **MINOR** — New features or behavioral changes that are backward-compatible.
+- **MAJOR** — Breaking changes to protocols, file formats, or public APIs.
+
+### Release Requirements
+
+| Level | Automated Tests | Manual Testing |
+|-------|----------------|----------------|
+| **Patch** | All tests must pass (`make test`) | None required |
+| **Minor** | All tests must pass (`make test`) | User must verify all features added or changed in this minor version |
+| **Major** | All tests must pass (`make test`) | User must verify all core features of the application |
+
+### Protocol Stability
+
+Both communication protocols (AESP and CLI Protocol) are **frozen** as of version 0.1.0.
+Protocol changes require a **major** version bump. See `docs/PROTOCOL.md` for details.
+
+### Version Update Policy
+
+Version numbers are updated **only at the explicit request of the user**. Developers and
+AI agents must never bump the version on their own initiative.
+
+---
+
 ## 1. Project Structure
 
 ### SPM Executables

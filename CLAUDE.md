@@ -46,25 +46,56 @@ attic/
 7. **Emacs Integration**: REPL designed for comint compatibility with clear prompts
 8. **MCP Integration**: AtticMCP server exposes emulator tools to AI assistants like Claude Code
 
+## Versioning
+
+This project uses [Semantic Versioning](https://semver.org/). See `CHANGELOG.md` for release history.
+
+### Single Source of Truth
+
+The version string in `Sources/AtticCore/AtticCore.swift` (`AtticCore.version`) is the
+**single source of truth** for all version numbers. When the version is bumped, these
+locations are updated automatically or must be kept in sync:
+
+| Location | How it stays in sync |
+|----------|---------------------|
+| `Sources/AtticCore/AtticCore.swift` | **Primary** — edit here |
+| `Sources/AtticGUI/Info.plist` | Must be updated to match |
+| `scripts/make-app.sh` output | Auto-injected from AtticCore.swift at build time |
+| About dialog (`AtticApp.swift`) | Reads `AtticCore.version` directly |
+| Git tag | Create `vX.Y.Z` tag at release commit |
+| `CHANGELOG.md` | Add new `## [X.Y.Z]` section |
+
+### Version Update Rules
+
+- **Version bumps are user-initiated only.** Never bump the version without an explicit request.
+- **Patch** (0.1.x): All automated tests must pass (`make test`).
+- **Minor** (0.x.0): Tests must pass, plus the user must complete manual testing of all features added or changed in the minor release.
+- **Major** (x.0.0): Tests must pass, plus the user must complete manual testing of all core features.
+
+### Protocol Freeze
+
+Both AESP and CLI Protocol specifications are **frozen**. No protocol changes unless accompanied by a major version bump. See `docs/PROTOCOL.md`.
+
 ## Implementation Status
 
 See `docs/IMPLEMENTATION_PLAN.md` for detailed phase-by-phase progress. Summary:
 
-**Complete:**
+**Complete (v0.1.0 — MVP):**
 - Phase 1-5: libatari800 wrapper, Metal renderer, Audio engine, Keyboard input, BASIC interaction
 - Phase 6: AESP Protocol Library (AtticProtocol module)
 - Phase 7: Emulator Server (AtticServer executable)
 - Phase 8: GUI as Protocol Client (AtticGUI connects to AtticServer via AESP)
+- Phase 9-17: CLI socket protocol, joystick input, 6502 disassembler, monitor mode, ATR filesystem, DOS mode, BASIC tokenizer, state save/load, polish
 
 **Pending:**
-- Phase 9-17: CLI socket protocol, joystick input, 6502 disassembler, monitor mode, ATR filesystem, DOS mode, BASIC tokenizer, state save/load, polish
 - Phase 18-19: WebSocket bridge and web browser client
 
 ## Key Files to Reference
 
+- `CHANGELOG.md` - Release history (Semantic Versioning)
 - `docs/ARCHITECTURE.md` - System architecture details
-- `docs/SPECIFICATION.md` - Complete feature specification
-- `docs/PROTOCOL.md` - CLI/GUI socket protocol
+- `docs/SPECIFICATION.md` - Complete feature specification (includes versioning policy)
+- `docs/PROTOCOL.md` - CLI/GUI socket protocol (FROZEN)
 - `docs/MCP_USAGE.md` - MCP server tools for Claude Code integration
 - `docs/BASIC_TOKENIZER.md` - BASIC tokenization implementation
 - `docs/ATR_FILESYSTEM.md` - ATR disk image format

@@ -1,0 +1,32 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.1.0] - 2026-02-14
+
+Initial release. All 17 implementation phases complete (MVP).
+
+### Added
+- Emulator core via libatari800 wrapper (Phase 1-2)
+- Metal renderer for 384x240 BGRA display at 60fps (Phase 3)
+- Core Audio engine with 44.1kHz PCM output (Phase 4)
+- Keyboard input handling (Phase 5)
+- AESP binary protocol library with Control, Video, and Audio channels (Phase 6)
+- Standalone emulator server (AtticServer) on ports 47800-47802 (Phase 7)
+- SwiftUI GUI as AESP protocol client (Phase 8)
+- CLI with Unix socket text protocol and Emacs comint compatibility (Phase 9)
+- Joystick input via keyboard emulation (Phase 10)
+- 6502 disassembler with address labels and all addressing modes (Phase 11)
+- Monitor/debugger with BRK-based breakpoints, step, step-over, run-until (Phase 12)
+- ATR disk image support (SD, ED, DD) with DOS 2.x/2.5 filesystem (Phase 13)
+- DOS mode with full file management commands (Phase 14)
+- BASIC tokenizer/detokenizer with memory injection (Phase 15)
+- State save/load persistence (Phase 16)
+- MCP server (Python/FastMCP) for Claude Code integration
+- macOS .app bundle packaging (`make app`)
+
+### Fixed
+- Protocol freeze: both AESP and CLI protocols are now frozen at this version

@@ -53,6 +53,16 @@ This separation enables:
 | 17 | Polish | ✅ Complete |
 | 18-19 | Web Browser Support | Pending |
 
+## Versioning and Protocol Stability
+
+The project uses [Semantic Versioning](https://semver.org/). The authoritative version
+string lives in `Sources/AtticCore/AtticCore.swift` (currently `0.1.0`).
+
+Both communication protocols — AESP (binary, ports 47800-47802) and the CLI text protocol
+(Unix socket) — are **frozen**. Any change to on-the-wire message formats requires a major
+version bump. See `docs/PROTOCOL.md` for the full freeze notice and `docs/SPECIFICATION.md`
+for release requirements.
+
 ## Component Diagram
 
 All AtticCore files are at the module top level (no subdirectories). Files are grouped logically below:
