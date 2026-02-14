@@ -352,37 +352,41 @@ struct AtticCLI {
                 }
             }
 
-            // Translate REPL command to CLI protocol command
-            let cliCommand = translateToProtocol(line: trimmed, mode: currentMode)
+            // Translate REPL command to one or more CLI protocol commands.
+            // Some monitor commands (e.g. `g $addr`) expand to multiple
+            // sequential protocol commands.
+            let cliCommands = translateToProtocol(line: trimmed, mode: currentMode)
 
-            // Send to server
+            // Send each command to the server in order
             do {
-                let response = try await client.sendRaw(cliCommand)
+                for cliCommand in cliCommands {
+                    let response = try await client.sendRaw(cliCommand)
 
-                // Display response
-                switch response {
-                case .ok(let data):
-                    // Check if the server started an interactive assembly session.
-                    // Response format: "ASM $XXXX"
-                    if data.hasPrefix("ASM $") {
-                        if let addr = parseHexAddress(String(data.dropFirst(4))) {
-                            inAssemblyMode = true
-                            assemblyAddress = addr
-                            // Show first assembly prompt instead of normal prompt
-                            print("$\(String(format: "%04X", assemblyAddress)): ", terminator: "")
-                            fflush(stdout)
-                            continue
+                    // Display response
+                    switch response {
+                    case .ok(let data):
+                        // Check if the server started an interactive assembly session.
+                        // Response format: "ASM $XXXX"
+                        if data.hasPrefix("ASM $") {
+                            if let addr = parseHexAddress(String(data.dropFirst(4))) {
+                                inAssemblyMode = true
+                                assemblyAddress = addr
+                                // Show first assembly prompt instead of normal prompt
+                                print("$\(String(format: "%04X", assemblyAddress)): ", terminator: "")
+                                fflush(stdout)
+                                continue
+                            }
                         }
-                    }
 
-                    // Handle multi-line responses
-                    let lines = data.split(separator: "\u{1E}", omittingEmptySubsequences: false)
-                    for line in lines {
-                        print(line)
-                    }
+                        // Handle multi-line responses
+                        let lines = data.split(separator: "\u{1E}", omittingEmptySubsequences: false)
+                        for line in lines {
+                            print(line)
+                        }
 
-                case .error(let message):
-                    printError(message)
+                    case .error(let message):
+                        printError(message)
+                    }
                 }
             } catch {
                 printError("Communication error: \(error.localizedDescription)")
@@ -399,13 +403,16 @@ struct AtticCLI {
         await client.disconnect()
     }
 
-    /// Translates a REPL command to a CLI protocol command string.
+    /// Translates a REPL command to one or more CLI protocol command strings.
+    ///
+    /// Most commands produce a single protocol string, but some (like `g $addr`
+    /// in monitor mode) expand to a sequence — e.g. set PC then resume.
     ///
     /// - Parameters:
     ///   - line: The user's input line.
     ///   - mode: The current REPL mode.
-    /// - Returns: The CLI protocol command string.
-    static func translateToProtocol(line: String, mode: SocketREPLMode) -> String {
+    /// - Returns: An array of CLI protocol command strings to send in order.
+    static func translateToProtocol(line: String, mode: SocketREPLMode) -> [String] {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
 
         // Handle dot commands
@@ -413,33 +420,33 @@ struct AtticCLI {
             let lowerTrimmed = trimmed.lowercased()
             switch lowerTrimmed {
             case ".status":
-                return "status"
+                return ["status"]
             case ".screen":
-                return "screen"
+                return ["screen"]
             case ".reset":
-                return "reset cold"
+                return ["reset cold"]
             case ".warmstart":
-                return "reset warm"
+                return ["reset warm"]
             case ".screenshot":
-                return "screenshot"
+                return ["screenshot"]
             default:
                 // Handle .screenshot with path
                 if lowerTrimmed.hasPrefix(".screenshot ") {
                     let path = String(trimmed.dropFirst(12))
-                    return "screenshot \(path)"
+                    return ["screenshot \(path)"]
                 }
                 // Handle .state save/load
                 if lowerTrimmed.hasPrefix(".state save ") {
                     let path = String(trimmed.dropFirst(12))
-                    return "state save \(path)"
+                    return ["state save \(path)"]
                 } else if lowerTrimmed.hasPrefix(".state load ") {
                     let path = String(trimmed.dropFirst(12))
-                    return "state load \(path)"
+                    return ["state load \(path)"]
                 }
                 // Handle .boot <path>
                 if lowerTrimmed.hasPrefix(".boot ") {
                     let path = String(trimmed.dropFirst(6))
-                    return "boot \(path)"
+                    return ["boot \(path)"]
                 }
             }
         }
@@ -449,42 +456,49 @@ struct AtticCLI {
         case .monitor:
             return translateMonitorCommand(trimmed)
         case .basic:
-            return translateBASICCommand(trimmed)
+            return [translateBASICCommand(trimmed)]
         case .dos:
-            return translateDOSCommand(trimmed)
+            return [translateDOSCommand(trimmed)]
         }
     }
 
     /// Translates a monitor mode command.
-    static func translateMonitorCommand(_ cmd: String) -> String {
+    ///
+    /// Most commands produce a single protocol string, but `g $addr` expands
+    /// to two commands: set the program counter, then resume execution.
+    static func translateMonitorCommand(_ cmd: String) -> [String] {
         let parts = cmd.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
-        guard let command = parts.first else { return cmd }
+        guard let command = parts.first else { return [cmd] }
 
         let cmdLower = String(command).lowercased()
         let args = parts.count > 1 ? String(parts[1]) : ""
 
         switch cmdLower {
         case "g":
-            return args.isEmpty ? "resume" : "resume"  // TODO: Set PC first
+            if args.isEmpty {
+                return ["resume"]
+            }
+            // g $addr -> set PC first, then resume
+            return ["registers pc=\(args)", "resume"]
         case "s", "step":
-            return args.isEmpty ? "step" : "step \(args)"
+            return args.isEmpty ? ["step"] : ["step \(args)"]
         case "p", "pause":
-            return "pause"
+            return ["pause"]
         case "r", "registers":
-            return args.isEmpty ? "registers" : "registers \(args)"
+            return args.isEmpty ? ["registers"] : ["registers \(args)"]
         case "m", "memory":
             // m $0600 16 -> read $0600 16
-            return "read \(args)"
+            return ["read \(args)"]
         case ">":
             // > $0600 A9,00 -> write $0600 A9,00
-            return "write \(args)"
+            return ["write \(args)"]
         case "d", "disassemble":
             // TODO: Not yet implemented
-            return "disassemble \(args)"
+            return ["disassemble \(args)"]
         case "b", "breakpoint":
-            return "breakpoint \(args)"
+            return ["breakpoint \(args)"]
         default:
-            return cmd
+            return [cmd]
         }
     }
 
