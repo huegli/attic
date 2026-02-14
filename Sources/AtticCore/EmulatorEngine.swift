@@ -335,7 +335,15 @@ public actor EmulatorEngine {
         let success = wrapper.reboot(with: filePath)
 
         if success {
-            // Let the emulator continue running so the boot process completes
+            // Execute frames to let the boot process complete before returning.
+            // The Atari needs ~120 frames (~2 seconds) to finish booting and
+            // initialize BASIC memory pointers (STMTAB, STARP, etc.).
+            // Without this, callers reading memory immediately after boot
+            // would see stale/uninitialized values (same pattern as reset()).
+            var input = InputState()
+            for _ in 0..<150 {
+                _ = wrapper.executeFrame(input: &input)
+            }
             state = .running
             return (success: true, errorMessage: nil)
         } else {
