@@ -46,7 +46,7 @@ import Foundation
 public enum AtticCore {
     /// The current version of the AtticCore library.
     /// Follows semantic versioning: MAJOR.MINOR.PATCH
-    public static let version = "0.1.0"
+    public static let version = "0.1.1"
 
     /// The name of the application.
     public static let appName = "Attic"
