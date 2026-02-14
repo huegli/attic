@@ -124,6 +124,10 @@ public enum CLICommand: Sendable {
     // Assembly
     case assemble(address: UInt16)
     case assembleLine(address: UInt16, instruction: String)
+    /// Feed an instruction to the active interactive assembly session.
+    case assembleInput(instruction: String)
+    /// End the active interactive assembly session.
+    case assembleEnd
 
     // Step over
     case stepOver
@@ -139,12 +143,21 @@ public enum CLICommand: Sendable {
     case unmount(drive: Int)
     case drives
 
+    // Boot with file
+    /// Boot the emulator with a file (ATR, XEX, BAS, LST, CAS, ROM, etc.).
+    /// Calls libatari800_reboot_with_file which loads the file and cold-starts.
+    case boot(path: String)
+
     // State management
     case stateSave(path: String)
     case stateLoad(path: String)
 
     // Display
     case screenshot(path: String?)
+    /// Read the text displayed on the GRAPHICS 0 screen as a string.
+    /// When `atascii` is true, inverse video characters are wrapped with
+    /// ANSI escape codes for reverse video rendering.
+    case screenText(atascii: Bool)
 
     // BASIC injection
     case injectBasic(base64Data: String)
@@ -160,7 +173,68 @@ public enum CLICommand: Sendable {
     case basicLine(line: String)
     case basicNew
     case basicRun
-    case basicList
+    /// List the BASIC program. When `atascii` is true, the listing uses
+    /// ANSI reverse video and Unicode glyphs for ATASCII graphics characters.
+    case basicList(atascii: Bool)
+
+    // BASIC editing commands
+    /// Delete a BASIC line or range of lines (e.g., "10" or "10-50").
+    case basicDelete(lineOrRange: String)
+    /// Stop a running BASIC program (equivalent to pressing BREAK).
+    case basicStop
+    /// Continue execution of a stopped BASIC program.
+    case basicCont
+    /// List all BASIC variables and their current values.
+    case basicVars
+    /// Show value and type of a specific BASIC variable.
+    case basicVar(name: String)
+    /// Show information about the current BASIC program (size, line count, etc.).
+    case basicInfo
+    /// Export the current BASIC program to a file. Path is tilde-expanded.
+    case basicExport(path: String)
+    /// Import a BASIC program from a file. Path is tilde-expanded.
+    case basicImport(path: String)
+    /// List files on a disk drive (1-8). Nil means the default drive.
+    case basicDir(drive: Int?)
+    /// Renumber BASIC program lines, optionally specifying start and step.
+    case basicRenumber(start: Int?, step: Int?)
+    /// Save tokenized BASIC program to an ATR disk file.
+    case basicSave(drive: Int?, filename: String)
+    /// Load tokenized BASIC program from an ATR disk file.
+    case basicLoad(drive: Int?, filename: String)
+
+    // DOS mode commands — file and disk management via DiskManager.
+    // These map to the same operations available in the old direct-REPL
+    // DOS mode, but routed through the CLI socket protocol.
+
+    /// Change the current drive (1-8).
+    case dosChangeDrive(drive: Int)
+    /// List directory contents, optionally filtered by a wildcard pattern.
+    case dosDirectory(pattern: String?)
+    /// Show detailed file information (size, sectors, locked status, etc.).
+    case dosFileInfo(filename: String)
+    /// Display a text file's contents (ATASCII decoded).
+    case dosType(filename: String)
+    /// Display a hex dump of a file's contents.
+    case dosDump(filename: String)
+    /// Copy a file between drives (e.g., "D1:FILE D2:FILE").
+    case dosCopy(source: String, destination: String)
+    /// Rename a file on the current drive.
+    case dosRename(oldName: String, newName: String)
+    /// Delete a file from the current drive.
+    case dosDelete(filename: String)
+    /// Lock a file (set read-only flag in directory).
+    case dosLock(filename: String)
+    /// Unlock a file (clear read-only flag in directory).
+    case dosUnlock(filename: String)
+    /// Export a file from ATR disk to the host filesystem.
+    case dosExport(filename: String, hostPath: String)
+    /// Import a file from the host filesystem to ATR disk.
+    case dosImport(hostPath: String, filename: String)
+    /// Create a new blank ATR disk image. Type is "sd", "ed", or "dd".
+    case dosNewDisk(path: String, type: String?)
+    /// Format the current drive (erases all data).
+    case dosFormat
 }
 
 // =============================================================================
@@ -328,6 +402,10 @@ public struct CLICommandParser: Sendable {
         case "drives":
             return .drives
 
+        // Boot with file
+        case "boot":
+            return try parseBoot(argsString)
+
         // State management
         case "state":
             return try parseState(argsString)
@@ -335,6 +413,9 @@ public struct CLICommandParser: Sendable {
         // Display
         case "screenshot":
             return .screenshot(path: argsString.isEmpty ? nil : argsString)
+        case "screen":
+            let atascii = argsString.uppercased() == "ATASCII"
+            return .screenText(atascii: atascii)
 
         // Injection
         case "inject":
@@ -343,6 +424,10 @@ public struct CLICommandParser: Sendable {
         // BASIC commands
         case "basic":
             return try parseBasic(argsString)
+
+        // DOS mode commands
+        case "dos":
+            return try parseDOS(argsString)
 
         default:
             throw CLIProtocolError.invalidCommand(command)
@@ -489,6 +574,22 @@ public struct CLICommandParser: Sendable {
             throw CLIProtocolError.missingArgument("assemble requires address")
         }
 
+        let firstWord = String(parts[0]).lowercased()
+
+        // Check for interactive assembly session subcommands.
+        // "input" and "end" are not valid hex addresses so there's no ambiguity
+        // with the existing address-based parsing.
+        if firstWord == "input" {
+            guard parts.count > 1 else {
+                throw CLIProtocolError.missingArgument("asm input requires an instruction")
+            }
+            return .assembleInput(instruction: String(parts[1]))
+        }
+
+        if firstWord == "end" {
+            return .assembleEnd
+        }
+
         guard let address = parseAddress(String(parts[0])) else {
             throw CLIProtocolError.invalidAddress(String(parts[0]))
         }
@@ -554,6 +655,20 @@ public struct CLICommandParser: Sendable {
             throw CLIProtocolError.invalidDriveNumber(args)
         }
         return .unmount(drive: drive)
+    }
+
+    /// Parses a `boot <path>` command.
+    ///
+    /// The path argument is required and may contain spaces. Tilde (~) is
+    /// expanded to the user's home directory.
+    private func parseBoot(_ args: String) throws -> CLICommand {
+        let path = args.trimmingCharacters(in: .whitespaces)
+        guard !path.isEmpty else {
+            throw CLIProtocolError.missingArgument("boot requires a file path")
+        }
+        // Expand ~ to home directory for convenience
+        let expandedPath = NSString(string: path).expandingTildeInPath
+        return .boot(path: expandedPath)
     }
 
     private func parseState(_ args: String) throws -> CLICommand {
@@ -640,23 +755,317 @@ public struct CLICommandParser: Sendable {
         return .disassemble(address: address, lines: lines)
     }
 
+    /// Parses BASIC subcommands.
+    ///
+    /// Recognized subcommands (case-insensitive): NEW, RUN, LIST, DEL, STOP,
+    /// CONT, VARS, VAR, INFO, EXPORT, IMPORT, DIR. Anything else that starts
+    /// with a digit falls through to `basicLine` (a numbered BASIC line).
     private func parseBasic(_ args: String) throws -> CLICommand {
-        // Handle immediate commands (RUN, NEW, LIST)
         let trimmed = args.trimmingCharacters(in: .whitespaces)
-        let upper = trimmed.uppercased()
 
-        if upper == "NEW" {
-            return .basicNew
-        } else if upper == "RUN" || upper.hasPrefix("RUN ") {
-            return .basicRun
-        } else if upper == "LIST" || upper.hasPrefix("LIST ") {
-            return .basicList
-        } else if trimmed.isEmpty {
+        guard !trimmed.isEmpty else {
             throw CLIProtocolError.missingArgument("basic requires a line or command")
-        } else {
-            // BASIC line entry (e.g., "10 PRINT HELLO")
+        }
+
+        // Split into first word and remaining argument text
+        let parts = trimmed.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+        let firstWord = String(parts[0]).uppercased()
+        let rest = parts.count > 1 ? String(parts[1]).trimmingCharacters(in: .whitespaces) : ""
+
+        switch firstWord {
+        case "NEW":
+            return .basicNew
+        case "RUN":
+            return .basicRun
+        case "LIST":
+            let atascii = rest.uppercased() == "ATASCII"
+            return .basicList(atascii: atascii)
+        case "DEL":
+            guard !rest.isEmpty else {
+                throw CLIProtocolError.missingArgument("basic del requires a line number or range (e.g., 10 or 10-50)")
+            }
+            return .basicDelete(lineOrRange: rest)
+        case "STOP":
+            return .basicStop
+        case "CONT":
+            return .basicCont
+        case "VARS":
+            return .basicVars
+        case "VAR":
+            guard !rest.isEmpty else {
+                throw CLIProtocolError.missingArgument("basic var requires a variable name")
+            }
+            return .basicVar(name: rest)
+        case "INFO":
+            return .basicInfo
+        case "EXPORT":
+            guard !rest.isEmpty else {
+                throw CLIProtocolError.missingArgument("basic export requires a file path")
+            }
+            let expandedPath = NSString(string: rest).expandingTildeInPath
+            return .basicExport(path: expandedPath)
+        case "IMPORT":
+            guard !rest.isEmpty else {
+                throw CLIProtocolError.missingArgument("basic import requires a file path")
+            }
+            let expandedPath = NSString(string: rest).expandingTildeInPath
+            return .basicImport(path: expandedPath)
+        case "DIR":
+            if rest.isEmpty {
+                return .basicDir(drive: nil)
+            }
+            guard let drive = Int(rest), drive >= 1, drive <= 8 else {
+                throw CLIProtocolError.invalidDriveNumber(rest)
+            }
+            return .basicDir(drive: drive)
+        case "RENUM", "RENUMBER":
+            return try parseBasicRenum(rest)
+        case "SAVE":
+            guard !rest.isEmpty else {
+                throw CLIProtocolError.missingArgument("basic save requires a filename (e.g., D:TEST or D2:FILE)")
+            }
+            let (drive, filename) = parseDrivePrefix(rest)
+            return .basicSave(drive: drive, filename: filename)
+        case "LOAD":
+            guard !rest.isEmpty else {
+                throw CLIProtocolError.missingArgument("basic load requires a filename (e.g., D:TEST or D2:FILE)")
+            }
+            let (drive, filename) = parseDrivePrefix(rest)
+            return .basicLoad(drive: drive, filename: filename)
+        default:
+            // Anything else is a numbered BASIC line (e.g., "10 PRINT X")
             return .basicLine(line: trimmed)
         }
+    }
+
+    // MARK: - BASIC Command Helpers
+
+    /// Parses the RENUM subcommand arguments.
+    ///
+    /// Formats:
+    /// - `RENUM` - renumber with defaults (start=10, step=10)
+    /// - `RENUM 100` - start at 100, step=10
+    /// - `RENUM 100 20` - start at 100, step 20
+    private func parseBasicRenum(_ args: String) throws -> CLICommand {
+        let trimmed = args.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty {
+            return .basicRenumber(start: nil, step: nil)
+        }
+
+        let parts = trimmed.split(separator: " ", omittingEmptySubsequences: true)
+        guard let start = Int(parts[0]), start >= 0 else {
+            throw CLIProtocolError.invalidValue(String(parts[0]))
+        }
+
+        var step: Int? = nil
+        if parts.count > 1 {
+            guard let s = Int(parts[1]), s > 0 else {
+                throw CLIProtocolError.invalidValue(String(parts[1]))
+            }
+            step = s
+        }
+
+        return .basicRenumber(start: start, step: step)
+    }
+
+    // MARK: - DOS Command Parser
+
+    /// Parses DOS subcommands for disk and file operations.
+    ///
+    /// Recognized subcommands (case-insensitive): CD, DIR, INFO, TYPE, DUMP,
+    /// COPY, RENAME, DELETE, LOCK, UNLOCK, EXPORT, IMPORT, NEWDISK, FORMAT.
+    private func parseDOS(_ args: String) throws -> CLICommand {
+        let trimmed = args.trimmingCharacters(in: .whitespaces)
+
+        guard !trimmed.isEmpty else {
+            throw CLIProtocolError.missingArgument("dos requires a subcommand (cd, dir, info, type, dump, copy, rename, delete, lock, unlock, export, import, newdisk, format)")
+        }
+
+        // Split into subcommand and remaining argument text
+        let parts = trimmed.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+        let subcommand = String(parts[0]).uppercased()
+        let rest = parts.count > 1 ? String(parts[1]).trimmingCharacters(in: .whitespaces) : ""
+
+        switch subcommand {
+        case "CD":
+            guard !rest.isEmpty else {
+                throw CLIProtocolError.missingArgument("dos cd requires a drive number (1-8)")
+            }
+            guard let drive = Int(rest), drive >= 1, drive <= 8 else {
+                throw CLIProtocolError.invalidDriveNumber(rest)
+            }
+            return .dosChangeDrive(drive: drive)
+
+        case "DIR":
+            return .dosDirectory(pattern: rest.isEmpty ? nil : rest)
+
+        case "INFO":
+            guard !rest.isEmpty else {
+                throw CLIProtocolError.missingArgument("dos info requires a filename")
+            }
+            return .dosFileInfo(filename: rest)
+
+        case "TYPE":
+            guard !rest.isEmpty else {
+                throw CLIProtocolError.missingArgument("dos type requires a filename")
+            }
+            return .dosType(filename: rest)
+
+        case "DUMP":
+            guard !rest.isEmpty else {
+                throw CLIProtocolError.missingArgument("dos dump requires a filename")
+            }
+            return .dosDump(filename: rest)
+
+        case "COPY":
+            return try parseDOSCopy(rest)
+
+        case "RENAME":
+            return try parseDOSRename(rest)
+
+        case "DELETE", "DEL":
+            guard !rest.isEmpty else {
+                throw CLIProtocolError.missingArgument("dos delete requires a filename")
+            }
+            return .dosDelete(filename: rest)
+
+        case "LOCK":
+            guard !rest.isEmpty else {
+                throw CLIProtocolError.missingArgument("dos lock requires a filename")
+            }
+            return .dosLock(filename: rest)
+
+        case "UNLOCK":
+            guard !rest.isEmpty else {
+                throw CLIProtocolError.missingArgument("dos unlock requires a filename")
+            }
+            return .dosUnlock(filename: rest)
+
+        case "EXPORT":
+            return try parseDOSExport(rest)
+
+        case "IMPORT":
+            return try parseDOSImport(rest)
+
+        case "NEWDISK":
+            return try parseDOSNewDisk(rest)
+
+        case "FORMAT":
+            return .dosFormat
+
+        default:
+            throw CLIProtocolError.invalidCommand("dos \(subcommand)")
+        }
+    }
+
+    /// Parses `dos copy <source> <destination>`.
+    ///
+    /// Both source and destination can include drive prefixes (e.g., D1:FILE).
+    /// Example: `dos copy D1:GAME.BAS D2:GAME.BAS`
+    private func parseDOSCopy(_ args: String) throws -> CLICommand {
+        let parts = args.split(separator: " ", omittingEmptySubsequences: true)
+        guard parts.count == 2 else {
+            throw CLIProtocolError.missingArgument("dos copy requires source and destination (e.g., D1:FILE D2:FILE)")
+        }
+        return .dosCopy(source: String(parts[0]), destination: String(parts[1]))
+    }
+
+    /// Parses `dos rename <oldname> <newname>`.
+    private func parseDOSRename(_ args: String) throws -> CLICommand {
+        let parts = args.split(separator: " ", omittingEmptySubsequences: true)
+        guard parts.count == 2 else {
+            throw CLIProtocolError.missingArgument("dos rename requires old name and new name")
+        }
+        return .dosRename(oldName: String(parts[0]), newName: String(parts[1]))
+    }
+
+    /// Parses `dos export <filename> <hostpath>`.
+    ///
+    /// Exports a file from the ATR disk image to the host filesystem.
+    /// The host path is tilde-expanded.
+    private func parseDOSExport(_ args: String) throws -> CLICommand {
+        let parts = args.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+        guard parts.count == 2 else {
+            throw CLIProtocolError.missingArgument("dos export requires filename and host path")
+        }
+        let hostPath = NSString(string: String(parts[1])).expandingTildeInPath
+        return .dosExport(filename: String(parts[0]), hostPath: hostPath)
+    }
+
+    /// Parses `dos import <hostpath> <filename>`.
+    ///
+    /// Imports a file from the host filesystem to the ATR disk image.
+    /// The host path is tilde-expanded.
+    private func parseDOSImport(_ args: String) throws -> CLICommand {
+        let parts = args.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+        guard parts.count == 2 else {
+            throw CLIProtocolError.missingArgument("dos import requires host path and filename")
+        }
+        let hostPath = NSString(string: String(parts[0])).expandingTildeInPath
+        return .dosImport(hostPath: hostPath, filename: String(parts[1]))
+    }
+
+    /// Parses `dos newdisk <path> [type]`.
+    ///
+    /// Creates a new blank ATR disk image. Type is optional:
+    /// - "sd" (default) — single density 90KB
+    /// - "ed" — enhanced density 130KB
+    /// - "dd" — double density 180KB
+    ///
+    /// The path is tilde-expanded.
+    private func parseDOSNewDisk(_ args: String) throws -> CLICommand {
+        guard !args.isEmpty else {
+            throw CLIProtocolError.missingArgument("dos newdisk requires a file path")
+        }
+
+        let parts = args.split(separator: " ", omittingEmptySubsequences: true)
+
+        // Last token might be a disk type (sd, ed, dd)
+        var type: String? = nil
+        var pathParts = parts
+
+        if parts.count >= 2 {
+            let lastPart = String(parts.last!).lowercased()
+            if ["sd", "ed", "dd"].contains(lastPart) {
+                type = lastPart
+                pathParts = parts.dropLast()
+            }
+        }
+
+        let path = NSString(string: pathParts.map(String.init).joined(separator: " ")).expandingTildeInPath
+        return .dosNewDisk(path: path, type: type)
+    }
+
+    /// Parses a `Dn:FILENAME` prefix to extract drive number and filename.
+    ///
+    /// Supports formats:
+    /// - `D:FILE` → drive nil (default), filename "FILE"
+    /// - `D1:FILE` → drive 1, filename "FILE"
+    /// - `D2:FILE` → drive 2, filename "FILE"
+    /// - `FILE` → drive nil, filename "FILE"
+    private func parseDrivePrefix(_ input: String) -> (drive: Int?, filename: String) {
+        let upper = input.uppercased()
+
+        // Match D: or Dn: prefix
+        if upper.hasPrefix("D") && upper.count > 1 {
+            let afterD = upper.dropFirst()
+            if afterD.hasPrefix(":") {
+                // D:FILENAME — default drive
+                let filename = String(input.dropFirst(2))
+                return (nil, filename)
+            }
+            if let colonIndex = afterD.firstIndex(of: ":") {
+                let driveStr = String(afterD[afterD.startIndex..<colonIndex])
+                if let drive = Int(driveStr), drive >= 1, drive <= 8 {
+                    let filenameStart = afterD.index(after: colonIndex)
+                    let filename = String(afterD[filenameStart...])
+                    return (drive, filename)
+                }
+            }
+        }
+
+        // No drive prefix
+        return (nil, input)
     }
 
     // MARK: - Helper Functions
@@ -690,6 +1099,7 @@ public struct CLICommandParser: Sendable {
                     case "n": result.append("\n")
                     case "t": result.append("\t")
                     case "r": result.append("\r")
+                    case "s": result.append(" ")  // Space
                     case "e": result.append("\u{1B}")  // Escape
                     case "\\": result.append("\\")
                     default: result.append(escaped)
@@ -808,15 +1218,35 @@ public struct CLIResponseParser: Sendable {
         switch String(eventType).lowercased() {
         case "breakpoint":
             // Format: breakpoint $XXXX A=$XX X=$XX Y=$XX S=$XX P=$XX
-            // Simplified parsing - just extract the address for now
+            var address: UInt16 = 0
+            var a: UInt8 = 0, x: UInt8 = 0, y: UInt8 = 0, s: UInt8 = 0, p: UInt8 = 0
+
+            // Extract the address (first $XXXX after "breakpoint")
             if let addressMatch = data.range(of: #"\$([0-9A-Fa-f]{4})"#, options: .regularExpression) {
                 let addressStr = String(data[addressMatch]).dropFirst()  // Remove $
-                if let address = UInt16(addressStr, radix: 16) {
-                    // TODO: Parse register values from the event
-                    return .breakpoint(address: address, a: 0, x: 0, y: 0, s: 0, p: 0)
+                address = UInt16(addressStr, radix: 16) ?? 0
+            }
+
+            // Extract register values using "REG=$XX" pattern
+            let regPattern = #"([AXYSP])=\$([0-9A-Fa-f]{2})"#
+            if let regex = try? NSRegularExpression(pattern: regPattern) {
+                let nsData = data as NSString
+                let matches = regex.matches(in: data, range: NSRange(location: 0, length: nsData.length))
+                for match in matches {
+                    let regName = nsData.substring(with: match.range(at: 1))
+                    let regValue = UInt8(nsData.substring(with: match.range(at: 2)), radix: 16) ?? 0
+                    switch regName {
+                    case "A": a = regValue
+                    case "X": x = regValue
+                    case "Y": y = regValue
+                    case "S": s = regValue
+                    case "P": p = regValue
+                    default: break
+                    }
                 }
             }
-            return .breakpoint(address: 0, a: 0, x: 0, y: 0, s: 0, p: 0)
+
+            return .breakpoint(address: address, a: a, x: x, y: y, s: s, p: p)
 
         case "stopped":
             if let addressMatch = data.range(of: #"\$([0-9A-Fa-f]{4})"#, options: .regularExpression) {

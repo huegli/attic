@@ -65,7 +65,7 @@ let package = Package(
         .executable(
             name: "AtticServer",
             targets: ["AtticServer"]
-        )
+        ),
     ],
 
     // Target definitions
@@ -114,7 +114,15 @@ let package = Package(
             // open are not properly discovered by xcodebuild.
             linkerSettings: [
                 // Link against the local libatari800.a static library
-                .unsafeFlags(["-L", "Libraries/libatari800/lib"]),
+                // Also limit common symbol alignment to 0x4000 to suppress the
+                // linker warning about __DATA,__common exceeding segment maximum.
+                // libatari800 has large common symbols (e.g. MEMORY_mem at 64KB)
+                // whose default alignment (next power of two) exceeds the segment
+                // maximum of 0x4000.
+                .unsafeFlags([
+                    "-L", "Libraries/libatari800/lib",
+                    "-Xlinker", "-max_default_common_align", "-Xlinker", "0x4000"
+                ]),
                 // Also need to link zlib which libatari800 depends on
                 .linkedLibrary("z")
             ]

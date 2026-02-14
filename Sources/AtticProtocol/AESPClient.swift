@@ -38,6 +38,7 @@ import Foundation
 #if canImport(Network)
 import Network
 #endif
+@preconcurrency import Dispatch
 import os.lock
 
 // MARK: - Continuation Resume Guard
@@ -178,6 +179,11 @@ public actor AESPClient {
     /// Current connection state.
     public private(set) var state: AESPClientState = .disconnected
 
+    /// Timestamp of the most recent PONG received from the server.
+    /// Used by heartbeat monitors to detect server loss — if this remains
+    /// nil or stale for too long, the server is presumed dead.
+    public private(set) var lastPongReceived: Date?
+
     /// Whether the client is connected.
     public var isConnected: Bool {
         if case .connected = state { return true }
@@ -224,6 +230,11 @@ public actor AESPClient {
 
     /// The audio sample stream.
     private var _audioStream: AsyncStream<Data>?
+
+    /// Pending continuation for a status request-response.
+    /// Set by `requestStatusWithDisks()` and resumed by `handleControlMessage()`
+    /// when a `.status` response arrives.
+    private var pendingStatusContinuation: CheckedContinuation<AESPMessage.StatusPayload, Never>?
 
     // =========================================================================
     // MARK: - Initialization
@@ -351,34 +362,48 @@ public actor AESPClient {
     }
 
     #if canImport(Network)
-    /// Creates a connection to the specified host and port.
+    /// Creates a connection to the specified host and port with timeout.
     ///
     /// - Parameters:
     ///   - host: The host to connect to.
     ///   - port: The port to connect to.
     ///   - channel: The channel type (for logging and state management).
     /// - Returns: The established NWConnection.
+    /// - Throws: `AESPError.connectionError` if connection fails or times out.
     private func createConnection(host: String, port: Int, channel: AESPChannel) async throws -> NWConnection {
         let endpoint = NWEndpoint.hostPort(
             host: NWEndpoint.Host(host),
             port: NWEndpoint.Port(integerLiteral: UInt16(port))
         )
         let connection = NWConnection(to: endpoint, using: .tcp)
+        let timeout = configuration.connectionTimeout
 
         return try await withCheckedThrowingContinuation { continuation in
             // Use a thread-safe flag to track whether continuation has been resumed
             let resumeGuard = ContinuationResumeGuard()
+
+            // Set up timeout - if connection doesn't establish in time, cancel it
+            let timeoutWorkItem = DispatchWorkItem {
+                if resumeGuard.tryResume() {
+                    connection.cancel()
+                    continuation.resume(throwing: AESPError.connectionError("Connection timed out after \(timeout)s"))
+                }
+            }
+            DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: timeoutWorkItem)
 
             connection.stateUpdateHandler = { [resumeGuard, weak self] state in
                 switch state {
                 case .ready:
                     // Only resume continuation once
                     if resumeGuard.tryResume() {
+                        // Cancel the timeout since we connected successfully
+                        timeoutWorkItem.cancel()
                         // Keep monitoring state for disconnection events
                         continuation.resume(returning: connection)
                     }
                 case .failed(let error):
                     if resumeGuard.tryResume() {
+                        timeoutWorkItem.cancel()
                         continuation.resume(throwing: error)
                     } else {
                         // Connection failed after initial establishment
@@ -388,6 +413,7 @@ public actor AESPClient {
                     }
                 case .cancelled:
                     if resumeGuard.tryResume() {
+                        timeoutWorkItem.cancel()
                         continuation.resume(throwing: AESPError.connectionError("Connection cancelled"))
                     } else {
                         // Connection cancelled after initial establishment
@@ -552,8 +578,20 @@ public actor AESPClient {
     private func handleControlMessage(_ message: AESPMessage) async {
         switch message.type {
         case .pong:
-            // Ping response received
-            break
+            // Ping response received — record the timestamp for heartbeat monitoring
+            lastPongReceived = Date()
+
+        case .status:
+            // If a requestStatusWithDisks() call is waiting, fulfil its continuation
+            if let continuation = pendingStatusContinuation {
+                pendingStatusContinuation = nil
+                let payload = message.parseStatusWithDisks()
+                    ?? AESPMessage.StatusPayload(isRunning: false, mountedDrives: [])
+                continuation.resume(returning: payload)
+            } else {
+                // No pending request — forward to delegate
+                await delegate?.client(self, didReceiveMessage: message)
+            }
 
         case .error:
             if let (code, errorMessage) = message.parseErrorPayload() {
@@ -695,9 +733,36 @@ public actor AESPClient {
         await sendMessage(.reset(cold: cold))
     }
 
-    /// Requests emulator status.
+    /// Requests emulator status (fire-and-forget).
     public func requestStatus() async {
         await sendMessage(.status())
+    }
+
+    /// Requests emulator status and waits for the response with disk information.
+    ///
+    /// Sends a STATUS request and awaits the server's response, which includes
+    /// the running state and any mounted drive filenames. This is a request-response
+    /// pattern: the next `.status` message received on the control channel will
+    /// fulfil this call.
+    ///
+    /// - Returns: A `StatusPayload` containing running state and mounted drives.
+    public func requestStatusWithDisks() async -> AESPMessage.StatusPayload {
+        return await withCheckedContinuation { continuation in
+            pendingStatusContinuation = continuation
+            Task {
+                await sendMessage(.status())
+            }
+        }
+    }
+
+    /// Boots the emulator with a file (disk image, executable, BASIC program, etc.).
+    ///
+    /// Sends a BOOT_FILE request to the server, which validates the file,
+    /// calls `libatari800_reboot_with_file`, and returns a response.
+    ///
+    /// - Parameter filePath: Absolute path to the file to boot.
+    public func bootFile(filePath: String) async {
+        await sendMessage(.bootFile(filePath: filePath))
     }
 
     // =========================================================================
@@ -762,27 +827,5 @@ public actor AESPClient {
         option: Bool = false
     ) async {
         await sendMessage(.consoleKeys(start: start, select: select, option: option))
-    }
-
-    // =========================================================================
-    // MARK: - Memory Access
-    // =========================================================================
-
-    /// Reads memory from the emulator.
-    ///
-    /// - Parameters:
-    ///   - address: The memory address to read from.
-    ///   - count: The number of bytes to read.
-    public func readMemory(address: UInt16, count: UInt16) async {
-        await sendMessage(.memoryRead(address: address, count: count))
-    }
-
-    /// Writes memory to the emulator.
-    ///
-    /// - Parameters:
-    ///   - address: The memory address to write to.
-    ///   - bytes: The data to write.
-    public func writeMemory(address: UInt16, bytes: Data) async {
-        await sendMessage(.memoryWrite(address: address, bytes: bytes))
     }
 }

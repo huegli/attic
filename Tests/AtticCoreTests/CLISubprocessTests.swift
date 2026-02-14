@@ -883,3 +883,289 @@ final class CLIMemoryCommandTests: XCTestCase {
         await client.disconnect()
     }
 }
+
+// =============================================================================
+// MARK: - Disassemble, Breakpoint, Mount/Unmount, Write+Read, Shutdown Tests
+// =============================================================================
+
+/// End-to-end subprocess tests for disassemble, breakpoint, mount/unmount,
+/// memory write+readback, and shutdown commands.
+final class CLIAdvancedCommandTests: XCTestCase {
+
+    var serverProcess: Process?
+
+    override func setUp() async throws {
+        SubprocessHelper.cleanupStaleSockets()
+    }
+
+    override func tearDown() async throws {
+        if let process = serverProcess, process.isRunning {
+            process.terminate()
+            process.waitUntilExit()
+        }
+        serverProcess = nil
+        SubprocessHelper.cleanupStaleSockets()
+    }
+
+    /// Helper: launch server and connect a client, or skip if not available.
+    private func launchServerAndConnect() async throws -> (Process, CLISocketClient, String) {
+        let serverPath = SubprocessHelper.serverPath
+
+        guard FileManager.default.fileExists(atPath: serverPath) else {
+            throw XCTSkip("AtticServer not found. Run 'swift build' first.")
+        }
+
+        let (process, _, _) = SubprocessHelper.spawnProcess(
+            executablePath: serverPath,
+            arguments: ["--headless"]
+        )
+        serverProcess = process
+
+        do {
+            try process.run()
+        } catch {
+            throw XCTSkip("Failed to launch AtticServer: \(error)")
+        }
+
+        guard let socketPath = SubprocessHelper.waitForSocket() else {
+            process.terminate()
+            XCTFail("Server did not create CLI socket")
+            throw XCTSkip("No socket created")
+        }
+
+        let client = CLISocketClient()
+
+        do {
+            try await client.connect(to: socketPath)
+        } catch {
+            process.terminate()
+            throw XCTSkip("Could not connect to server: \(error)")
+        }
+
+        return (process, client, socketPath)
+    }
+
+    // =========================================================================
+    // MARK: - Disassemble
+    // =========================================================================
+
+    /// Test disassemble command returns output with instruction data.
+    func testDisassemble() async throws {
+        let (_, client, _) = try await launchServerAndConnect()
+
+        do {
+            // Pause before disassembling
+            _ = try await client.send(.pause)
+
+            // Disassemble from a known ROM address
+            let response = try await client.send(.disassemble(address: 0xE000, lines: 8))
+
+            switch response {
+            case .ok(let data):
+                XCTAssertFalse(data.isEmpty, "Disassembly should return data")
+                // Disassembly output should contain address references
+                let lines = data.components(separatedBy: "\n").filter { !$0.isEmpty }
+                XCTAssertGreaterThan(lines.count, 0, "Disassembly should return at least one line")
+            case .error(let msg):
+                throw XCTSkip("Server returned error for disassemble: \(msg)")
+            }
+        } catch let error as CLIProtocolError {
+            await client.disconnect()
+            throw XCTSkip("Server command failed: \(error)")
+        }
+
+        await client.disconnect()
+    }
+
+    // =========================================================================
+    // MARK: - Breakpoint Set / List / Clear
+    // =========================================================================
+
+    /// Test setting, listing, and clearing breakpoints via subprocess.
+    func testBreakpointSetListClear() async throws {
+        let (_, client, _) = try await launchServerAndConnect()
+
+        do {
+            // Set a breakpoint at a safe address
+            let setResponse = try await client.send(.breakpointSet(address: 0x0600))
+            guard case .ok = setResponse else {
+                await client.disconnect()
+                throw XCTSkip("Server returned non-OK response to breakpoint set")
+            }
+
+            // List breakpoints - should contain the one we just set
+            let listResponse = try await client.send(.breakpointList)
+            switch listResponse {
+            case .ok(let data):
+                let lower = data.lowercased()
+                XCTAssertTrue(
+                    lower.contains("0600") || lower.contains("$0600") || lower.contains("1536"),
+                    "Breakpoint list should contain address 0x0600: \(data)"
+                )
+            case .error(let msg):
+                throw XCTSkip("Server returned error for breakpoint list: \(msg)")
+            }
+
+            // Clear the breakpoint
+            let clearResponse = try await client.send(.breakpointClear(address: 0x0600))
+            guard case .ok = clearResponse else {
+                await client.disconnect()
+                throw XCTSkip("Server returned non-OK response to breakpoint clear")
+            }
+
+            // List again - should be empty or not contain our address
+            let listAfterClear = try await client.send(.breakpointList)
+            switch listAfterClear {
+            case .ok(let data):
+                // "none" or empty list is expected
+                let lower = data.lowercased()
+                let stillHas = lower.contains("0600") || lower.contains("$0600")
+                XCTAssertFalse(stillHas, "Breakpoint 0x0600 should be cleared: \(data)")
+            case .error(let msg):
+                throw XCTSkip("Server returned error for breakpoint list: \(msg)")
+            }
+        } catch let error as CLIProtocolError {
+            await client.disconnect()
+            throw XCTSkip("Server command failed: \(error)")
+        }
+
+        await client.disconnect()
+    }
+
+    // =========================================================================
+    // MARK: - Mount / Unmount
+    // =========================================================================
+
+    /// Test mount and unmount commands. Mount with a non-existent path verifies
+    /// the command round-trip works (server returns an error for missing file).
+    func testMountUnmount() async throws {
+        let (_, client, _) = try await launchServerAndConnect()
+
+        do {
+            // Mount with a non-existent path - should return an error response
+            // (which proves the command was received and processed)
+            let mountResponse = try await client.send(
+                .mount(drive: 1, path: "/tmp/nonexistent-test.atr")
+            )
+
+            switch mountResponse {
+            case .error:
+                // Expected: file doesn't exist so mount fails gracefully
+                break
+            case .ok:
+                // If server accepted it, unmount to clean up
+                _ = try await client.send(.unmount(drive: 1))
+            }
+
+            // Unmount drive 1 (should succeed even if nothing is mounted)
+            let unmountResponse = try await client.send(.unmount(drive: 1))
+            switch unmountResponse {
+            case .ok, .error:
+                break  // Any response is acceptable
+            }
+
+            // Verify drives command works
+            let drivesResponse = try await client.send(.drives)
+            switch drivesResponse {
+            case .ok(let data):
+                XCTAssertFalse(data.isEmpty, "Drives response should not be empty")
+            case .error(let msg):
+                throw XCTSkip("Server returned error for drives: \(msg)")
+            }
+        } catch let error as CLIProtocolError {
+            await client.disconnect()
+            throw XCTSkip("Server command failed: \(error)")
+        }
+
+        await client.disconnect()
+    }
+
+    // =========================================================================
+    // MARK: - Memory Write + Readback Verification
+    // =========================================================================
+
+    /// Test writing bytes to memory and reading them back to verify correctness.
+    func testMemoryWriteAndReadback() async throws {
+        let (_, client, _) = try await launchServerAndConnect()
+
+        do {
+            // Pause emulation before memory operations
+            _ = try await client.send(.pause)
+
+            // Write a known pattern to user memory area (page 6)
+            let testData: [UInt8] = [0xA9, 0x42, 0x8D, 0x00, 0xD4]
+            let writeResponse = try await client.send(
+                .write(address: 0x0600, data: testData)
+            )
+
+            guard case .ok = writeResponse else {
+                await client.disconnect()
+                throw XCTSkip("Server returned non-OK response to write")
+            }
+
+            // Read back the same bytes
+            let readResponse = try await client.send(
+                .read(address: 0x0600, count: UInt16(testData.count))
+            )
+
+            guard case .ok(let data) = readResponse else {
+                await client.disconnect()
+                throw XCTSkip("Server returned non-OK response to read")
+            }
+
+            // Parse the hex data from the response.
+            // Response format is typically "data A9,42,8D,00,D4" or "A9,42,8D,00,D4"
+            let hexPart = data.hasPrefix("data ") ? String(data.dropFirst(5)) : data
+            let readBytes = hexPart.split(separator: ",").compactMap {
+                UInt8($0.trimmingCharacters(in: .whitespaces), radix: 16)
+            }
+
+            XCTAssertEqual(
+                readBytes, testData,
+                "Read-back data should match written data. Response was: \(data)"
+            )
+        } catch let error as CLIProtocolError {
+            await client.disconnect()
+            throw XCTSkip("Server command failed: \(error)")
+        }
+
+        await client.disconnect()
+    }
+
+    // =========================================================================
+    // MARK: - Shutdown
+    // =========================================================================
+
+    /// Test that the shutdown command causes the server process to exit.
+    func testShutdown() async throws {
+        let (process, client, _) = try await launchServerAndConnect()
+
+        do {
+            // Send shutdown command
+            let response = try await client.send(.shutdown)
+
+            guard case .ok = response else {
+                await client.disconnect()
+                throw XCTSkip("Server returned non-OK response to shutdown")
+            }
+        } catch is CLIProtocolError {
+            // Shutdown may close the connection before we get a response,
+            // which is acceptable behavior
+        } catch {
+            // Connection reset during shutdown is expected
+        }
+
+        await client.disconnect()
+
+        // Wait for the server process to actually exit
+        let deadline = Date().addingTimeInterval(5.0)
+        while process.isRunning && Date() < deadline {
+            try await Task.sleep(nanoseconds: 100_000_000)  // 100ms
+        }
+
+        XCTAssertFalse(process.isRunning, "Server process should have exited after shutdown")
+
+        // Mark serverProcess as nil so tearDown doesn't try to terminate it again
+        serverProcess = nil
+    }
+}

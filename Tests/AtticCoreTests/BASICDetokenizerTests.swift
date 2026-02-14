@@ -27,7 +27,7 @@ final class BASICDetokenizerTests: XCTestCase {
     let tokenizer = BASICTokenizer()
 
     /// Helper to create a minimal tokenized line for testing.
-    /// Format: [lineNum low, lineNum high, length, ...content..., $16]
+    /// Format: [lineNum low, lineNum high, lineOffset, stmtOffset, ...content..., $16]
     func makeLineBytes(
         lineNumber: UInt16,
         content: [UInt8]
@@ -35,8 +35,9 @@ final class BASICDetokenizerTests: XCTestCase {
         var bytes: [UInt8] = []
         bytes.append(UInt8(lineNumber & 0xFF))
         bytes.append(UInt8(lineNumber >> 8))
-        let length = UInt8(3 + content.count + 1)  // header + content + EOL
-        bytes.append(length)
+        let length = UInt8(4 + content.count + 1)  // header (4) + content + EOL
+        bytes.append(length)  // Line offset
+        bytes.append(length)  // Statement offset (same for single-statement lines)
         bytes.append(contentsOf: content)
         bytes.append(BASICSpecialToken.endOfLine)
         return bytes
@@ -110,12 +111,12 @@ final class BASICDetokenizerTests: XCTestCase {
         let bytes = makeLineBytes(
             lineNumber: 10,
             content: [
-                0x08,                   // FOR
-                0x80,                   // Variable I (index 0)
-                0x52,                   // = (assignment)
-                0x0D, 0x01,             // Small int 1
-                0x3E,                   // TO
-                0x0D, 0x0A              // Small int 10
+                BASICStatementToken.forStatement.rawValue,  // FOR
+                0x80,                                        // Variable I (index 0)
+                BASICOperatorToken.equalsAssign.rawValue,    // = (assignment)
+                0x0D, 0x01,                                  // Small int 1
+                BASICOperatorToken.toKeyword.rawValue,       // TO
+                0x0D, 0x0A                                   // Small int 10
             ]
         )
 
@@ -133,10 +134,10 @@ final class BASICDetokenizerTests: XCTestCase {
         let bytes = makeLineBytes(
             lineNumber: 10,
             content: [
-                0x36,                   // Implied LET
-                0x80,                   // Variable X
-                0x52,                   // = (assignment)
-                0x0D, 0x05              // Small int 5
+                BASICStatementToken.impliedLet.rawValue,     // Implied LET
+                0x80,                                         // Variable X
+                BASICOperatorToken.equalsAssign.rawValue,     // = (assignment)
+                0x0D, 0x05                                    // Small int 5
             ]
         )
 
@@ -155,10 +156,10 @@ final class BASICDetokenizerTests: XCTestCase {
         let bytes = makeLineBytes(
             lineNumber: 10,
             content: [
-                0x06,                   // Explicit LET
-                0x80,                   // Variable X
-                0x52,                   // = (assignment)
-                0x0D, 0x05              // Small int 5
+                BASICStatementToken.letStatement.rawValue,    // Explicit LET
+                0x80,                                          // Variable X
+                BASICOperatorToken.equalsAssign.rawValue,      // = (assignment)
+                0x0D, 0x05                                     // Small int 5
             ]
         )
 
@@ -357,16 +358,16 @@ final class BASICDetokenizerTests: XCTestCase {
             BASICVariableName(name: "B", type: .numeric)
         ]
 
-        // A+B
+        // A=A+B (implied LET)
         let bytes = makeLineBytes(
             lineNumber: 10,
             content: [
-                0x36,   // Implied LET
-                0x80,   // A
-                0x52,   // =
-                0x80,   // A
-                0x4A,   // +
-                0x81    // B
+                BASICStatementToken.impliedLet.rawValue,     // Implied LET
+                0x80,                                         // A
+                BASICOperatorToken.equalsAssign.rawValue,     // =
+                0x80,                                         // A
+                BASICOperatorToken.plus.rawValue,             // +
+                0x81                                          // B
             ]
         )
 
@@ -386,11 +387,11 @@ final class BASICDetokenizerTests: XCTestCase {
         let bytes = makeLineBytes(
             lineNumber: 10,
             content: [
-                0x07,   // IF
-                0x80,   // A
-                0x43,   // <>
-                0x81,   // B
-                0x40    // THEN
+                BASICStatementToken.ifStatement.rawValue,    // IF
+                0x80,                                         // A
+                BASICOperatorToken.notEqual.rawValue,         // <>
+                0x81,                                         // B
+                BASICOperatorToken.then.rawValue              // THEN
             ]
         )
 
@@ -411,10 +412,10 @@ final class BASICDetokenizerTests: XCTestCase {
         let bytes = makeLineBytes(
             lineNumber: 10,
             content: [
-                0x07,   // IF
-                0x80,   // A
-                0x4F,   // AND
-                0x81    // B
+                BASICStatementToken.ifStatement.rawValue,    // IF
+                0x80,                                         // A
+                BASICOperatorToken.and.rawValue,              // AND
+                0x81                                          // B
             ]
         )
 
@@ -435,11 +436,11 @@ final class BASICDetokenizerTests: XCTestCase {
         let bytes = makeLineBytes(
             lineNumber: 10,
             content: [
-                0x20,   // PRINT
-                0x6F,   // ABS
-                0x50,   // (
-                0x80,   // X
-                0x51    // )
+                BASICStatementToken.print.rawValue,          // PRINT
+                BASICFunctionToken.abs.rawValue,             // ABS
+                BASICOperatorToken.leftParen.rawValue,       // (
+                0x80,                                         // X
+                BASICOperatorToken.rightParen.rawValue       // )
             ]
         )
 
@@ -456,11 +457,11 @@ final class BASICDetokenizerTests: XCTestCase {
         let bytes = makeLineBytes(
             lineNumber: 10,
             content: [
-                0x20,   // PRINT
-                0x62,   // LEN
-                0x50,   // (
-                0x80,   // A$
-                0x51    // )
+                BASICStatementToken.print.rawValue,          // PRINT
+                BASICFunctionToken.len.rawValue,             // LEN
+                BASICOperatorToken.leftParen.rawValue,       // (
+                0x80,                                         // A$
+                BASICOperatorToken.rightParen.rawValue       // )
             ]
         )
 
@@ -510,7 +511,12 @@ final class BASICDetokenizerTests: XCTestCase {
 
         let line10 = makeLineBytes(
             lineNumber: 10,
-            content: [0x36, 0x80, 0x52, 0x0D, 0x05]  // X=5
+            content: [
+                BASICStatementToken.impliedLet.rawValue,
+                0x80,
+                BASICOperatorToken.equalsAssign.rawValue,
+                0x0D, 0x05
+            ]  // X=5
         )
 
         let line20 = makeLineBytes(
@@ -545,7 +551,12 @@ final class BASICDetokenizerTests: XCTestCase {
 
         let line10 = makeLineBytes(
             lineNumber: 10,
-            content: [0x36, 0x80, 0x52, 0x0D, 0x05]
+            content: [
+                BASICStatementToken.impliedLet.rawValue,
+                0x80,
+                BASICOperatorToken.equalsAssign.rawValue,
+                0x0D, 0x05
+            ]
         )
 
         let line20 = makeLineBytes(
@@ -610,7 +621,12 @@ final class BASICDetokenizerTests: XCTestCase {
 
         let line10 = makeLineBytes(
             lineNumber: 10,
-            content: [0x36, 0x80, 0x52, 0x0D, 0x05]
+            content: [
+                BASICStatementToken.impliedLet.rawValue,
+                0x80,
+                BASICOperatorToken.equalsAssign.rawValue,
+                0x0D, 0x05
+            ]
         )
         let line20 = makeLineBytes(
             lineNumber: 20,

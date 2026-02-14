@@ -1,0 +1,13 @@
+[project]
+name = "attic-mcp"
+version = "0.1.0"
+description = "MCP server for the Attic Atari 800 XL emulator"
+requires-python = ">=3.10"
+dependencies = ["mcp[cli]>=1.8.0"]
+
+[project.scripts]
+attic-mcp = "attic_mcp.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

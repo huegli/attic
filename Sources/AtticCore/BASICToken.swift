@@ -6,17 +6,21 @@
 // Atari BASIC stores programs in a compact tokenized form where keywords,
 // operators, and functions are represented by single-byte tokens.
 //
-// Token ranges:
+// Token ranges (statement name position — first byte of each statement):
 // - $00-$36: Statement tokens (REM, PRINT, FOR, etc.)
-// - $37-$5C: Operator tokens (arithmetic, comparison, logical)
-// - $5D-$74: Function tokens (STR$, CHR$, ABS, etc.)
 //
-// Special encoding:
-// - $0D + byte: Small integer constant (0-255)
+// Token ranges (expression position — all other bytes):
 // - $0E + 6 bytes: BCD floating-point constant
 // - $0F + length + chars: String constant
-// - $16: End of line marker
-// - $80+: Variable reference (index into Variable Name Table)
+// - $12-$37: Operator tokens (arithmetic, comparison, logical)
+// - $38-$4F: Function tokens (STR$, CHR$, ABS, etc.)
+// - $16: End of line marker (also operator token .endOfLine)
+// - $80-$FF: Variable reference (index into Variable Name Table)
+//
+// IMPORTANT: Operator values $12-$36 overlap with statement tokens.
+// Context determines interpretation: the byte immediately after the line
+// header (and after each colon separator) is always a statement name token;
+// all other bytes use the expression token space.
 //
 // Reference: Atari BASIC Reference Manual, De Re Atari Chapter 8
 //
@@ -157,48 +161,55 @@ public enum BASICStatementToken: UInt8, CaseIterable, Sendable {
 
 /// Operator tokens represent punctuation, arithmetic, comparison, and logical operators.
 ///
-/// These tokens appear within expressions and between statement parts.
+/// These tokens appear within the EXPRESSION portion of tokenized lines (after
+/// the statement name token). Their byte values ($12-$37) overlap with statement
+/// token values ($00-$36) — the Atari BASIC ROM uses position context to
+/// disambiguate: the first byte after the header (and after each colon separator)
+/// is a statement name, while all other bytes use the expression token space.
+///
 /// Note that some operators have different tokens depending on context
 /// (e.g., assignment = vs comparison =).
+///
+/// Reference: De Re Atari Chapter 10, Atari BASIC Source Book
 public enum BASICOperatorToken: UInt8, CaseIterable, Sendable {
-    case comma = 0x37             // ,
-    case dollarSign = 0x38        // $ (string type indicator)
-    case colon = 0x39             // : (statement separator)
-    case semicolon = 0x3A         // ;
-    case endOfLine = 0x3B         // EOL (internal use, not $16)
-    case gotoInOn = 0x3C          // GOTO within ON...GOTO
-    case gosubInOn = 0x3D         // GOSUB within ON...GOSUB
-    case toKeyword = 0x3E         // TO (in FOR...TO)
-    case step = 0x3F              // STEP (in FOR...STEP)
-    case then = 0x40              // THEN (in IF...THEN)
-    case pound = 0x41             // # (channel number prefix)
-    case lessEqual = 0x42         // <=
-    case notEqual = 0x43          // <>
-    case greaterEqual = 0x44      // >=
-    case lessThan = 0x45          // <
-    case greaterThan = 0x46       // >
-    case equals = 0x47            // = (in expressions)
-    case power = 0x48             // ^
-    case multiply = 0x49          // *
-    case plus = 0x4A              // +
-    case minus = 0x4B             // -
-    case divide = 0x4C            // /
-    case not = 0x4D               // NOT
-    case or = 0x4E                // OR
-    case and = 0x4F               // AND
-    case leftParen = 0x50         // (
-    case rightParen = 0x51        // )
-    case equalsAssign = 0x52      // = (assignment)
-    case equalsCompare = 0x53     // = (comparison, alternate)
-    case lessEqual2 = 0x54        // <= (alternate)
-    case notEqual2 = 0x55         // <> (alternate)
-    case greaterEqual2 = 0x56     // >= (alternate)
-    case lessThan2 = 0x57         // < (alternate)
-    case greaterThan2 = 0x58      // > (alternate)
-    case equals2 = 0x59           // = (alternate)
-    case unaryPlus = 0x5A         // + (unary)
-    case unaryMinus = 0x5B        // - (unary)
-    case leftParenArray = 0x5C    // ( (array subscript)
+    case comma = 0x12             // ,
+    case dollarSign = 0x13        // $ (string type indicator)
+    case colon = 0x14             // : (statement separator)
+    case semicolon = 0x15         // ;
+    case endOfLine = 0x16         // EOL marker
+    case gotoInOn = 0x17          // GOTO within ON...GOTO
+    case gosubInOn = 0x18         // GOSUB within ON...GOSUB
+    case toKeyword = 0x19         // TO (in FOR...TO)
+    case step = 0x1A              // STEP (in FOR...STEP)
+    case then = 0x1B              // THEN (in IF...THEN)
+    case pound = 0x1C             // # (channel number prefix)
+    case lessEqual = 0x1D         // <=
+    case notEqual = 0x1E          // <>
+    case greaterEqual = 0x1F      // >=
+    case lessThan = 0x20          // <
+    case greaterThan = 0x21       // >
+    case equals = 0x22            // = (in expressions)
+    case power = 0x23             // ^
+    case multiply = 0x24          // *
+    case plus = 0x25              // +
+    case minus = 0x26             // -
+    case divide = 0x27            // /
+    case not = 0x28               // NOT
+    case or = 0x29                // OR
+    case and = 0x2A               // AND
+    case leftParen = 0x2B         // (
+    case rightParen = 0x2C        // )
+    case equalsAssign = 0x2D      // = (assignment)
+    case equalsCompare = 0x2E     // = (comparison, alternate)
+    case lessEqual2 = 0x2F        // <= (alternate)
+    case notEqual2 = 0x30         // <> (alternate)
+    case greaterEqual2 = 0x31     // >= (alternate)
+    case lessThan2 = 0x32         // < (alternate)
+    case greaterThan2 = 0x33      // > (alternate)
+    case equals2 = 0x34           // = (alternate)
+    case unaryPlus = 0x35         // + (unary)
+    case unaryMinus = 0x36        // - (unary)
+    case leftParenArray = 0x37    // ( (array subscript)
 
     /// The string representation of this operator.
     public var symbol: String {
@@ -240,33 +251,39 @@ public enum BASICOperatorToken: UInt8, CaseIterable, Sendable {
 
 /// Function tokens represent built-in BASIC functions.
 ///
+/// Like operator tokens, these appear in the EXPRESSION portion of tokenized
+/// lines (after the statement name token). Their byte values ($38-$4F) do not
+/// overlap with statement tokens ($00-$36) or operator tokens ($12-$37).
+///
 /// Functions are used within expressions and always have parentheses
 /// following them (even if empty, like RND).
+///
+/// Reference: De Re Atari Chapter 10, Atari BASIC Source Book
 public enum BASICFunctionToken: UInt8, CaseIterable, Sendable {
-    case str = 0x5D               // STR$
-    case chr = 0x5E               // CHR$
-    case usr = 0x5F               // USR
-    case asc = 0x60               // ASC
-    case val = 0x61               // VAL
-    case len = 0x62               // LEN
-    case adr = 0x63               // ADR
-    case atn = 0x64               // ATN
-    case cos = 0x65               // COS
-    case peek = 0x66              // PEEK
-    case sin = 0x67               // SIN
-    case rnd = 0x68               // RND
-    case fre = 0x69               // FRE
-    case exp = 0x6A               // EXP
-    case log = 0x6B               // LOG
-    case clog = 0x6C              // CLOG
-    case sqr = 0x6D               // SQR
-    case sgn = 0x6E               // SGN
-    case abs = 0x6F               // ABS
-    case int = 0x70               // INT
-    case paddle = 0x71            // PADDLE
-    case stick = 0x72             // STICK
-    case ptrig = 0x73             // PTRIG
-    case strig = 0x74             // STRIG
+    case str = 0x38               // STR$
+    case chr = 0x39               // CHR$
+    case usr = 0x3A               // USR
+    case asc = 0x3B               // ASC
+    case val = 0x3C               // VAL
+    case len = 0x3D               // LEN
+    case adr = 0x3E               // ADR
+    case atn = 0x3F               // ATN
+    case cos = 0x40               // COS
+    case peek = 0x41              // PEEK
+    case sin = 0x42               // SIN
+    case rnd = 0x43               // RND
+    case fre = 0x44               // FRE
+    case exp = 0x45               // EXP
+    case log = 0x46               // LOG
+    case clog = 0x47              // CLOG
+    case sqr = 0x48               // SQR
+    case sgn = 0x49               // SGN
+    case abs = 0x4A               // ABS
+    case int = 0x4B               // INT
+    case paddle = 0x4C            // PADDLE
+    case stick = 0x4D             // STICK
+    case ptrig = 0x4E             // PTRIG
+    case strig = 0x4F             // STRIG
 
     /// The keyword string for this function.
     public var keyword: String {
@@ -494,30 +511,40 @@ public enum BASICTokenLookup {
 
     /// Finds the closest keyword to a misspelled word (for error suggestions).
     ///
-    /// Uses simple prefix matching to find likely intended keywords.
+    /// Uses Levenshtein distance to find the keyword with the smallest edit
+    /// distance to the input. Returns the best match if within threshold.
     ///
     /// - Parameter word: The misspelled word.
     /// - Returns: A suggested correction, or nil if no close match found.
     public static func suggestKeyword(_ word: String) -> String? {
         let upper = word.uppercased()
+        var bestMatch: String?
+        var bestDistance = Int.max
 
         // Check statement keywords
         for token in BASICStatementToken.allCases {
             let kw = token.keyword
-            if !kw.isEmpty && (kw.hasPrefix(upper) || levenshteinDistance(upper, kw) <= 2) {
-                return kw
+            guard !kw.isEmpty else { continue }
+
+            let distance = levenshteinDistance(upper, kw)
+            if distance < bestDistance {
+                bestDistance = distance
+                bestMatch = kw
             }
         }
 
         // Check function keywords
         for token in BASICFunctionToken.allCases {
             let kw = token.keyword
-            if kw.hasPrefix(upper) || levenshteinDistance(upper, kw) <= 2 {
-                return kw
+            let distance = levenshteinDistance(upper, kw)
+            if distance < bestDistance {
+                bestDistance = distance
+                bestMatch = kw
             }
         }
 
-        return nil
+        // Only return if within reasonable threshold (2 edits)
+        return bestDistance <= 2 ? bestMatch : nil
     }
 
     /// Calculates the Levenshtein distance between two strings.

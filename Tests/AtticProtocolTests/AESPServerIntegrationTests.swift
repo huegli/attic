@@ -101,6 +101,11 @@ final class AESPClientConfigurationTests: XCTestCase {
 /// Tests for server lifecycle management.
 final class AESPServerLifecycleTests: XCTestCase {
 
+    override func setUp() {
+        super.setUp()
+        AESPTestProcessGuard.ensureClean()
+    }
+
     /// Test server starts successfully.
     func test_serverStart() async throws {
         #if !canImport(Network)
@@ -275,6 +280,11 @@ final class AESPClientStateTests: XCTestCase {
 /// Tests for server-client communication.
 final class AESPServerClientTests: XCTestCase {
 
+    override func setUp() {
+        super.setUp()
+        AESPTestProcessGuard.ensureClean()
+    }
+
     /// Test client connection to server.
     func test_clientConnectsToServer() async throws {
         #if !canImport(Network)
@@ -440,6 +450,11 @@ final class AESPServerDelegateTests: XCTestCase {
 /// Tests for video frame broadcasting.
 final class AESPVideoBroadcastTests: XCTestCase {
 
+    override func setUp() {
+        super.setUp()
+        AESPTestProcessGuard.ensureClean()
+    }
+
     /// Test broadcasting increments frame counter.
     func test_broadcastIncrementsFrameCounter() async throws {
         #if !canImport(Network)
@@ -499,6 +514,11 @@ final class AESPVideoBroadcastTests: XCTestCase {
 
 /// Tests for audio sample broadcasting.
 final class AESPAudioBroadcastTests: XCTestCase {
+
+    override func setUp() {
+        super.setUp()
+        AESPTestProcessGuard.ensureClean()
+    }
 
     /// Test broadcasting audio samples.
     func test_broadcastAudio() async throws {
@@ -597,6 +617,11 @@ final class AESPChannelTests: XCTestCase {
 /// Tests for server delegate property.
 final class AESPServerDelegatePropertyTests: XCTestCase {
 
+    override func setUp() {
+        super.setUp()
+        AESPTestProcessGuard.ensureClean()
+    }
+
     /// Test server delegate can be assigned.
     func test_serverDelegateAssignment() async throws {
         #if !canImport(Network)
@@ -622,6 +647,11 @@ final class AESPServerDelegatePropertyTests: XCTestCase {
 
 /// Tests for broadcasting messages on specific channels.
 final class AESPMessageBroadcastTests: XCTestCase {
+
+    override func setUp() {
+        super.setUp()
+        AESPTestProcessGuard.ensureClean()
+    }
 
     /// Test broadcast on control channel.
     func test_broadcastOnControlChannel() async throws {
@@ -697,6 +727,11 @@ final class AESPMessageBroadcastTests: XCTestCase {
 
 /// Tests for client connection options.
 final class AESPClientConnectionOptionsTests: XCTestCase {
+
+    override func setUp() {
+        super.setUp()
+        AESPTestProcessGuard.ensureClean()
+    }
 
     /// Test client can connect without video channel.
     func test_connectWithoutVideo() async throws {
@@ -811,44 +846,226 @@ final class AESPClientConnectionOptionsTests: XCTestCase {
 }
 
 // =============================================================================
+// MARK: - Integration Test Helpers
+// =============================================================================
+
+/// Standard delay for server startup in integration tests (100ms).
+private let integrationServerStartDelay: UInt64 = 100_000_000
+
+/// Standard delay for message propagation in integration tests (200ms).
+private let integrationMessageDelay: UInt64 = 200_000_000
+
+/// Creates a server and connected client pair for integration testing.
+///
+/// This helper handles the boilerplate of:
+/// 1. Creating server/client configurations with matching ports
+/// 2. Setting the server delegate
+/// 3. Starting the server and waiting for listeners
+/// 4. Connecting the client and waiting for connection establishment
+///
+/// - Parameters:
+///   - controlPort: Base port for control channel (video = +1, audio = +2).
+///   - connectVideo: Whether the client connects to the video channel.
+///   - connectAudio: Whether the client connects to the audio channel.
+///   - delegate: Server delegate for receiving messages.
+/// - Returns: Tuple of (server, client) ready for testing.
+private func createIntegrationServerAndClient(
+    controlPort: Int,
+    connectVideo: Bool = false,
+    connectAudio: Bool = false,
+    delegate: MockServerDelegate
+) async throws -> (AESPServer, AESPClient) {
+    let serverConfig = AESPServerConfiguration(
+        controlPort: controlPort,
+        videoPort: controlPort + 1,
+        audioPort: controlPort + 2
+    )
+    let server = AESPServer(configuration: serverConfig)
+    await server.setDelegate(delegate)
+
+    try await server.start()
+    try await Task.sleep(nanoseconds: integrationServerStartDelay)
+
+    let clientConfig = AESPClientConfiguration(
+        host: "localhost",
+        controlPort: controlPort,
+        videoPort: controlPort + 1,
+        audioPort: controlPort + 2
+    )
+    let client = AESPClient(configuration: clientConfig)
+
+    try await client.connect(connectVideo: connectVideo, connectAudio: connectAudio)
+    try await Task.sleep(nanoseconds: integrationServerStartDelay)
+
+    return (server, client)
+}
+
+/// Extension to set delegate on AESPServer (convenience for integration tests).
+///
+/// The server's `delegate` property is directly assignable since AESPServer
+/// is an actor — we just need `await` to cross the actor boundary.
+private extension AESPServer {
+    func setDelegate(_ delegate: AESPServerDelegate) {
+        self.delegate = delegate
+    }
+}
+
+// =============================================================================
 // MARK: - Client Command Tests
 // =============================================================================
 
-/// Tests for client command methods.
+/// Integration tests for client command methods.
+///
+/// Each test connects a client to a real server, sends a command, and verifies
+/// the server delegate receives the correct message type. Port range: 49400-49414.
 final class AESPClientCommandTests: XCTestCase {
 
-    /// Test client ping method creates correct message.
-    func test_clientPing() async {
-        let client = AESPClient()
+    override func setUp() {
+        super.setUp()
+        AESPTestProcessGuard.ensureClean()
+    }
 
-        // Just verify the method exists and doesn't crash
-        // Actual network testing is done in integration tests
+    /// Test ping sends a PING message and server auto-responds with PONG.
+    ///
+    /// PING is handled internally by AESPServer.handleMessage (not forwarded
+    /// to the delegate), so we verify the client remains connected after the
+    /// round-trip, confirming the message traversed the network.
+    func test_clientPing() async throws {
+        #if !canImport(Network)
+        throw XCTSkip("Network framework not available")
+        #endif
+
+        let delegate = MockServerDelegate()
+        let (server, client) = try await createIntegrationServerAndClient(
+            controlPort: 49400,
+            delegate: delegate
+        )
+
+        // Send PING — server handles it internally (sends PONG, doesn't forward to delegate)
         await client.ping()
+        try await Task.sleep(nanoseconds: integrationMessageDelay)
+
+        // Verify client is still connected (PING/PONG succeeded without error)
+        let isConnected = await client.isConnected
+        XCTAssertTrue(isConnected, "Client should remain connected after PING")
+
+        // Verify server is still running
+        let isRunning = await server.isRunning
+        XCTAssertTrue(isRunning, "Server should remain running after PING")
+
+        await client.disconnect()
+        await server.stop()
     }
 
-    /// Test client pause method.
-    func test_clientPause() async {
-        let client = AESPClient()
+    /// Test pause sends a PAUSE message that the server delegate receives.
+    func test_clientPause() async throws {
+        #if !canImport(Network)
+        throw XCTSkip("Network framework not available")
+        #endif
+
+        let delegate = MockServerDelegate()
+        let (server, client) = try await createIntegrationServerAndClient(
+            controlPort: 49403,
+            delegate: delegate
+        )
+
         await client.pause()
+        try await Task.sleep(nanoseconds: integrationMessageDelay)
+
+        // Verify server delegate received PAUSE
+        let messages = await delegate.storage.receivedMessages
+        XCTAssertTrue(messages.contains { $0.type == .pause },
+                      "Server delegate should have received PAUSE message")
+
+        await client.disconnect()
+        await server.stop()
     }
 
-    /// Test client resume method.
-    func test_clientResume() async {
-        let client = AESPClient()
+    /// Test resume sends a RESUME message that the server delegate receives.
+    func test_clientResume() async throws {
+        #if !canImport(Network)
+        throw XCTSkip("Network framework not available")
+        #endif
+
+        let delegate = MockServerDelegate()
+        let (server, client) = try await createIntegrationServerAndClient(
+            controlPort: 49406,
+            delegate: delegate
+        )
+
         await client.resume()
+        try await Task.sleep(nanoseconds: integrationMessageDelay)
+
+        // Verify server delegate received RESUME
+        let messages = await delegate.storage.receivedMessages
+        XCTAssertTrue(messages.contains { $0.type == .resume },
+                      "Server delegate should have received RESUME message")
+
+        await client.disconnect()
+        await server.stop()
     }
 
-    /// Test client reset method.
-    func test_clientReset() async {
-        let client = AESPClient()
+    /// Test reset sends a RESET message with the correct cold/warm flag.
+    ///
+    /// The reset payload is 1 byte: 0x01 for cold reset, 0x00 for warm reset.
+    func test_clientReset() async throws {
+        #if !canImport(Network)
+        throw XCTSkip("Network framework not available")
+        #endif
+
+        let delegate = MockServerDelegate()
+        let (server, client) = try await createIntegrationServerAndClient(
+            controlPort: 49409,
+            delegate: delegate
+        )
+
+        // Send cold reset
         await client.reset(cold: true)
+        try await Task.sleep(nanoseconds: integrationMessageDelay)
+
+        // Send warm reset
         await client.reset(cold: false)
+        try await Task.sleep(nanoseconds: integrationMessageDelay)
+
+        // Verify server delegate received both RESET messages
+        let messages = await delegate.storage.receivedMessages
+        let resets = messages.filter { $0.type == .reset }
+        XCTAssertEqual(resets.count, 2, "Should have received 2 RESET messages")
+
+        // First reset should be cold (payload byte = 0x01)
+        if resets.count >= 2 {
+            XCTAssertEqual(resets[0].payload.first, 0x01,
+                           "First reset should be cold (0x01)")
+            XCTAssertEqual(resets[1].payload.first, 0x00,
+                           "Second reset should be warm (0x00)")
+        }
+
+        await client.disconnect()
+        await server.stop()
     }
 
-    /// Test client requestStatus method.
-    func test_clientRequestStatus() async {
-        let client = AESPClient()
+    /// Test requestStatus sends a STATUS message that the server delegate receives.
+    func test_clientRequestStatus() async throws {
+        #if !canImport(Network)
+        throw XCTSkip("Network framework not available")
+        #endif
+
+        let delegate = MockServerDelegate()
+        let (server, client) = try await createIntegrationServerAndClient(
+            controlPort: 49412,
+            delegate: delegate
+        )
+
         await client.requestStatus()
+        try await Task.sleep(nanoseconds: integrationMessageDelay)
+
+        // Verify server delegate received STATUS
+        let messages = await delegate.storage.receivedMessages
+        XCTAssertTrue(messages.contains { $0.type == .status },
+                      "Server delegate should have received STATUS message")
+
+        await client.disconnect()
+        await server.stop()
     }
 }
 
@@ -856,51 +1073,151 @@ final class AESPClientCommandTests: XCTestCase {
 // MARK: - Client Input Tests
 // =============================================================================
 
-/// Tests for client input methods.
+/// Integration tests for client input methods.
+///
+/// Each test connects a client to a real server, sends an input event, and
+/// verifies the server delegate receives the correct message with the expected
+/// payload values. Port range: 49415-49426.
 final class AESPClientInputTests: XCTestCase {
 
-    /// Test sendKeyDown method.
-    func test_sendKeyDown() async {
-        let client = AESPClient()
+    override func setUp() {
+        super.setUp()
+        AESPTestProcessGuard.ensureClean()
+    }
+
+    /// Test sendKeyDown sends a KEY_DOWN message with correct payload.
+    ///
+    /// Payload format: [keyChar, keyCode, flags] where flags bit 0 = shift,
+    /// bit 1 = control.
+    func test_sendKeyDown() async throws {
+        #if !canImport(Network)
+        throw XCTSkip("Network framework not available")
+        #endif
+
+        let delegate = MockServerDelegate()
+        let (server, client) = try await createIntegrationServerAndClient(
+            controlPort: 49415,
+            delegate: delegate
+        )
+
         await client.sendKeyDown(keyChar: 0x41, keyCode: 0x3F, shift: true, control: false)
+        try await Task.sleep(nanoseconds: integrationMessageDelay)
+
+        // Verify server delegate received KEY_DOWN with correct payload
+        let messages = await delegate.storage.receivedMessages
+        let keyDowns = messages.filter { $0.type == .keyDown }
+        XCTAssertEqual(keyDowns.count, 1, "Should have received 1 KEY_DOWN message")
+
+        if let keyMsg = keyDowns.first,
+           let parsed = keyMsg.parseKeyPayload() {
+            XCTAssertEqual(parsed.keyChar, 0x41, "keyChar should be 0x41 ('A')")
+            XCTAssertEqual(parsed.keyCode, 0x3F, "keyCode should be 0x3F")
+            XCTAssertTrue(parsed.shift, "shift should be true")
+            XCTAssertFalse(parsed.control, "control should be false")
+        } else {
+            XCTFail("KEY_DOWN message should have parseable payload")
+        }
+
+        await client.disconnect()
+        await server.stop()
     }
 
-    /// Test sendKeyUp method.
-    func test_sendKeyUp() async {
-        let client = AESPClient()
+    /// Test sendKeyUp sends a KEY_UP message that the server delegate receives.
+    func test_sendKeyUp() async throws {
+        #if !canImport(Network)
+        throw XCTSkip("Network framework not available")
+        #endif
+
+        let delegate = MockServerDelegate()
+        let (server, client) = try await createIntegrationServerAndClient(
+            controlPort: 49418,
+            delegate: delegate
+        )
+
         await client.sendKeyUp()
+        try await Task.sleep(nanoseconds: integrationMessageDelay)
+
+        // Verify server delegate received KEY_UP
+        let messages = await delegate.storage.receivedMessages
+        XCTAssertTrue(messages.contains { $0.type == .keyUp },
+                      "Server delegate should have received KEY_UP message")
+
+        await client.disconnect()
+        await server.stop()
     }
 
-    /// Test sendJoystick method.
-    func test_sendJoystick() async {
-        let client = AESPClient()
+    /// Test sendJoystick sends a JOYSTICK message with correct payload.
+    ///
+    /// Payload format: [port, directions, trigger] where directions is a
+    /// bitmask (bit 0=up, 1=down, 2=left, 3=right).
+    func test_sendJoystick() async throws {
+        #if !canImport(Network)
+        throw XCTSkip("Network framework not available")
+        #endif
+
+        let delegate = MockServerDelegate()
+        let (server, client) = try await createIntegrationServerAndClient(
+            controlPort: 49421,
+            delegate: delegate
+        )
+
         await client.sendJoystick(port: 0, up: true, down: false, left: false, right: false, trigger: true)
+        try await Task.sleep(nanoseconds: integrationMessageDelay)
+
+        // Verify server delegate received JOYSTICK with correct payload
+        let messages = await delegate.storage.receivedMessages
+        let joysticks = messages.filter { $0.type == .joystick }
+        XCTAssertEqual(joysticks.count, 1, "Should have received 1 JOYSTICK message")
+
+        if let joyMsg = joysticks.first,
+           let parsed = joyMsg.parseJoystickPayload() {
+            XCTAssertEqual(parsed.port, 0, "Port should be 0")
+            XCTAssertTrue(parsed.up, "up should be true")
+            XCTAssertFalse(parsed.down, "down should be false")
+            XCTAssertFalse(parsed.left, "left should be false")
+            XCTAssertFalse(parsed.right, "right should be false")
+            XCTAssertTrue(parsed.trigger, "trigger should be true")
+        } else {
+            XCTFail("JOYSTICK message should have parseable payload")
+        }
+
+        await client.disconnect()
+        await server.stop()
     }
 
-    /// Test sendConsoleKeys method.
-    func test_sendConsoleKeys() async {
-        let client = AESPClient()
+    /// Test sendConsoleKeys sends a CONSOLE_KEYS message with correct payload.
+    ///
+    /// Payload format: 1 byte bitmask where bit 0=start, 1=select, 2=option.
+    func test_sendConsoleKeys() async throws {
+        #if !canImport(Network)
+        throw XCTSkip("Network framework not available")
+        #endif
+
+        let delegate = MockServerDelegate()
+        let (server, client) = try await createIntegrationServerAndClient(
+            controlPort: 49424,
+            delegate: delegate
+        )
+
         await client.sendConsoleKeys(start: true, select: false, option: true)
-    }
-}
+        try await Task.sleep(nanoseconds: integrationMessageDelay)
 
-// =============================================================================
-// MARK: - Client Memory Access Tests
-// =============================================================================
+        // Verify server delegate received CONSOLE_KEYS with correct payload
+        let messages = await delegate.storage.receivedMessages
+        let consoleKeys = messages.filter { $0.type == .consoleKeys }
+        XCTAssertEqual(consoleKeys.count, 1, "Should have received 1 CONSOLE_KEYS message")
 
-/// Tests for client memory access methods.
-final class AESPClientMemoryTests: XCTestCase {
+        if let ckMsg = consoleKeys.first,
+           let parsed = ckMsg.parseConsoleKeysPayload() {
+            XCTAssertTrue(parsed.start, "start should be true")
+            XCTAssertFalse(parsed.select, "select should be false")
+            XCTAssertTrue(parsed.option, "option should be true")
+        } else {
+            XCTFail("CONSOLE_KEYS message should have parseable payload")
+        }
 
-    /// Test readMemory method.
-    func test_readMemory() async {
-        let client = AESPClient()
-        await client.readMemory(address: 0x0600, count: 16)
-    }
-
-    /// Test writeMemory method.
-    func test_writeMemory() async {
-        let client = AESPClient()
-        await client.writeMemory(address: 0x0600, bytes: Data([0xA9, 0x00, 0x60]))
+        await client.disconnect()
+        await server.stop()
     }
 }
 
@@ -908,32 +1225,126 @@ final class AESPClientMemoryTests: XCTestCase {
 // MARK: - Client Subscription Tests
 // =============================================================================
 
-/// Tests for client subscription methods.
+/// Integration tests for client subscription methods.
+///
+/// Subscription messages (VIDEO_SUBSCRIBE, VIDEO_UNSUBSCRIBE, AUDIO_SUBSCRIBE,
+/// AUDIO_UNSUBSCRIBE) are handled internally by AESPServer.handleMessage rather
+/// than being forwarded to the delegate. These tests verify the messages traverse
+/// the network successfully by confirming the client and server remain healthy
+/// after each subscription command. Port range: 49433-49444.
 final class AESPClientSubscriptionTests: XCTestCase {
 
-    /// Test subscribeToVideo method.
-    func test_subscribeToVideo() async {
-        let client = AESPClient()
+    override func setUp() {
+        super.setUp()
+        AESPTestProcessGuard.ensureClean()
+    }
+
+    /// Test subscribeToVideo sends VIDEO_SUBSCRIBE over the network.
+    ///
+    /// Verifies the message reaches the server without error by checking
+    /// client stays connected and server stays running.
+    func test_subscribeToVideo() async throws {
+        #if !canImport(Network)
+        throw XCTSkip("Network framework not available")
+        #endif
+
+        let delegate = MockServerDelegate()
+        let (server, client) = try await createIntegrationServerAndClient(
+            controlPort: 49433,
+            delegate: delegate
+        )
+
+        // Send both delta and non-delta subscription requests
         await client.subscribeToVideo(deltaEncoding: false)
+        try await Task.sleep(nanoseconds: integrationMessageDelay)
+
         await client.subscribeToVideo(deltaEncoding: true)
+        try await Task.sleep(nanoseconds: integrationMessageDelay)
+
+        // Verify client and server remain healthy after subscription messages
+        let isConnected = await client.isConnected
+        XCTAssertTrue(isConnected, "Client should remain connected after VIDEO_SUBSCRIBE")
+
+        let isRunning = await server.isRunning
+        XCTAssertTrue(isRunning, "Server should remain running after VIDEO_SUBSCRIBE")
+
+        await client.disconnect()
+        await server.stop()
     }
 
-    /// Test unsubscribeFromVideo method.
-    func test_unsubscribeFromVideo() async {
-        let client = AESPClient()
+    /// Test unsubscribeFromVideo sends VIDEO_UNSUBSCRIBE over the network.
+    func test_unsubscribeFromVideo() async throws {
+        #if !canImport(Network)
+        throw XCTSkip("Network framework not available")
+        #endif
+
+        let delegate = MockServerDelegate()
+        let (server, client) = try await createIntegrationServerAndClient(
+            controlPort: 49436,
+            delegate: delegate
+        )
+
         await client.unsubscribeFromVideo()
+        try await Task.sleep(nanoseconds: integrationMessageDelay)
+
+        let isConnected = await client.isConnected
+        XCTAssertTrue(isConnected, "Client should remain connected after VIDEO_UNSUBSCRIBE")
+
+        let isRunning = await server.isRunning
+        XCTAssertTrue(isRunning, "Server should remain running after VIDEO_UNSUBSCRIBE")
+
+        await client.disconnect()
+        await server.stop()
     }
 
-    /// Test subscribeToAudio method.
-    func test_subscribeToAudio() async {
-        let client = AESPClient()
+    /// Test subscribeToAudio sends AUDIO_SUBSCRIBE over the network.
+    func test_subscribeToAudio() async throws {
+        #if !canImport(Network)
+        throw XCTSkip("Network framework not available")
+        #endif
+
+        let delegate = MockServerDelegate()
+        let (server, client) = try await createIntegrationServerAndClient(
+            controlPort: 49439,
+            delegate: delegate
+        )
+
         await client.subscribeToAudio()
+        try await Task.sleep(nanoseconds: integrationMessageDelay)
+
+        let isConnected = await client.isConnected
+        XCTAssertTrue(isConnected, "Client should remain connected after AUDIO_SUBSCRIBE")
+
+        let isRunning = await server.isRunning
+        XCTAssertTrue(isRunning, "Server should remain running after AUDIO_SUBSCRIBE")
+
+        await client.disconnect()
+        await server.stop()
     }
 
-    /// Test unsubscribeFromAudio method.
-    func test_unsubscribeFromAudio() async {
-        let client = AESPClient()
+    /// Test unsubscribeFromAudio sends AUDIO_UNSUBSCRIBE over the network.
+    func test_unsubscribeFromAudio() async throws {
+        #if !canImport(Network)
+        throw XCTSkip("Network framework not available")
+        #endif
+
+        let delegate = MockServerDelegate()
+        let (server, client) = try await createIntegrationServerAndClient(
+            controlPort: 49442,
+            delegate: delegate
+        )
+
         await client.unsubscribeFromAudio()
+        try await Task.sleep(nanoseconds: integrationMessageDelay)
+
+        let isConnected = await client.isConnected
+        XCTAssertTrue(isConnected, "Client should remain connected after AUDIO_UNSUBSCRIBE")
+
+        let isRunning = await server.isRunning
+        XCTAssertTrue(isRunning, "Server should remain running after AUDIO_UNSUBSCRIBE")
+
+        await client.disconnect()
+        await server.stop()
     }
 }
 
@@ -941,21 +1352,66 @@ final class AESPClientSubscriptionTests: XCTestCase {
 // MARK: - Client Stream Tests
 // =============================================================================
 
-/// Tests for client stream access.
+/// Integration tests for client stream access when connected to a real server.
+///
+/// Unlike the previous stub tests that accessed streams on a disconnected client,
+/// these tests connect to a real server with video/audio channels and verify the
+/// streams are properly initialized. Port range: 49445-49450.
 final class AESPClientStreamTests: XCTestCase {
 
-    /// Test frameStream access.
-    func test_frameStreamAccess() async {
-        let client = AESPClient()
-        let _ = await client.frameStream
-        // Stream should be accessible
+    override func setUp() {
+        super.setUp()
+        AESPTestProcessGuard.ensureClean()
     }
 
-    /// Test audioStream access.
-    func test_audioStreamAccess() async {
-        let client = AESPClient()
-        let _ = await client.audioStream
-        // Stream should be accessible
+    /// Test frameStream is accessible and properly initialized when connected with video.
+    func test_frameStreamAccess() async throws {
+        #if !canImport(Network)
+        throw XCTSkip("Network framework not available")
+        #endif
+
+        let delegate = MockServerDelegate()
+        let (server, client) = try await createIntegrationServerAndClient(
+            controlPort: 49445,
+            connectVideo: true,
+            delegate: delegate
+        )
+
+        // Access the frame stream — should be a real stream (not a finished placeholder)
+        let stream = await client.frameStream
+        XCTAssertNotNil(stream, "frameStream should be accessible when connected with video")
+
+        // Verify client is connected with video channel active
+        let isConnected = await client.isConnected
+        XCTAssertTrue(isConnected, "Client should be connected")
+
+        await client.disconnect()
+        await server.stop()
+    }
+
+    /// Test audioStream is accessible and properly initialized when connected with audio.
+    func test_audioStreamAccess() async throws {
+        #if !canImport(Network)
+        throw XCTSkip("Network framework not available")
+        #endif
+
+        let delegate = MockServerDelegate()
+        let (server, client) = try await createIntegrationServerAndClient(
+            controlPort: 49448,
+            connectAudio: true,
+            delegate: delegate
+        )
+
+        // Access the audio stream — should be a real stream (not a finished placeholder)
+        let stream = await client.audioStream
+        XCTAssertNotNil(stream, "audioStream should be accessible when connected with audio")
+
+        // Verify client is connected with audio channel active
+        let isConnected = await client.isConnected
+        XCTAssertTrue(isConnected, "Client should be connected")
+
+        await client.disconnect()
+        await server.stop()
     }
 }
 

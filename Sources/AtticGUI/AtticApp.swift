@@ -5,38 +5,20 @@
 // This is the main entry point for the Attic GUI application.
 // It defines the SwiftUI App struct which creates the main window.
 //
-// The GUI application supports two operation modes:
-//
-// 1. **Client Mode (default)**: Connects to AtticServer via AESP protocol.
-//    The server runs as a subprocess and handles all emulation. The GUI
-//    receives video frames and audio samples via the protocol.
-//
-// 2. **Embedded Mode**: Runs the EmulatorEngine directly within the GUI
-//    process. Used for debugging or when server launch fails.
-//    Enabled with --embedded flag.
+// The GUI connects to AtticServer via the AESP protocol. The server runs
+// as a subprocess and handles all emulation. The GUI receives video frames
+// and audio samples via the protocol and sends input back.
 //
 // Architecture:
 // The App struct creates a single main window containing the ContentView.
-// AtticViewModel manages either the protocol client or embedded emulator.
+// AtticViewModel manages the AESP protocol client connection to the server.
 //
 // =============================================================================
 
 import SwiftUI
+import UniformTypeIdentifiers
 import AtticCore
 import AtticProtocol
-
-// MARK: - Operation Mode
-
-/// The operation mode for the GUI application.
-enum OperationMode: Sendable {
-    /// Client mode: connects to AtticServer via AESP protocol.
-    /// This is the default mode for normal operation.
-    case client
-
-    /// Embedded mode: runs EmulatorEngine directly in the GUI process.
-    /// Used for debugging or when server launch fails.
-    case embedded
-}
 
 /// The main SwiftUI application for Attic.
 ///
@@ -61,24 +43,7 @@ struct AtticApp: App {
     // =========================================================================
 
     init() {
-        // Parse command-line arguments to determine operation mode
-        let mode = AtticApp.parseOperationMode()
-        _viewModel = StateObject(wrappedValue: AtticViewModel(mode: mode))
-    }
-
-    /// Parses command-line arguments to determine operation mode.
-    private static func parseOperationMode() -> OperationMode {
-        let arguments = CommandLine.arguments
-
-        // Check for --embedded flag
-        if arguments.contains("--embedded") {
-            print("[AtticGUI] Running in embedded mode")
-            return .embedded
-        }
-
-        // Default to client mode
-        print("[AtticGUI] Running in client mode")
-        return .client
+        _viewModel = StateObject(wrappedValue: AtticViewModel())
     }
 
     // =========================================================================
@@ -125,6 +90,12 @@ struct AtticApp: App {
 /// We fix this by setting the activation policy to `.regular`, which makes
 /// the app behave as a normal foreground GUI application.
 class AppDelegate: NSObject, NSApplicationDelegate {
+    /// Callback for handling file open events from Finder.
+    /// Set by AtticViewModel during initialization so the AppDelegate
+    /// can forward file open requests to the view model.
+    /// Marked @MainActor because AppDelegate and the callback both run on the main thread.
+    @MainActor static var onOpenFile: ((URL) -> Void)?
+
     /// Called before the app finishes launching.
     ///
     /// We set the activation policy here to ensure the app becomes a proper
@@ -151,11 +122,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Server cleanup is handled by AtticViewModel's deinit
     }
 
-    /// Called when a file is opened via Finder (double-click on .atr file).
+    /// Called when a file is opened via Finder (double-click on .atr file, drag-and-drop, etc.).
+    ///
+    /// Forwards the file URL to the view model via the static callback.
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
             print("[AtticGUI] Open file: \(url.path)")
-            // TODO: Mount disk image or load state file
+            AppDelegate.onOpenFile?(url)
         }
     }
 
@@ -171,33 +144,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
 /// Main view model for the Attic application.
 ///
-/// This class supports two operation modes:
-/// - **Client mode**: Connects to AtticServer via AESP protocol
-/// - **Embedded mode**: Runs EmulatorEngine directly
-///
-/// In client mode, the view model:
+/// Connects to AtticServer via the AESP protocol. The view model:
 /// 1. Launches AtticServer as a subprocess
 /// 2. Connects via AESPClient
 /// 3. Receives video frames via AsyncStream
 /// 4. Receives audio samples via AsyncStream
 /// 5. Sends input via protocol messages
 ///
-/// In embedded mode, the view model:
-/// 1. Creates and initializes EmulatorEngine directly
-/// 2. Runs an emulation loop that executes frames
-/// 3. Gets frame/audio data directly from the emulator
-/// 4. Sends input directly to the emulator
-///
 /// Note: @MainActor ensures all UI-related updates happen on the main thread.
 @MainActor
 class AtticViewModel: ObservableObject {
-    // =========================================================================
-    // MARK: - Mode Configuration
-    // =========================================================================
-
-    /// The current operation mode.
-    let mode: OperationMode
-
     // =========================================================================
     // MARK: - Shared Components
     // =========================================================================
@@ -227,16 +183,24 @@ class AtticViewModel: ObservableObject {
     /// Task for receiving audio samples.
     private var audioReceiverTask: Task<Void, Never>?
 
-    // =========================================================================
-    // MARK: - Embedded Mode Components
-    // =========================================================================
+    /// Task for periodic status polling (disk mounts, running state).
+    /// Polls the server every few seconds so the GUI reflects changes made
+    /// by other clients (e.g. CLI mount/unmount operations).
+    private var statusPollingTask: Task<Void, Never>?
 
-    /// The emulator engine (embedded mode only).
-    /// This is the core emulation that wraps libatari800.
-    private var emulator: EmulatorEngine?
+    /// Task for heartbeat monitoring via PING/PONG.
+    /// Detects server loss and triggers the "Server Connection Lost" alert.
+    private var heartbeatTask: Task<Void, Never>?
 
-    /// The emulation loop task (embedded mode only).
-    private var emulationTask: Task<Void, Never>?
+    /// PID of the AtticServer process if we launched it.
+    /// Used for process lifecycle management (SIGTERM shutdown).
+    private var serverPID: Int32?
+
+    /// Whether this GUI instance launched the AtticServer process.
+    /// When true, "Shutdown All" is enabled (we own the server lifecycle).
+    /// When false (connected to a pre-existing server), "Shutdown All" is
+    /// greyed out since we shouldn't control a server we didn't start.
+    @Published var launchedByUs: Bool = false
 
     // =========================================================================
     // MARK: - Published State
@@ -254,8 +218,16 @@ class AtticViewModel: ObservableObject {
     /// Status message for display.
     @Published var statusMessage: String = "Not Initialized"
 
-    /// FPS counter.
+    /// FPS counter (driven by FrameRateMonitor).
     @Published var fps: Int = 0
+
+    /// Mounted disk names for display in the status bar (e.g. "D1:GAME.ATR").
+    /// Updated when the AESP status response includes disk information.
+    @Published var mountedDiskNames: String = ""
+
+    /// Whether the "Server Connection Lost" alert should be displayed.
+    /// Set to true by the heartbeat monitor when the server stops responding.
+    @Published var showServerLostAlert: Bool = false
 
     /// Whether audio is enabled.
     @Published var isAudioEnabled: Bool = true {
@@ -267,43 +239,59 @@ class AtticViewModel: ObservableObject {
         }
     }
 
+    /// Whether joystick emulation is enabled.
+    /// When enabled, arrow keys map to joystick directions and spacebar maps
+    /// to the fire button (port 0). Toggling off resets all joystick state
+    /// so no directions remain "stuck".
+    @Published var isJoystickEmulationEnabled: Bool = false {
+        didSet {
+            if !isJoystickEmulationEnabled {
+                resetJoystickState()
+            }
+        }
+    }
+
     // =========================================================================
     // MARK: - Internal State
     // =========================================================================
 
-    /// Frame counter for FPS calculation.
-    private var frameCounter: Int = 0
+    /// Frame rate monitor for FPS calculation and drop detection.
+    /// Tracks frame timing, detects drops (frames exceeding 1.5× target interval),
+    /// and provides statistics (average/min/max frame time, jitter).
+    private let frameRateMonitor = FrameRateMonitor()
 
-    /// Last FPS update time.
-    private var lastFPSUpdate: Date = Date()
+    // Joystick emulation key-held tracking.
+    // Each boolean tracks whether the corresponding key is currently held down.
+    // Multiple keys can be held simultaneously for diagonal movement.
+    private var joystickUpHeld: Bool = false
+    private var joystickDownHeld: Bool = false
+    private var joystickLeftHeld: Bool = false
+    private var joystickRightHeld: Bool = false
+    private var joystickTriggerHeld: Bool = false
 
     // =========================================================================
     // MARK: - Initialization
     // =========================================================================
 
-    /// Creates a new view model with the specified operation mode.
-    ///
-    /// - Parameter mode: The operation mode (client or embedded).
-    init(mode: OperationMode = .client) {
-        self.mode = mode
+    /// Creates a new view model.
+    init() {
         self.audioEngine = AudioEngine()
         self.keyboardHandler = KeyboardInputHandler()
-
-        // Only create emulator in embedded mode
-        if mode == .embedded {
-            self.emulator = EmulatorEngine()
-        }
     }
 
-    /// Initializes the emulator (embedded mode) or connects to server (client mode).
+    /// Connects to the AtticServer via AESP protocol.
     ///
     /// This should be called when the view appears.
     func initializeEmulator() async {
-        switch mode {
-        case .client:
-            await initializeClientMode()
-        case .embedded:
-            await initializeEmbeddedMode()
+        await initializeClientMode()
+
+        // Register file open handler so AppDelegate can forward
+        // Finder file-open events (double-click, drag-and-drop) to us
+        AppDelegate.onOpenFile = { [weak self] url in
+            guard let self = self else { return }
+            Task { @MainActor in
+                await self.bootFile(url: url)
+            }
         }
     }
 
@@ -311,15 +299,112 @@ class AtticViewModel: ObservableObject {
     // MARK: - Client Mode Initialization
     // =========================================================================
 
-    /// Initializes client mode by connecting to an existing AtticServer.
+    /// Writes a debug message to a log file (for debugging GUI startup).
+    private func debugLog(_ message: String) {
+        let logPath = "/tmp/attic-gui-debug.log"
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let line = "[\(timestamp)] \(message)\n"
+        if let data = line.data(using: .utf8) {
+            if FileManager.default.fileExists(atPath: logPath) {
+                if let handle = FileHandle(forWritingAtPath: logPath) {
+                    handle.seekToEndOfFile()
+                    handle.write(data)
+                    handle.closeFile()
+                }
+            } else {
+                FileManager.default.createFile(atPath: logPath, contents: data)
+            }
+        }
+    }
+
+    /// Initializes client mode by connecting to AtticServer.
     ///
-    /// The server must be started separately before launching the GUI.
-    /// If no server is running, an error message is displayed.
+    /// If no server is running, automatically launches one first.
     private func initializeClientMode() async {
+        debugLog("initializeClientMode() called")
         statusMessage = "Connecting to server..."
 
+        // Try to connect to existing server first
+        let connected = await tryConnectToServer()
+        debugLog("tryConnectToServer() returned: \(connected)")
+
+        if !connected {
+            // No server running - try to launch one
+            debugLog("No server running, attempting to launch...")
+            statusMessage = "Starting server..."
+
+            let launcher = ServerLauncher()
+            if let execPath = launcher.findServerExecutable() {
+                debugLog("Found server executable at: \(execPath)")
+            } else {
+                debugLog("Server executable NOT found")
+            }
+            let result = launcher.launchServer(options: ServerLaunchOptions(silent: false))
+            debugLog("launchServer result: \(result)")
+
+            switch result {
+            case .success(let socketPath, let pid):
+                debugLog("AtticServer started (PID: \(pid)) at \(socketPath)")
+                // Store server PID for process lifecycle management (SIGTERM shutdown)
+                serverPID = pid
+                launchedByUs = true
+                // Wait a moment for AESP to initialize
+                try? await Task.sleep(nanoseconds: 500_000_000)  // 0.5 seconds
+                // Try connecting again
+                let retryConnected = await tryConnectToServer()
+                if !retryConnected {
+                    initializationError = """
+                        AtticServer started but connection failed.
+
+                        Try starting the server manually:
+                          swift run AtticServer
+                        """
+                    statusMessage = "Connection Failed"
+                    await cleanup()
+                }
+
+            case .executableNotFound:
+                print("[AtticGUI] AtticServer executable not found")
+                initializationError = """
+                    AtticServer executable not found.
+
+                    Make sure AtticServer is built:
+                      swift build
+                    """
+                statusMessage = "Server Not Found"
+                await cleanup()
+
+            case .launchFailed(let error):
+                print("[AtticGUI] Failed to launch AtticServer: \(error)")
+                initializationError = """
+                    Failed to launch AtticServer: \(error.localizedDescription)
+
+                    Try starting it manually:
+                      swift run AtticServer
+                    """
+                statusMessage = "Launch Failed"
+                await cleanup()
+
+            case .socketTimeout(let pid):
+                print("[AtticGUI] AtticServer started (PID: \(pid)) but socket not ready")
+                initializationError = """
+                    AtticServer started but socket not ready.
+
+                    Try starting the server manually:
+                      swift run AtticServer
+                    """
+                statusMessage = "Server Timeout"
+                await cleanup()
+            }
+        }
+    }
+
+    /// Attempts to connect to an existing AtticServer via AESP protocol.
+    ///
+    /// - Returns: True if connection successful, false otherwise.
+    private func tryConnectToServer() async -> Bool {
         do {
-            // Create and connect client to existing server
+            // Create and connect client
             let clientConfig = AESPClientConfiguration(
                 host: "localhost",
                 controlPort: AESPConstants.defaultControlPort,
@@ -349,33 +434,28 @@ class AtticViewModel: ObservableObject {
                 }
             }
 
-            // Start receiving frames and audio
+            // Start receiving frames, audio, periodic status polling, and heartbeat
             startFrameReceiver()
             startAudioReceiver()
+            startStatusPolling()
+            startHeartbeat()
 
             isInitialized = true
             isRunning = true
             statusMessage = "Connected"
             audioEngine.resume()
 
+            // Fetch initial disk status from the server
+            await refreshDiskStatus()
+
             print("[AtticGUI] Connected to server")
+            return true
 
         } catch {
-            // No server is running - show error message
             print("[AtticGUI] Failed to connect to server: \(error)")
-            initializationError = """
-                No AtticServer found on localhost:\(AESPConstants.defaultControlPort)
-
-                Please start the server first:
-                  swift run AtticServer
-
-                Or run in embedded mode:
-                  swift run AtticGUI --embedded
-                """
-            statusMessage = "No Server"
-
-            // Clean up
-            await cleanup()
+            // Clean up partial state
+            client = nil
+            return false
         }
     }
 
@@ -406,97 +486,58 @@ class AtticViewModel: ObservableObject {
         }
     }
 
-    // =========================================================================
-    // MARK: - Embedded Mode Initialization
-    // =========================================================================
-
-    /// Initializes embedded mode with direct EmulatorEngine.
-    private func initializeEmbeddedMode() async {
-        guard let emulator = emulator else {
-            initializationError = "Emulator not created"
-            return
-        }
-
-        // Try to find ROM directory
-        let romPath = findROMPath()
-
-        guard let romPath = romPath else {
-            initializationError = "ROM directory not found"
-            return
-        }
-
-        do {
-            // Initialize the emulator
-            try await emulator.initialize(romPath: romPath)
-            isInitialized = true
-            statusMessage = "Ready"
-
-            // Configure audio engine to match emulator's output format
-            let audioConfig = await emulator.getAudioConfiguration()
-            audioEngine.configure(from: audioConfig)
-
-            // Start audio engine
-            do {
-                try audioEngine.start()
-                let bitsPerSample = audioConfig.sampleSize * 8
-                print("[AtticGUI] Audio engine started: \(audioConfig.sampleRate) Hz, \(audioConfig.channels) ch, \(bitsPerSample)-bit")
-            } catch {
-                print("[AtticGUI] Warning: Failed to start audio: \(error.localizedDescription)")
+    /// Starts periodic status polling to detect changes made by other clients.
+    ///
+    /// Polls the server every 3 seconds for the current status including
+    /// mounted disk information. This ensures the GUI reflects CLI-initiated
+    /// mount/unmount operations without requiring a push notification mechanism.
+    private func startStatusPolling() {
+        statusPollingTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)  // 3 seconds
+                guard !Task.isCancelled else { break }
+                await self?.refreshDiskStatus()
             }
-
-            // Start the emulation loop
-            startEmulationLoop()
-
-            // Auto-start
-            await start()
-        } catch {
-            initializationError = error.localizedDescription
-            statusMessage = "Error"
         }
     }
 
-    // =========================================================================
-    // MARK: - ROM Path Discovery
-    // =========================================================================
-
-    /// Finds the ROM directory.
+    /// Starts the heartbeat monitor that detects server loss.
     ///
-    /// Searches in standard locations for the ROM files.
-    private func findROMPath() -> URL? {
-        let fileManager = FileManager.default
+    /// Every 5 seconds, sends a PING to the server and checks whether a PONG
+    /// has been received within the last 10 seconds. If the server stops
+    /// responding, sets `showServerLostAlert` to trigger a user-facing alert.
+    private func startHeartbeat() {
+        heartbeatTask = Task { [weak self] in
+            // Wait 5 seconds before the first check to let the connection settle
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
 
-        // Check various locations
-        let searchPaths: [URL] = [
-            // Current working directory
-            URL(fileURLWithPath: fileManager.currentDirectoryPath)
-                .appendingPathComponent("Resources/ROM"),
-            // Bundle resources (for packaged app)
-            Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/ROM"),
-            // User's home directory
-            fileManager.homeDirectoryForCurrentUser
-                .appendingPathComponent(".attic/ROM"),
-            // Source repo location (for development)
-            URL(fileURLWithPath: #file)
-                .deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .appendingPathComponent("Resources/ROM"),
-        ]
+            while !Task.isCancelled {
+                guard let self = self, let client = self.client else { break }
 
-        for path in searchPaths {
-            let osRom = path.appendingPathComponent("ATARIXL.ROM")
-            if fileManager.fileExists(atPath: osRom.path) {
-                print("[AtticGUI] Found ROMs at: \(path.path)")
-                return path
+                // Send PING
+                await client.ping()
+
+                // Wait 5 seconds for the PONG to arrive
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                guard !Task.isCancelled else { break }
+
+                // Check if we received a PONG recently (within last 10 seconds)
+                let lastPong = await client.lastPongReceived
+                let stale: Bool
+                if let lastPong = lastPong {
+                    stale = Date().timeIntervalSince(lastPong) > 10.0
+                } else {
+                    // Never received a PONG — server is not responding
+                    stale = true
+                }
+
+                if stale {
+                    print("[AtticGUI] Heartbeat: server not responding, showing alert")
+                    self.showServerLostAlert = true
+                    break
+                }
             }
         }
-
-        print("[AtticGUI] ROM search paths tried:")
-        for path in searchPaths {
-            print("  - \(path.path)")
-        }
-
-        return nil
     }
 
     // =========================================================================
@@ -506,58 +547,80 @@ class AtticViewModel: ObservableObject {
     /// Starts/resumes the emulator.
     func start() async {
         guard isInitialized else { return }
-
-        switch mode {
-        case .client:
-            await client?.resume()
-            audioEngine.resume()
-            isRunning = true
-            statusMessage = "Running"
-
-        case .embedded:
-            guard let emulator = emulator else { return }
-            await emulator.resume()
-            audioEngine.resume()
-            isRunning = true
-            statusMessage = "Running"
-        }
+        await client?.resume()
+        audioEngine.resume()
+        isRunning = true
+        statusMessage = "Running"
     }
 
     /// Pauses the emulator.
     func pause() async {
-        switch mode {
-        case .client:
-            await client?.pause()
-            audioEngine.pause()
-            isRunning = false
-            statusMessage = "Paused"
-
-        case .embedded:
-            guard let emulator = emulator else { return }
-            await emulator.pause()
-            audioEngine.pause()
-            isRunning = false
-            statusMessage = "Paused"
-        }
+        await client?.pause()
+        audioEngine.pause()
+        isRunning = false
+        statusMessage = "Paused"
     }
 
     /// Performs a reset.
     ///
     /// - Parameter cold: If true, performs a cold reset (power cycle).
     func reset(cold: Bool = true) async {
-        switch mode {
-        case .client:
-            await client?.reset(cold: cold)
-            audioEngine.clearBuffer()
-            keyboardHandler.reset()
-            statusMessage = cold ? "Cold Reset" : "Warm Reset"
+        await client?.reset(cold: cold)
+        audioEngine.clearBuffer()
+        keyboardHandler.reset()
+        if isJoystickEmulationEnabled { resetJoystickState() }
+        statusMessage = cold ? "Cold Reset" : "Warm Reset"
+    }
 
-        case .embedded:
-            guard let emulator = emulator else { return }
-            await emulator.reset(cold: cold)
-            audioEngine.clearBuffer()
-            keyboardHandler.reset()
-            statusMessage = cold ? "Cold Reset" : "Warm Reset"
+    // =========================================================================
+    // MARK: - Boot File
+    // =========================================================================
+
+    /// Boots the emulator with a file (disk image, executable, BASIC program, etc.).
+    ///
+    /// Sends a boot file command to the server via AESP protocol, which loads
+    /// the file and performs a cold start.
+    ///
+    /// - Parameter url: URL of the file to boot.
+    func bootFile(url: URL) async {
+        let path = url.path
+
+        await client?.bootFile(filePath: path)
+        audioEngine.clearBuffer()
+        keyboardHandler.reset()
+        isRunning = true
+        statusMessage = "Booting \(url.lastPathComponent)..."
+        // Refresh disk status after boot so the status bar shows the new disk
+        await refreshDiskStatus()
+    }
+
+    // =========================================================================
+    // MARK: - Disk Status
+    // =========================================================================
+
+    /// Requests the current status (including mounted disks) from the server
+    /// and updates the `mountedDiskNames` published property.
+    ///
+    /// Sends an AESP status request and parses the enhanced response.
+    func refreshDiskStatus() async {
+        guard let client = client else { return }
+        let status = await client.requestStatusWithDisks()
+
+        // Build the new display string for the status bar
+        let newDiskNames: String
+        if status.mountedDrives.isEmpty {
+            newDiskNames = ""
+        } else {
+            newDiskNames = status.mountedDrives
+                .map { "D\($0.drive):\($0.filename)" }
+                .joined(separator: "  ")
+        }
+
+        // Only update @Published property when the value actually changes.
+        // Unconditional assignment fires objectWillChange every poll cycle,
+        // which causes SwiftUI to rebuild menus unnecessarily.
+        if newDiskNames != mountedDiskNames {
+            mountedDiskNames = newDiskNames
         }
     }
 
@@ -578,6 +641,45 @@ class AtticViewModel: ObservableObject {
             command: event.modifierFlags.contains(.command)
         )
 
+        // When joystick emulation is active, intercept arrow keys and spacebar
+        // before they reach the normal keyboard handler. This allows games to be
+        // played using the keyboard as a virtual joystick on port 0.
+        if isJoystickEmulationEnabled {
+            switch event.keyCode {
+            case MacKeyCode.upArrow:
+                joystickUpHeld = true
+                sendJoystickState()
+                return
+            case MacKeyCode.downArrow:
+                joystickDownHeld = true
+                sendJoystickState()
+                return
+            case MacKeyCode.leftArrow:
+                joystickLeftHeld = true
+                sendJoystickState()
+                return
+            case MacKeyCode.rightArrow:
+                joystickRightHeld = true
+                sendJoystickState()
+                return
+            case MacKeyCode.space:
+                joystickTriggerHeld = true
+                sendJoystickState()
+                return
+            default:
+                break  // Fall through to normal keyboard handling
+            }
+        }
+
+        // F5 triggers warm reset (Atari RESET key)
+        // This is handled specially because RESET is not part of the keyboard matrix
+        if event.keyCode == 0x60 {  // MacKeyCode.f5
+            Task {
+                await reset(cold: false)
+            }
+            return
+        }
+
         // Convert to Atari key
         if let (keyChar, keyCode, atariShift, atariControl) = keyboardHandler.keyDown(
             keyCode: event.keyCode,
@@ -585,24 +687,14 @@ class AtticViewModel: ObservableObject {
             shift: shift,
             control: control
         ) {
-            // Send to emulator/server based on mode
+            // Send to server via AESP protocol
             Task {
-                switch mode {
-                case .client:
-                    await client?.sendKeyDown(
-                        keyChar: keyChar,
-                        keyCode: keyCode,
-                        shift: atariShift,
-                        control: atariControl
-                    )
-                case .embedded:
-                    await emulator?.pressKey(
-                        keyChar: keyChar,
-                        keyCode: keyCode,
-                        shift: atariShift,
-                        control: atariControl
-                    )
-                }
+                await client?.sendKeyDown(
+                    keyChar: keyChar,
+                    keyCode: keyCode,
+                    shift: atariShift,
+                    control: atariControl
+                )
             }
         }
 
@@ -612,15 +704,40 @@ class AtticViewModel: ObservableObject {
 
     /// Handles a key up event from the keyboard.
     func handleKeyUp(_ event: NSEvent) {
+        // When joystick emulation is active, intercept arrow/space key releases
+        // to clear the held state. Without this, releasing a direction key would
+        // also trigger a sendKeyUp which could interfere with keyboard input.
+        if isJoystickEmulationEnabled {
+            switch event.keyCode {
+            case MacKeyCode.upArrow:
+                joystickUpHeld = false
+                sendJoystickState()
+                return
+            case MacKeyCode.downArrow:
+                joystickDownHeld = false
+                sendJoystickState()
+                return
+            case MacKeyCode.leftArrow:
+                joystickLeftHeld = false
+                sendJoystickState()
+                return
+            case MacKeyCode.rightArrow:
+                joystickRightHeld = false
+                sendJoystickState()
+                return
+            case MacKeyCode.space:
+                joystickTriggerHeld = false
+                sendJoystickState()
+                return
+            default:
+                break  // Fall through to normal key up handling
+            }
+        }
+
         if keyboardHandler.keyUp(keyCode: event.keyCode) {
             // Release the key
             Task {
-                switch mode {
-                case .client:
-                    await client?.sendKeyUp()
-                case .embedded:
-                    await emulator?.releaseKey()
-                }
+                await client?.sendKeyUp()
             }
         }
 
@@ -642,120 +759,113 @@ class AtticViewModel: ObservableObject {
     func sendConsoleKeys() {
         let consoleKeys = keyboardHandler.getConsoleKeys()
         Task {
-            switch mode {
-            case .client:
-                await client?.sendConsoleKeys(
-                    start: consoleKeys.start,
-                    select: consoleKeys.select,
-                    option: consoleKeys.option
-                )
-            case .embedded:
-                await emulator?.setConsoleKeys(
-                    start: consoleKeys.start,
-                    select: consoleKeys.select,
-                    option: consoleKeys.option
-                )
-            }
+            await client?.sendConsoleKeys(
+                start: consoleKeys.start,
+                select: consoleKeys.select,
+                option: consoleKeys.option
+            )
         }
     }
 
     /// Sends console key states (for button presses).
     func setConsoleKeys(start: Bool, select: Bool, option: Bool) {
         Task {
-            switch mode {
-            case .client:
-                await client?.sendConsoleKeys(
-                    start: start,
-                    select: select,
-                    option: option
-                )
-            case .embedded:
-                await emulator?.setConsoleKeys(
-                    start: start,
-                    select: select,
-                    option: option
-                )
-            }
+            await client?.sendConsoleKeys(
+                start: start,
+                select: select,
+                option: option
+            )
+        }
+    }
+
+    /// Presses the HELP key (for HELP button).
+    func pressHelpKey() {
+        Task {
+            await client?.sendKeyDown(
+                keyChar: 0,
+                keyCode: AtariKeyCode.help,
+                shift: false,
+                control: false
+            )
+        }
+    }
+
+    /// Releases the HELP key (for HELP button).
+    func releaseHelpKey() {
+        Task {
+            await client?.sendKeyUp()
         }
     }
 
     // =========================================================================
-    // MARK: - Emulation Loop (Embedded Mode Only)
+    // MARK: - Joystick Emulation
     // =========================================================================
 
-    /// Starts the emulation loop (embedded mode only).
-    private func startEmulationLoop() {
-        guard mode == .embedded else { return }
-        emulationTask = Task { [weak self] in
-            await self?.emulationLoop()
+    /// Sends the current joystick state to the server based on held key state.
+    ///
+    /// Reads the five key-held booleans and dispatches to the AESP client.
+    private func sendJoystickState() {
+        let up = joystickUpHeld
+        let down = joystickDownHeld
+        let left = joystickLeftHeld
+        let right = joystickRightHeld
+        let trigger = joystickTriggerHeld
+
+        Task {
+            await client?.sendJoystick(
+                port: 0,
+                up: up,
+                down: down,
+                left: left,
+                right: right,
+                trigger: trigger
+            )
         }
     }
 
-    /// The main emulation loop (embedded mode only).
-    private func emulationLoop() async {
-        guard let emulator = emulator else { return }
-
-        // Target 60fps = 16.67ms per frame
-        // Use absolute frame scheduling to prevent timing drift
-        let targetFrameTime: UInt64 = 16_666_667  // nanoseconds
-        var nextFrameTime = DispatchTime.now().uptimeNanoseconds + targetFrameTime
-
-        while !Task.isCancelled {
-            if isRunning {
-                // Execute one frame
-                let result = await emulator.executeFrame()
-
-                // Get frame buffer and update renderer
-                let frameBuffer = await emulator.getFrameBuffer()
-
-                // Get audio samples and feed to audio engine
-                let audioSamples = await emulator.getAudioSamples()
-                if !audioSamples.isEmpty {
-                    audioEngine.enqueueSamplesFromEmulator(bytes: audioSamples)
-                }
-
-                // Update UI
-                renderer?.updateTexture(with: frameBuffer)
-                updateFPS()
-
-                // Handle special frame results
-                switch result {
-                case .breakpoint:
-                    isRunning = false
-                    statusMessage = "Breakpoint"
-                    audioEngine.pause()
-                case .cpuCrash:
-                    isRunning = false
-                    statusMessage = "CPU Crash"
-                    audioEngine.pause()
-                default:
-                    break
-                }
-            }
-
-            // Sleep until next scheduled frame time
-            let now = DispatchTime.now().uptimeNanoseconds
-            if now < nextFrameTime {
-                let sleepTime = nextFrameTime - now
-                try? await Task.sleep(nanoseconds: sleepTime)
-            }
-            // Schedule next frame (prevents timing drift)
-            nextFrameTime += targetFrameTime
-        }
+    /// Resets all joystick held state and sends the neutral position.
+    ///
+    /// Called when joystick emulation is toggled off or after an emulator reset,
+    /// to ensure no directions remain "stuck" from previously held keys.
+    private func resetJoystickState() {
+        joystickUpHeld = false
+        joystickDownHeld = false
+        joystickLeftHeld = false
+        joystickRightHeld = false
+        joystickTriggerHeld = false
+        sendJoystickState()
     }
 
-    /// Updates the FPS counter.
+    /// Updates the FPS counter using the frame rate monitor.
+    ///
+    /// Records a frame timestamp and updates the published `fps` property
+    /// when the monitor recalculates (approximately once per second).
     private func updateFPS() {
-        frameCounter += 1
+        frameRateMonitor.recordFrame()
+        fps = frameRateMonitor.currentFPS
+    }
 
-        let now = Date()
-        let elapsed = now.timeIntervalSince(lastFPSUpdate)
+    // =========================================================================
+    // MARK: - Server Shutdown
+    // =========================================================================
 
-        if elapsed >= 1.0 {
-            fps = Int(Double(frameCounter) / elapsed)
-            frameCounter = 0
-            lastFPSUpdate = now
-        }
+    /// Shuts down the AtticServer if we launched it.
+    ///
+    /// Uses process lifecycle management (SIGTERM) instead of the CLI protocol.
+    /// AtticServer handles SIGTERM by gracefully stopping its emulation loop,
+    /// closing all protocol servers, and shutting down the emulator.
+    ///
+    /// This should only be called when `launchedByUs` is true — i.e. when
+    /// this GUI instance started the server as a child process.
+    func shutdownServer() {
+        guard let pid = serverPID else { return }
+
+        // Send SIGTERM for graceful shutdown (equivalent to Process.terminate())
+        kill(pid, SIGTERM)
+        print("[AtticGUI] Sent SIGTERM to AtticServer (PID: \(pid))")
+
+        serverPID = nil
+        launchedByUs = false
     }
 
     // =========================================================================
@@ -767,16 +877,16 @@ class AtticViewModel: ObservableObject {
         // Cancel receiver tasks
         frameReceiverTask?.cancel()
         audioReceiverTask?.cancel()
+        statusPollingTask?.cancel()
+        heartbeatTask?.cancel()
         frameReceiverTask = nil
         audioReceiverTask = nil
+        statusPollingTask = nil
+        heartbeatTask = nil
 
         // Disconnect client
         await client?.disconnect()
         client = nil
-
-        // Cancel emulation task
-        emulationTask?.cancel()
-        emulationTask = nil
 
         // Stop audio
         audioEngine.stop()
@@ -787,7 +897,8 @@ class AtticViewModel: ObservableObject {
         // Cancel tasks synchronously
         frameReceiverTask?.cancel()
         audioReceiverTask?.cancel()
-        emulationTask?.cancel()
+        statusPollingTask?.cancel()
+        heartbeatTask?.cancel()
     }
 }
 
@@ -800,24 +911,31 @@ struct AtticCommands: Commands {
     @ObservedObject var viewModel: AtticViewModel
 
     var body: some Commands {
-        // Replace the standard New/Open menu with our disk operations
+        // Replace the standard New/Open menu with our file operations
         CommandGroup(replacing: .newItem) {
-            Button("Open Disk Image...") {
-                // TODO: Show file picker for .atr files
+            Button("Open File...") {
+                // Present a file picker for all supported Atari file types.
+                // NSOpenPanel is used directly because SwiftUI's fileImporter
+                // doesn't easily support the Commands context.
+                let panel = NSOpenPanel()
+                panel.title = "Open Atari File"
+                panel.allowedContentTypes = [
+                    "atr", "xfd", "atx", "dcm", "pro",  // Disk images
+                    "xex", "com", "exe",                  // Executables
+                    "bas", "lst",                         // BASIC programs
+                    "rom", "car",                         // Cartridges
+                    "cas",                                // Cassettes
+                ].compactMap { UTType(filenameExtension: $0) }
+                panel.allowsMultipleSelection = false
+                panel.canChooseDirectories = false
+
+                if panel.runModal() == .OK, let url = panel.url {
+                    Task {
+                        await viewModel.bootFile(url: url)
+                    }
+                }
             }
             .keyboardShortcut("O")
-
-            Divider()
-
-            Button("Save State...") {
-                // TODO: Save state dialog
-            }
-            .keyboardShortcut("S")
-
-            Button("Load State...") {
-                // TODO: Load state dialog
-            }
-            .keyboardShortcut("L")
         }
 
         // Emulator menu
@@ -847,30 +965,75 @@ struct AtticCommands: Commands {
 
             Divider()
 
-            // Show current mode
-            Text("Mode: \(viewModel.mode == .client ? "Client" : "Embedded")")
-                .foregroundColor(.secondary)
+            // Joystick emulation toggle: maps arrow keys to joystick directions
+            // and spacebar to fire (port 0). Renders as a checkmark menu item.
+            Toggle("Joystick Emulation", isOn: $viewModel.isJoystickEmulationEnabled)
+                .keyboardShortcut("J")
         }
 
-        // View menu additions
-        CommandGroup(after: .windowSize) {
+        // About dialog: replaces the standard "About" menu item in the app menu
+        // with a customized version showing the Attic application info.
+        CommandGroup(replacing: .appInfo) {
+            Button("About Attic") {
+                NSApplication.shared.orderFrontStandardAboutPanel(options: [
+                    .applicationName: "Attic",
+                    .applicationVersion: "1.0",
+                    .version: "1",
+                    .credits: NSAttributedString(
+                        string: "Atari 800 XL Emulator\nPowered by libatari800",
+                        attributes: [
+                            .font: NSFont.systemFont(ofSize: 11),
+                            .foregroundColor: NSColor.secondaryLabelColor
+                        ]
+                    )
+                ])
+            }
+        }
+
+        // Full Screen toggle in the View menu.
+        // macOS provides a built-in full screen button in the title bar, but since
+        // we use .hiddenTitleBar window style, users need a menu/keyboard shortcut.
+        CommandGroup(after: .toolbar) {
+            Button("Toggle Full Screen") {
+                NSApp.keyWindow?.toggleFullScreen(nil)
+            }
+            .keyboardShortcut("F", modifiers: [.command, .control])
+        }
+
+        // Hide the standard Close menu item (we handle it in app termination)
+        CommandGroup(replacing: .saveItem) {
+            // Empty - removes Save/Save As which we don't need
+        }
+
+        // App termination options.
+        // Replace the default Quit command with our shutdown options.
+        CommandGroup(replacing: .appTermination) {
+            // Close window / disconnect from server but leave it running
+            Button("Close") {
+                NSApplication.shared.terminate(nil)
+            }
+            .keyboardShortcut("W")
+
             Divider()
 
-            Button("Actual Size (1x)") {
-                // TODO: Resize window
+            // Shutdown server and quit.
+            // Only enabled when this GUI instance launched the server.
+            // When connected to a pre-existing AtticServer, this item is
+            // greyed out because we shouldn't control a server we didn't start.
+            Button("Shutdown All") {
+                Task {
+                    viewModel.shutdownServer()
+                    // Give server a moment to shut down, then quit
+                    try? await Task.sleep(nanoseconds: 200_000_000)
+                    await MainActor.run {
+                        NSApplication.shared.terminate(nil)
+                    }
+                }
             }
-            .keyboardShortcut("1")
-
-            Button("Double Size (2x)") {
-                // TODO: Resize window
-            }
-            .keyboardShortcut("2")
-
-            Button("Triple Size (3x)") {
-                // TODO: Resize window
-            }
-            .keyboardShortcut("3")
+            .keyboardShortcut("Q")
+            .disabled(!viewModel.launchedByUs)
         }
     }
+
 }
 

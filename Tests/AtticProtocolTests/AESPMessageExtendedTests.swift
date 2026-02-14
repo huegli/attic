@@ -9,8 +9,6 @@
 // Coverage includes:
 // - PAUSE/RESUME individual tests
 // - INFO message
-// - REGISTERS_READ/WRITE
-// - BREAKPOINT_SET/CLEAR/LIST/HIT
 // - PADDLE
 // - FRAME_DELTA/CONFIG
 // - VIDEO_UNSUBSCRIBE
@@ -189,216 +187,130 @@ final class AESPControlMessageExtendedTests: XCTestCase {
     }
 
     // =========================================================================
-    // MARK: - REGISTERS Tests
+    // MARK: - BOOT_FILE Tests
     // =========================================================================
 
-    /// Test encoding REGISTERS_READ request.
-    func test_encode_registersRead() {
-        let message = AESPMessage.registersRead()
+    /// Test encoding BOOT_FILE request message.
+    func test_encode_bootFile() {
+        let message = AESPMessage.bootFile(filePath: "/path/to/game.atr")
         let encoded = message.encode()
 
-        XCTAssertEqual(encoded.count, 8)
-        XCTAssertEqual(encoded[3], AESPMessageType.registersRead.rawValue)
-        XCTAssertEqual(encoded[3], 0x12)
+        XCTAssertEqual(encoded[3], AESPMessageType.bootFile.rawValue)
+        XCTAssertEqual(encoded[3], 0x07)
+
+        // Payload should be UTF-8 encoded file path
+        let payloadBytes = encoded[8...]
+        let path = String(decoding: payloadBytes, as: UTF8.self)
+        XCTAssertEqual(path, "/path/to/game.atr")
     }
 
-    /// Test encoding REGISTERS_READ response with register values.
-    func test_encode_registersResponse() {
-        let message = AESPMessage.registersResponse(
-            a: 0x42, x: 0x10, y: 0x20, s: 0xFF, p: 0x34, pc: 0xE477
-        )
-        let encoded = message.encode()
+    /// Test decoding BOOT_FILE request message.
+    func test_decode_bootFile() throws {
+        let filePath = "/Users/test/game.xex"
+        var data = Data([0xAE, 0x50, 0x01, 0x07, 0x00, 0x00, 0x00])
+        data.append(UInt8(filePath.utf8.count))
+        data.append(contentsOf: filePath.utf8)
 
-        XCTAssertEqual(encoded.count, 16) // 8 header + 8 payload
-        XCTAssertEqual(encoded[3], AESPMessageType.registersRead.rawValue)
-
-        // A, X, Y, S, P
-        XCTAssertEqual(encoded[8], 0x42)   // A
-        XCTAssertEqual(encoded[9], 0x10)   // X
-        XCTAssertEqual(encoded[10], 0x20)  // Y
-        XCTAssertEqual(encoded[11], 0xFF)  // S
-        XCTAssertEqual(encoded[12], 0x34)  // P
-
-        // PC (big-endian)
-        XCTAssertEqual(encoded[13], 0xE4)  // PC high
-        XCTAssertEqual(encoded[14], 0x77)  // PC low
-
-        // Reserved
-        XCTAssertEqual(encoded[15], 0x00)
-    }
-
-    /// Test decoding REGISTERS_READ response.
-    func test_decode_registersResponse() throws {
-        let data = Data([0xAE, 0x50, 0x01, 0x12, 0x00, 0x00, 0x00, 0x08,
-                        0x42, 0x10, 0x20, 0xFF, 0x34, 0xE4, 0x77, 0x00])
         let (message, _) = try AESPMessage.decode(from: data)
 
-        guard let regs = message.parseRegistersPayload() else {
-            XCTFail("Failed to parse registers payload")
+        guard let parsedPath = message.parseBootFileRequest() else {
+            XCTFail("Failed to parse boot file request")
             return
         }
-
-        XCTAssertEqual(regs.a, 0x42)
-        XCTAssertEqual(regs.x, 0x10)
-        XCTAssertEqual(regs.y, 0x20)
-        XCTAssertEqual(regs.s, 0xFF)
-        XCTAssertEqual(regs.p, 0x34)
-        XCTAssertEqual(regs.pc, 0xE477)
+        XCTAssertEqual(parsedPath, filePath)
     }
 
-    /// Test encoding REGISTERS_WRITE request.
-    func test_encode_registersWrite() {
-        let message = AESPMessage.registersWrite(
-            a: 0x50, x: 0x00, y: 0x00, s: 0xFD, p: 0x30, pc: 0x0600
-        )
+    /// Test encoding BOOT_FILE response with success.
+    func test_encode_bootFileResponse_success() {
+        let message = AESPMessage.bootFileResponse(success: true, message: "Loaded ATR disk image")
         let encoded = message.encode()
 
-        XCTAssertEqual(encoded.count, 16)
-        XCTAssertEqual(encoded[3], AESPMessageType.registersWrite.rawValue)
-        XCTAssertEqual(encoded[3], 0x13)
+        XCTAssertEqual(encoded[3], AESPMessageType.bootFile.rawValue)
+        XCTAssertEqual(encoded[8], 0x00) // success = 0x00
     }
 
-    /// Test REGISTERS round-trip.
-    func test_roundtrip_registers() throws {
-        let original = AESPMessage.registersResponse(
-            a: 0xAB, x: 0xCD, y: 0xEF, s: 0x12, p: 0x34, pc: 0x5678
-        )
+    /// Test encoding BOOT_FILE response with failure.
+    func test_encode_bootFileResponse_failure() {
+        let message = AESPMessage.bootFileResponse(success: false, message: "File not found")
+        let encoded = message.encode()
+
+        XCTAssertEqual(encoded[3], AESPMessageType.bootFile.rawValue)
+        XCTAssertEqual(encoded[8], 0x01) // failure = 0x01
+    }
+
+    /// Test decoding BOOT_FILE response with success.
+    func test_decode_bootFileResponse_success() throws {
+        let msg = "Loaded ATR disk image"
+        var data = Data([0xAE, 0x50, 0x01, 0x07, 0x00, 0x00, 0x00])
+        data.append(UInt8(1 + msg.utf8.count))
+        data.append(0x00) // success
+        data.append(contentsOf: msg.utf8)
+
+        let (message, _) = try AESPMessage.decode(from: data)
+
+        guard let (success, responseMsg) = message.parseBootFileResponse() else {
+            XCTFail("Failed to parse boot file response")
+            return
+        }
+        XCTAssertTrue(success)
+        XCTAssertEqual(responseMsg, msg)
+    }
+
+    /// Test decoding BOOT_FILE response with failure.
+    func test_decode_bootFileResponse_failure() throws {
+        let msg = "File not found"
+        var data = Data([0xAE, 0x50, 0x01, 0x07, 0x00, 0x00, 0x00])
+        data.append(UInt8(1 + msg.utf8.count))
+        data.append(0x01) // failure
+        data.append(contentsOf: msg.utf8)
+
+        let (message, _) = try AESPMessage.decode(from: data)
+
+        guard let (success, responseMsg) = message.parseBootFileResponse() else {
+            XCTFail("Failed to parse boot file response")
+            return
+        }
+        XCTAssertFalse(success)
+        XCTAssertEqual(responseMsg, msg)
+    }
+
+    /// Test BOOT_FILE request round-trip.
+    func test_roundtrip_bootFile() throws {
+        let filePath = "/Users/test/my game/starraiders.atr"
+        let original = AESPMessage.bootFile(filePath: filePath)
         let encoded = original.encode()
         let (decoded, _) = try AESPMessage.decode(from: encoded)
 
-        guard let regs = decoded.parseRegistersPayload() else {
-            XCTFail("Failed to parse registers")
+        guard let parsedPath = decoded.parseBootFileRequest() else {
+            XCTFail("Failed to parse boot file request")
             return
         }
-
-        XCTAssertEqual(regs.a, 0xAB)
-        XCTAssertEqual(regs.x, 0xCD)
-        XCTAssertEqual(regs.y, 0xEF)
-        XCTAssertEqual(regs.s, 0x12)
-        XCTAssertEqual(regs.p, 0x34)
-        XCTAssertEqual(regs.pc, 0x5678)
+        XCTAssertEqual(parsedPath, filePath)
     }
 
-    // =========================================================================
-    // MARK: - BREAKPOINT Tests
-    // =========================================================================
-
-    /// Test encoding BREAKPOINT_SET message.
-    func test_encode_breakpointSet() {
-        let message = AESPMessage.breakpointSet(address: 0x0600)
-        let encoded = message.encode()
-
-        XCTAssertEqual(encoded.count, 10) // 8 header + 2 address
-        XCTAssertEqual(encoded[3], AESPMessageType.breakpointSet.rawValue)
-        XCTAssertEqual(encoded[3], 0x20)
-
-        // Address (big-endian)
-        XCTAssertEqual(encoded[8], 0x06)
-        XCTAssertEqual(encoded[9], 0x00)
-    }
-
-    /// Test encoding BREAKPOINT_CLEAR message.
-    func test_encode_breakpointClear() {
-        let message = AESPMessage.breakpointClear(address: 0xE477)
-        let encoded = message.encode()
-
-        XCTAssertEqual(encoded.count, 10)
-        XCTAssertEqual(encoded[3], AESPMessageType.breakpointClear.rawValue)
-        XCTAssertEqual(encoded[3], 0x21)
-
-        // Address (big-endian)
-        XCTAssertEqual(encoded[8], 0xE4)
-        XCTAssertEqual(encoded[9], 0x77)
-    }
-
-    /// Test encoding BREAKPOINT_LIST request.
-    func test_encode_breakpointListRequest() {
-        let message = AESPMessage.breakpointList()
-        let encoded = message.encode()
-
-        XCTAssertEqual(encoded.count, 8)
-        XCTAssertEqual(encoded[3], AESPMessageType.breakpointList.rawValue)
-        XCTAssertEqual(encoded[3], 0x22)
-    }
-
-    /// Test encoding BREAKPOINT_LIST response with addresses.
-    func test_encode_breakpointListResponse() {
-        let addresses: [UInt16] = [0x0600, 0x0700, 0xE477]
-        let message = AESPMessage.breakpointListResponse(addresses: addresses)
-        let encoded = message.encode()
-
-        XCTAssertEqual(encoded.count, 14) // 8 header + 6 bytes (3 * 2)
-        XCTAssertEqual(encoded[3], AESPMessageType.breakpointList.rawValue)
-
-        // First address
-        XCTAssertEqual(encoded[8], 0x06)
-        XCTAssertEqual(encoded[9], 0x00)
-
-        // Second address
-        XCTAssertEqual(encoded[10], 0x07)
-        XCTAssertEqual(encoded[11], 0x00)
-
-        // Third address
-        XCTAssertEqual(encoded[12], 0xE4)
-        XCTAssertEqual(encoded[13], 0x77)
-    }
-
-    /// Test decoding BREAKPOINT_LIST response.
-    func test_decode_breakpointListResponse() throws {
-        let data = Data([0xAE, 0x50, 0x01, 0x22, 0x00, 0x00, 0x00, 0x04,
-                        0x06, 0x00, 0x07, 0x00])
-        let (message, _) = try AESPMessage.decode(from: data)
-
-        guard let addresses = message.parseBreakpointListPayload() else {
-            XCTFail("Failed to parse breakpoint list payload")
-            return
-        }
-
-        XCTAssertEqual(addresses.count, 2)
-        XCTAssertEqual(addresses[0], 0x0600)
-        XCTAssertEqual(addresses[1], 0x0700)
-    }
-
-    /// Test encoding BREAKPOINT_HIT notification.
-    func test_encode_breakpointHit() {
-        let message = AESPMessage.breakpointHit(address: 0x0600)
-        let encoded = message.encode()
-
-        XCTAssertEqual(encoded.count, 10)
-        XCTAssertEqual(encoded[3], AESPMessageType.breakpointHit.rawValue)
-        XCTAssertEqual(encoded[3], 0x23)
-
-        // Address (big-endian)
-        XCTAssertEqual(encoded[8], 0x06)
-        XCTAssertEqual(encoded[9], 0x00)
-    }
-
-    /// Test decoding BREAKPOINT_HIT notification.
-    func test_decode_breakpointHit() throws {
-        let data = Data([0xAE, 0x50, 0x01, 0x23, 0x00, 0x00, 0x00, 0x02,
-                        0xE4, 0x77])
-        let (message, _) = try AESPMessage.decode(from: data)
-
-        guard let address = message.parseBreakpointHitPayload() else {
-            XCTFail("Failed to parse breakpoint hit payload")
-            return
-        }
-
-        XCTAssertEqual(address, 0xE477)
-    }
-
-    /// Test BREAKPOINT_SET round-trip.
-    func test_roundtrip_breakpointSet() throws {
-        let original = AESPMessage.breakpointSet(address: 0xABCD)
+    /// Test BOOT_FILE response round-trip.
+    func test_roundtrip_bootFileResponse() throws {
+        let original = AESPMessage.bootFileResponse(success: true, message: "Loaded XEX executable")
         let encoded = original.encode()
         let (decoded, _) = try AESPMessage.decode(from: encoded)
 
-        XCTAssertEqual(decoded.type, .breakpointSet)
-
-        // Parse the address from payload
-        let address = UInt16(decoded.payload[0]) << 8 | UInt16(decoded.payload[1])
-        XCTAssertEqual(address, 0xABCD)
+        guard let (success, message) = decoded.parseBootFileResponse() else {
+            XCTFail("Failed to parse boot file response")
+            return
+        }
+        XCTAssertTrue(success)
+        XCTAssertEqual(message, "Loaded XEX executable")
     }
+
+    /// Test BOOT_FILE message properties.
+    func test_bootFile_properties() {
+        XCTAssertEqual(AESPMessageType.bootFile.rawValue, 0x07)
+        XCTAssertEqual(AESPMessageType.bootFile.category, .control)
+        XCTAssertTrue(AESPMessageType.bootFile.isRequest)
+        XCTAssertFalse(AESPMessageType.bootFile.isResponse)
+        XCTAssertEqual(AESPMessageType.bootFile.name, "BOOT_FILE")
+    }
+
 }
 
 // =============================================================================
@@ -745,15 +657,8 @@ final class AESPProtocolConformanceTests: XCTestCase {
         XCTAssertEqual(AESPMessageType.reset.rawValue, 0x04)
         XCTAssertEqual(AESPMessageType.status.rawValue, 0x05)
         XCTAssertEqual(AESPMessageType.info.rawValue, 0x06)
+        XCTAssertEqual(AESPMessageType.bootFile.rawValue, 0x07)
         XCTAssertEqual(AESPMessageType.ack.rawValue, 0x0F)
-        XCTAssertEqual(AESPMessageType.memoryRead.rawValue, 0x10)
-        XCTAssertEqual(AESPMessageType.memoryWrite.rawValue, 0x11)
-        XCTAssertEqual(AESPMessageType.registersRead.rawValue, 0x12)
-        XCTAssertEqual(AESPMessageType.registersWrite.rawValue, 0x13)
-        XCTAssertEqual(AESPMessageType.breakpointSet.rawValue, 0x20)
-        XCTAssertEqual(AESPMessageType.breakpointClear.rawValue, 0x21)
-        XCTAssertEqual(AESPMessageType.breakpointList.rawValue, 0x22)
-        XCTAssertEqual(AESPMessageType.breakpointHit.rawValue, 0x23)
         XCTAssertEqual(AESPMessageType.error.rawValue, 0x3F)
     }
 

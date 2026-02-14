@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "attic": {
+      "command": "uv",
+      "args": ["run", "--directory", "Sources/AtticMCP-Python", "attic-mcp"]
+    }
+  }
+}

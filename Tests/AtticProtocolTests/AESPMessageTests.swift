@@ -80,8 +80,6 @@ final class AESPMessageTypeTests: XCTestCase {
     func test_controlMessages_inCorrectRange() {
         let controlTypes: [AESPMessageType] = [
             .ping, .pong, .pause, .resume, .reset, .status, .info, .ack,
-            .memoryRead, .memoryWrite, .registersRead, .registersWrite,
-            .breakpointSet, .breakpointClear, .breakpointList, .breakpointHit,
             .error
         ]
 
@@ -161,8 +159,6 @@ final class AESPMessageTypeTests: XCTestCase {
         XCTAssertEqual(AESPMessageType.reset.rawValue, 0x04)
         XCTAssertEqual(AESPMessageType.status.rawValue, 0x05)
         XCTAssertEqual(AESPMessageType.ack.rawValue, 0x0F)
-        XCTAssertEqual(AESPMessageType.memoryRead.rawValue, 0x10)
-        XCTAssertEqual(AESPMessageType.memoryWrite.rawValue, 0x11)
         XCTAssertEqual(AESPMessageType.keyDown.rawValue, 0x40)
         XCTAssertEqual(AESPMessageType.keyUp.rawValue, 0x41)
         XCTAssertEqual(AESPMessageType.joystick.rawValue, 0x42)
@@ -172,6 +168,7 @@ final class AESPMessageTypeTests: XCTestCase {
         XCTAssertEqual(AESPMessageType.audioPCM.rawValue, 0x80)
         XCTAssertEqual(AESPMessageType.audioSubscribe.rawValue, 0x83)
         XCTAssertEqual(AESPMessageType.error.rawValue, 0x3F)
+        XCTAssertEqual(AESPMessageType.bootFile.rawValue, 0x07)
     }
 }
 
@@ -274,42 +271,6 @@ final class AESPMessageEncodingTests: XCTestCase {
         XCTAssertEqual(encoded.count, 9)
         XCTAssertEqual(encoded[3], AESPMessageType.ack.rawValue)
         XCTAssertEqual(encoded[8], AESPMessageType.pause.rawValue)
-    }
-
-    /// Test encoding MEMORY_READ request.
-    func test_encode_memoryRead() {
-        let message = AESPMessage.memoryRead(address: 0x0600, count: 16)
-        let encoded = message.encode()
-
-        XCTAssertEqual(encoded.count, 12) // 8 header + 4 payload
-        XCTAssertEqual(encoded[3], AESPMessageType.memoryRead.rawValue)
-
-        // Address (big-endian): 0x0600
-        XCTAssertEqual(encoded[8], 0x06)
-        XCTAssertEqual(encoded[9], 0x00)
-
-        // Count (big-endian): 16 = 0x0010
-        XCTAssertEqual(encoded[10], 0x00)
-        XCTAssertEqual(encoded[11], 0x10)
-    }
-
-    /// Test encoding MEMORY_WRITE request.
-    func test_encode_memoryWrite() {
-        let bytes = Data([0xA9, 0x00, 0x60]) // LDA #$00; RTS
-        let message = AESPMessage.memoryWrite(address: 0x0600, bytes: bytes)
-        let encoded = message.encode()
-
-        XCTAssertEqual(encoded.count, 13) // 8 header + 2 address + 3 data
-        XCTAssertEqual(encoded[3], AESPMessageType.memoryWrite.rawValue)
-
-        // Address (big-endian): 0x0600
-        XCTAssertEqual(encoded[8], 0x06)
-        XCTAssertEqual(encoded[9], 0x00)
-
-        // Data
-        XCTAssertEqual(encoded[10], 0xA9)
-        XCTAssertEqual(encoded[11], 0x00)
-        XCTAssertEqual(encoded[12], 0x60)
     }
 
     /// Test encoding KEY_DOWN message.
@@ -601,38 +562,6 @@ final class AESPMessageDecodingTests: XCTestCase {
         }
     }
 
-    /// Test decoding MEMORY_READ request.
-    func test_decode_memoryRead() throws {
-        // Address: 0x0600, Count: 16
-        let data = Data([0xAE, 0x50, 0x01, 0x10, 0x00, 0x00, 0x00, 0x04,
-                        0x06, 0x00, 0x00, 0x10])
-        let (message, _) = try AESPMessage.decode(from: data)
-
-        guard let (address, count) = message.parseMemoryReadRequest() else {
-            XCTFail("Failed to parse memory read request")
-            return
-        }
-
-        XCTAssertEqual(address, 0x0600)
-        XCTAssertEqual(count, 16)
-    }
-
-    /// Test decoding MEMORY_WRITE request.
-    func test_decode_memoryWrite() throws {
-        // Address: 0x0600, Data: [0xA9, 0x00, 0x60]
-        let data = Data([0xAE, 0x50, 0x01, 0x11, 0x00, 0x00, 0x00, 0x05,
-                        0x06, 0x00, 0xA9, 0x00, 0x60])
-        let (message, _) = try AESPMessage.decode(from: data)
-
-        guard let (address, bytes) = message.parseMemoryWriteRequest() else {
-            XCTFail("Failed to parse memory write request")
-            return
-        }
-
-        XCTAssertEqual(address, 0x0600)
-        XCTAssertEqual(Array(bytes), [0xA9, 0x00, 0x60])
-    }
-
     /// Test decoding KEY_DOWN message.
     func test_decode_keyDown() throws {
         let data = Data([0xAE, 0x50, 0x01, 0x40, 0x00, 0x00, 0x00, 0x03,
@@ -784,43 +713,12 @@ final class AESPMessageRoundtripTests: XCTestCase {
 
     /// Test ACK round-trip.
     func test_roundtrip_ack() throws {
-        let original = AESPMessage.ack(for: .memoryWrite)
+        let original = AESPMessage.ack(for: .pause)
         let encoded = original.encode()
         let (decoded, _) = try AESPMessage.decode(from: encoded)
 
         XCTAssertEqual(decoded.type, .ack)
-        XCTAssertEqual(decoded.payload[0], AESPMessageType.memoryWrite.rawValue)
-    }
-
-    /// Test MEMORY_READ round-trip.
-    func test_roundtrip_memoryRead() throws {
-        let original = AESPMessage.memoryRead(address: 0xE000, count: 256)
-        let encoded = original.encode()
-        let (decoded, _) = try AESPMessage.decode(from: encoded)
-
-        guard let (address, count) = decoded.parseMemoryReadRequest() else {
-            XCTFail("Failed to parse")
-            return
-        }
-
-        XCTAssertEqual(address, 0xE000)
-        XCTAssertEqual(count, 256)
-    }
-
-    /// Test MEMORY_WRITE round-trip.
-    func test_roundtrip_memoryWrite() throws {
-        let bytes = Data([0xA9, 0x42, 0x8D, 0x0E, 0xD4, 0x60])
-        let original = AESPMessage.memoryWrite(address: 0x0600, bytes: bytes)
-        let encoded = original.encode()
-        let (decoded, _) = try AESPMessage.decode(from: encoded)
-
-        guard let (address, data) = decoded.parseMemoryWriteRequest() else {
-            XCTFail("Failed to parse")
-            return
-        }
-
-        XCTAssertEqual(address, 0x0600)
-        XCTAssertEqual(data, bytes)
+        XCTAssertEqual(decoded.payload[0], AESPMessageType.pause.rawValue)
     }
 
     /// Test KEY_DOWN round-trip.
@@ -1094,11 +992,11 @@ final class AESPMessageDescriptionTests: XCTestCase {
 
     /// Test message description format.
     func test_description_format() {
-        let message = AESPMessage.memoryRead(address: 0x0600, count: 16)
+        let message = AESPMessage.reset(cold: true)
         let description = message.description
 
-        XCTAssertTrue(description.contains("MEMORY_READ"))
-        XCTAssertTrue(description.contains("4 bytes"))
+        XCTAssertTrue(description.contains("RESET"))
+        XCTAssertTrue(description.contains("1 bytes"))
     }
 
     /// Test message type description.

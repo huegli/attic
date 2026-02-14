@@ -603,6 +603,8 @@ public struct CommandParser {
     /// - `vars [name]` - show variables
     /// - `del start [-end]` - delete lines
     /// - `renum [start] [step]` - renumber lines
+    /// - `save D:FILENAME` - save tokenized program to ATR disk
+    /// - `load D:FILENAME` - load tokenized program from ATR disk
     /// - `import <path>` - import .BAS file from host
     /// - `export <path>` - export to .BAS file on host
     private func parseBasicCommand(_ input: String) throws -> Command {
@@ -675,10 +677,28 @@ public struct CommandParser {
             }
             return .basicExport(path: argsString)
 
+        case "save":
+            guard !argsString.isEmpty else {
+                throw AtticError.invalidCommand(
+                    "save",
+                    suggestion: "Usage: save D:FILENAME  (e.g., save D:TEST or save D2:MYPROG)"
+                )
+            }
+            return .basicSaveATR(filename: argsString)
+
+        case "load":
+            guard !argsString.isEmpty else {
+                throw AtticError.invalidCommand(
+                    "load",
+                    suggestion: "Usage: load D:FILENAME  (e.g., load D:TEST or load D2:MYPROG)"
+                )
+            }
+            return .basicLoadATR(filename: argsString)
+
         default:
             throw AtticError.invalidCommand(
                 command,
-                suggestion: "Unknown BASIC command. Commands: run, stop, cont, new, list, vars, del, import, export"
+                suggestion: "Unknown BASIC command. Commands: run, stop, cont, new, list, vars, del, renum, save, load, import, export"
             )
         }
     }

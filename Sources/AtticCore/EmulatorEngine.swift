@@ -121,6 +121,9 @@ public actor EmulatorEngine {
     /// Frame counter for timing.
     private var frameCount: UInt64 = 0
 
+    /// Path to ROM directory, stored for cold reset reinitialization.
+    private var romPath: URL?
+
     /// Callback invoked when a breakpoint is hit.
     /// Set this to be notified asynchronously of breakpoint events.
     public var onBreakpointHit: (@Sendable (UInt16, CPURegisters) async -> Void)?
@@ -149,6 +152,7 @@ public actor EmulatorEngine {
     ///   The directory should contain ATARIXL.ROM and ATARIBAS.ROM.
     /// - Throws: AtticError if initialization fails.
     public func initialize(romPath: URL) async throws {
+        self.romPath = romPath
         try wrapper.initialize(romPath: romPath)
         state = .paused
         frameCount = 0
@@ -196,25 +200,72 @@ public actor EmulatorEngine {
     /// - Parameter cold: If true, performs a cold reset (power cycle).
     ///                   If false, performs a warm reset (RESET key).
     public func reset(cold: Bool) async {
-        if cold {
-            // Cold reset - reboot and run boot sequence
-            wrapper.reboot(with: nil)
+        // Preserve the running state - reset should not pause emulation
+        // (matches real Atari behavior where RESET continues running)
+        let wasRunning = state == .running
 
-            // Run frames to complete boot sequence.
-            // The Atari needs ~120 frames (~2 seconds) to complete boot.
-            var input = InputState()
-            for _ in 0..<150 {
-                _ = wrapper.executeFrame(input: &input)
+        if cold {
+            // Cold reset - full power cycle by shutting down and reinitializing
+            // This completely resets the emulator state including all RAM.
+            guard let romPath = romPath else {
+                // If we don't have a ROM path (shouldn't happen), fall back to reboot
+                wrapper.reboot(with: nil)
+                var input = InputState()
+                for _ in 0..<150 {
+                    _ = wrapper.executeFrame(input: &input)
+                }
+                clearBASICProgram()
+                state = wasRunning ? .running : .paused
+                return
             }
 
-            // Clear BASIC memory by resetting pointers to empty state.
-            // This simulates the NEW command, clearing any stored program.
-            clearBASICProgram()
+            // Shutdown the emulator
+            wrapper.shutdown()
+
+            // Reinitialize with the same ROM path
+            do {
+                try wrapper.initialize(romPath: romPath)
+
+                // Run frames to complete boot sequence.
+                // The Atari needs ~120 frames (~2 seconds) to complete boot.
+                var input = InputState()
+                for _ in 0..<150 {
+                    _ = wrapper.executeFrame(input: &input)
+                }
+
+                // Clear breakpoints and frame counter
+                breakpoints.removeAll()
+                breakpointOriginalBytes.removeAll()
+                frameCount = 0
+
+            } catch {
+                // If reinitialization fails, leave emulator in uninitialized state
+                state = .uninitialized
+                return
+            }
         } else {
-            // Warm reset - just reboot without clearing BASIC memory.
-            wrapper.reboot(with: nil)
+            // Warm reset - like pressing RESET key on the Atari.
+            // Preserves RAM but restarts from RESET vector.
+            wrapper.warmstart()
         }
-        state = .paused
+
+        // Restore previous state - if emulator was running, keep it running
+        state = wasRunning ? .running : .paused
+    }
+
+    /// Sends a BREAK signal to stop a running BASIC program.
+    ///
+    /// This simulates pressing the BREAK key on the Atari keyboard.
+    /// After sending the break, a few frames are executed to allow
+    /// the emulator to process the signal and return to the READY prompt.
+    public func sendBreak() {
+        wrapper.sendBreak()
+        // Execute additional frames to let the break signal propagate
+        // and the BASIC interpreter return to the READY prompt.
+        var input = InputState()
+        for _ in 0..<10 {
+            _ = wrapper.executeFrame(input: &input)
+        }
     }
 
     /// Clears the BASIC program from memory by resetting pointers.
@@ -266,6 +317,31 @@ public actor EmulatorEngine {
     public func reboot(with filePath: String? = nil) async {
         wrapper.reboot(with: filePath)
         state = .paused
+    }
+
+    /// Boots the emulator with a file (disk image, executable, BASIC program, etc.).
+    ///
+    /// Validates the file exists, calls `libatari800_reboot_with_file`, and
+    /// sets the emulator running so the boot process continues naturally.
+    ///
+    /// - Parameter filePath: Absolute path to the file to boot.
+    /// - Returns: Tuple with success flag and optional error message.
+    public func bootFile(_ filePath: String) async -> (success: Bool, errorMessage: String?) {
+        // Validate the file exists before passing to libatari800
+        guard FileManager.default.fileExists(atPath: filePath) else {
+            return (success: false, errorMessage: "File not found: \(filePath)")
+        }
+
+        let success = wrapper.reboot(with: filePath)
+
+        if success {
+            // Let the emulator continue running so the boot process completes
+            state = .running
+            return (success: true, errorMessage: nil)
+        } else {
+            state = .paused
+            return (success: false, errorMessage: "Failed to load file: \(filePath)")
+        }
     }
 
     /// Executes the emulation loop.

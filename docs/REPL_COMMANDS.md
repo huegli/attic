@@ -86,6 +86,7 @@ The monitor provides low-level debugging and memory inspection.
 |---------|--------|-------------|
 | `g` | `g [address]` | Go (resume execution) |
 | `s` | `s [count]` | Step count instructions (default 1) |
+| `so` | `so` | Step over (execute JSR as atomic operation) |
 | `pause` | `pause` | Pause execution |
 | `until` | `until <address>` | Run until PC reaches address |
 
@@ -101,6 +102,9 @@ $E479  8D 00 D4  STA $D400
 [monitor] $E479> s 5
 $E484  4C 77 E4  JMP $E477
   A=$01 X=$00 Y=$00 S=$FF P=$30
+[monitor] $E484> so
+$E487  A5 12     LDA $12
+  A=$00 X=$00 Y=$00 S=$FF P=$32
 [monitor] $E484> until $E480
 Stopped at $E480
   A=$00 X=$00 Y=$00 S=$FF P=$32
@@ -231,19 +235,6 @@ Warning: $E477 is in ROM space
 Breakpoint set at $E477 (ROM watch mode)
 ```
 
-### Memory Watches
-
-| Command | Syntax | Description |
-|---------|--------|-------------|
-| `w` | `w <addr> [len]` | Watch memory location |
-| `wc` | `wc <addr>` | Clear watch |
-| `wc` | `wc *` | Clear all watches |
-
-Watches report when memory changes:
-```
-* Watch $D400 changed: $00 -> $55
-```
-
 ## BASIC Mode
 
 For entering and managing BASIC programs.
@@ -296,6 +287,10 @@ Stopped at line 100
 | `list` | `list <line>` | List single line |
 | `list` | `list <start>-<end>` | List range |
 
+By default, listings use rich ATASCII rendering: inverse video characters are
+shown with ANSI reverse video codes and ATASCII graphics are mapped to Unicode
+glyphs. Launch the CLI with `--plain` for clean ASCII output.
+
 **Examples:**
 ```
 [basic] > list
@@ -336,7 +331,6 @@ Stopped at line 100
 |---------|--------|-------------|
 | `save` | `save "<D:FILE>"` | Save to mounted disk |
 | `load` | `load "<D:FILE>"` | Load from mounted disk |
-| `dir` | `dir` | List BASIC files on disk |
 
 **Examples:**
 ```

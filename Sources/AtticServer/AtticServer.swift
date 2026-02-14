@@ -9,7 +9,7 @@
 // The server provides two protocol interfaces:
 //
 // 1. AESP (Binary Protocol) - For GUI/web clients
-//    - Control (47800): Commands, status, memory access, input events
+//    - Control (47800): Commands, status, input events
 //    - Video (47801): Frame broadcasts to subscribed clients
 //    - Audio (47802): Audio sample broadcasts to subscribed clients
 //
@@ -40,6 +40,9 @@
 import Foundation
 import AtticCore
 import AtticProtocol
+import CoreGraphics
+import ImageIO
+import UniformTypeIdentifiers
 
 // MARK: - Server Configuration
 
@@ -190,6 +193,11 @@ final class ServerDelegate: AESPServerDelegate, @unchecked Sendable {
     /// Reference to the emulator engine.
     private let emulator: EmulatorEngine
 
+    /// Disk manager for querying mounted drives.
+    /// Shared with CLIServerDelegate so both AESP and CLI handlers see
+    /// the same disk state.
+    var diskManager: DiskManager?
+
     /// Lock for thread-safe access.
     private let lock = NSLock()
 
@@ -219,27 +227,47 @@ final class ServerDelegate: AESPServerDelegate, @unchecked Sendable {
             await emulator.reset(cold: cold)
             await server.sendMessage(.ack(for: .reset), to: clientId, channel: .control)
 
+        case .bootFile:
+            if let filePath = message.parseBootFileRequest() {
+                print("[Server] Boot file: \(filePath) (requested by \(clientId))")
+                let result = await emulator.bootFile(filePath)
+                if result.success, let dm = diskManager {
+                    // libatari800_reboot_with_file() mounts disk images on D1.
+                    // Tell DiskManager so listDrives() reports the booted disk.
+                    // For non-disk files (XEX, BAS, etc.) this silently does nothing.
+                    await dm.trackBootedDisk(drive: 1, path: filePath)
+                }
+                let response = AESPMessage.bootFileResponse(
+                    success: result.success,
+                    message: result.success ? "Booted \(filePath)" : (result.errorMessage ?? "Unknown error")
+                )
+                await server.sendMessage(response, to: clientId, channel: .control)
+            } else {
+                await server.sendMessage(
+                    .error(code: 0x01, message: "Invalid boot file request"),
+                    to: clientId, channel: .control
+                )
+            }
+
         case .status:
             let state = await emulator.state
             let isRunning = state == .running
-            var payload = Data()
-            payload.append(isRunning ? 0x01 : 0x00)
-            let response = AESPMessage(type: .status, payload: payload)
+            // Build mounted drives list from disk manager (if available)
+            var mountedDrives: [(drive: Int, filename: String)] = []
+            if let dm = diskManager {
+                let drives = await dm.listDrives()
+                for driveStatus in drives where driveStatus.mounted {
+                    let filename = driveStatus.path.map {
+                        URL(fileURLWithPath: $0).lastPathComponent
+                    } ?? "?"
+                    mountedDrives.append((drive: driveStatus.drive, filename: filename))
+                }
+            }
+            let response = AESPMessage.statusResponse(
+                isRunning: isRunning,
+                mountedDrives: mountedDrives
+            )
             await server.sendMessage(response, to: clientId, channel: .control)
-
-        // Memory access
-        case .memoryRead:
-            if let (address, count) = message.parseMemoryReadRequest() {
-                let bytes = await emulator.readMemoryBlock(at: address, count: Int(count))
-                let response = AESPMessage(type: .memoryRead, payload: bytes)
-                await server.sendMessage(response, to: clientId, channel: .control)
-            }
-
-        case .memoryWrite:
-            if let (address, data) = message.parseMemoryWriteRequest() {
-                await emulator.writeMemoryBlock(at: address, bytes: Array(data))
-                await server.sendMessage(.ack(for: .memoryWrite), to: clientId, channel: .control)
-            }
 
         // Input messages
         case .keyDown:
@@ -285,9 +313,20 @@ final class ServerDelegate: AESPServerDelegate, @unchecked Sendable {
 ///
 /// This delegate implements the text-based CLI protocol, translating CLI commands
 /// into emulator operations and returning formatted responses.
+///
+/// Disk operations (mount, unmount, drives) go through DiskManager, which
+/// coordinates with both the emulator's C library and Swift-side ATR parsing.
+/// This ensures that disk state is always consistent between libatari800 and
+/// the REPL file system view.
 final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
     /// Reference to the emulator engine.
     private let emulator: EmulatorEngine
+
+    /// Disk manager — the single API for all disk mount/unmount operations.
+    /// Coordinates with EmulatorEngine so that libatari800 and Swift-side
+    /// file system state stay in sync. Exposed as internal so the AESP
+    /// ServerDelegate can share the same instance.
+    let diskManager: DiskManager
 
     /// BASIC line handler for tokenization and memory injection.
     private let basicHandler: BASICLineHandler
@@ -295,11 +334,28 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
     /// Reference to the CLI socket server for sending events.
     private weak var cliServer: CLISocketServer?
 
+    /// Callback to signal server shutdown.
+    /// Called when the .shutdown command is received.
+    var onShutdown: (() -> Void)?
+
     /// Lock for thread-safe access.
     private let lock = NSLock()
 
+    /// Tracks active interactive assembly sessions per connected CLI client.
+    /// Each session holds an `InteractiveAssembler` that auto-advances the
+    /// address and a record of the starting address and total bytes written.
+    private var assemblySessions: [UUID: AssemblySession] = [:]
+
+    /// State for an active interactive assembly session.
+    private struct AssemblySession {
+        let assembler: InteractiveAssembler
+        let startAddress: UInt16
+        var totalBytes: Int = 0
+    }
+
     init(emulator: EmulatorEngine) {
         self.emulator = emulator
+        self.diskManager = DiskManager(emulator: emulator)
         self.basicHandler = BASICLineHandler(emulator: emulator)
     }
 
@@ -325,7 +381,8 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
             return .ok("goodbye")
 
         case .shutdown:
-            // Signal shutdown (handled in main loop)
+            // Signal shutdown to main loop via callback
+            onShutdown?()
             return .ok("shutting down")
 
         // Emulator control
@@ -352,6 +409,21 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
         case .reset(let cold):
             await emulator.reset(cold: cold)
             return .ok("reset \(cold ? "cold" : "warm")")
+
+        case .boot(let path):
+            // Validate file exists on the server side
+            guard FileManager.default.fileExists(atPath: path) else {
+                return .error("File not found '\(path)'")
+            }
+            let result = await emulator.bootFile(path)
+            if result.success {
+                // libatari800_reboot_with_file() mounts disk images on D1.
+                // Tell DiskManager so listDrives() reports the booted disk.
+                await diskManager.trackBootedDisk(drive: 1, path: path)
+                return .ok("booted \(path)")
+            } else {
+                return .error(result.errorMessage ?? "Boot failed for '\(path)'")
+            }
 
         case .status:
             return await formatStatus()
@@ -412,25 +484,32 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
             let bpStrs = bps.map { "$\(String(format: "%04X", $0))" }.joined(separator: ",")
             return .ok("breakpoints \(bpStrs)")
 
-        // Disk operations
+        // Disk operations — all go through DiskManager which coordinates
+        // with EmulatorEngine so libatari800 and Swift-side state stay in sync.
         case .mount(let drive, let path):
-            // Check if file exists
-            guard FileManager.default.fileExists(atPath: path) else {
-                return .error("File not found '\(path)'")
-            }
-            if await emulator.mountDisk(drive: drive, path: path, readOnly: false) {
-                return .ok("mounted \(drive) \(path)")
-            } else {
-                return .error("Failed to mount '\(path)'")
+            do {
+                let info = try await diskManager.mount(drive: drive, path: path)
+                return .ok("mounted \(drive) \(info.filename) (\(info.diskType.shortName), \(info.fileCount) files, \(info.freeSectors) free)")
+            } catch {
+                return .error(error.localizedDescription)
             }
 
         case .unmount(let drive):
-            await emulator.unmountDisk(drive: drive)
-            return .ok("unmounted \(drive)")
+            do {
+                try await diskManager.unmount(drive: drive)
+                return .ok("unmounted \(drive)")
+            } catch {
+                return .error(error.localizedDescription)
+            }
 
         case .drives:
-            // TODO: Get mounted drives from emulator
-            return .ok("drives (none)")
+            let drives = await diskManager.listDrives()
+            let mountedDrives = drives.filter { $0.mounted }
+            if mountedDrives.isEmpty {
+                return .ok("drives (none)")
+            }
+            let lines = mountedDrives.map { $0.displayString }
+            return .okMultiLine(lines)
 
         // State management
         case .stateSave(let path):
@@ -464,33 +543,34 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
 
         // Display
         case .screenshot(let path):
-            // TODO: Implement screenshot capture
-            let actualPath = path ?? "~/Desktop/Attic-\(Date()).png"
-            return .ok("screenshot \(actualPath)")
+            return await handleScreenshot(path: path)
 
-        // BASIC injection
-        case .injectBasic(let base64Data):
-            // TODO: Implement BASIC injection
-            guard Data(base64Encoded: base64Data) != nil else {
-                return .error("Invalid base64 data")
-            }
-            return .ok("injected basic (not yet implemented)")
+        case .screenText(let atascii):
+            return await handleScreenText(atascii: atascii)
+
+        // BASIC injection - DISABLED per attic-ahl (direct memory manipulation)
+        case .injectBasic:
+            return .error("BASIC injection is disabled. Use keyboard input instead.")
 
         case .injectKeys(let text):
-            // TODO: Implement keyboard injection
-            return .ok("injected keys \(text.count)")
+            return await handleInjectKeys(text: text)
 
         // Disassembly
         case .disassemble(let address, let lines):
             return await handleDisassemble(address: address, lines: lines)
 
-        // Phase 11: Monitor mode commands (not fully implemented yet)
+        // Phase 11: Monitor mode commands
         case .assemble(let address):
-            // Interactive assembly mode - not supported via CLI protocol
-            return .error("Interactive assembly not supported via protocol. Use assembleLine for single instructions.")
+            // Start an interactive assembly session for this client.
+            let assembler = InteractiveAssembler(startAddress: address)
+            assemblySessions[clientId] = AssemblySession(
+                assembler: assembler,
+                startAddress: address
+            )
+            return .ok("ASM $\(String(format: "%04X", address))")
 
         case .assembleLine(let address, let instruction):
-            // Single-line assembly
+            // Single-line assembly (no session needed)
             let assembler = Assembler()
             do {
                 let result = try assembler.assembleLine(instruction, at: address)
@@ -503,6 +583,37 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
             } catch {
                 return .error("Assembly error: \(error)")
             }
+
+        case .assembleInput(let instruction):
+            // Feed an instruction to the active assembly session.
+            guard var session = assemblySessions[clientId] else {
+                return .error("No active assembly session. Start one with: assemble $<address>")
+            }
+            do {
+                let result = try session.assembler.assembleLine(instruction)
+                // Write assembled bytes to emulator memory
+                await emulator.writeMemoryBlock(at: result.address, bytes: result.bytes)
+                session.totalBytes += result.bytes.count
+                assemblySessions[clientId] = session
+                // Format: assembled line + record separator + next address
+                let formatted = session.assembler.format(result)
+                let nextAddr = "$\(String(format: "%04X", session.assembler.currentAddress))"
+                return .ok("\(formatted)\(CLIProtocolConstants.multiLineSeparator)\(nextAddr)")
+            } catch {
+                // Return error but keep session alive so the user can retry
+                return .error("Assembly error: \(error)")
+            }
+
+        case .assembleEnd:
+            // End the active assembly session and return summary.
+            guard let session = assemblySessions.removeValue(forKey: clientId) else {
+                return .error("No active assembly session")
+            }
+            if session.totalBytes == 0 {
+                return .ok("Assembly complete: 0 bytes")
+            }
+            let endAddr = session.startAddress &+ UInt16(session.totalBytes) &- 1
+            return .ok("Assembly complete: \(session.totalBytes) bytes at $\(String(format: "%04X", session.startAddress))-$\(String(format: "%04X", endAddr))")
 
         case .stepOver:
             // Step over (treat JSR as single step)
@@ -541,41 +652,539 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
             }
             return .ok("filled $\(String(format: "%04X", start))-$\(String(format: "%04X", end)) with $\(String(format: "%02X", value))")
 
-        // BASIC line entry and commands
-        case .basicLine(let line):
-            let result = await basicHandler.enterLine(line)
-            if result.success {
-                return .ok(result.message)
-            } else {
-                return .error(result.message)
-            }
+        // BASIC line entry and commands - DISABLED per attic-ahl (direct memory manipulation)
+        case .basicLine:
+            return .error("BASIC line injection is disabled. Use keyboard input instead.")
 
         case .basicNew:
-            let result = await basicHandler.newProgram()
-            if result.success {
-                return .ok(result.message)
-            } else {
-                return .error(result.message)
-            }
+            return .error("BASIC NEW injection is disabled. Use keyboard input instead.")
 
         case .basicRun:
-            let result = await basicHandler.runProgram()
-            if result.success {
-                return .ok(result.message)
+            return .error("BASIC RUN injection is disabled. Use keyboard input instead.")
+
+        // BASIC editing commands
+        case .basicDelete(let lineOrRange):
+            let result = await basicHandler.deleteLines(lineOrRange: lineOrRange)
+            return result.success ? .ok(result.message) : .error(result.message)
+
+        case .basicStop:
+            await emulator.sendBreak()
+            return .ok("STOPPED")
+
+        case .basicCont:
+            let result = await basicHandler.continueProgram()
+            return .ok(result.message)
+
+        case .basicVars:
+            let variables = await basicHandler.listVariablesWithValues()
+            if variables.isEmpty {
+                return .ok("(no variables)")
+            }
+            let lines = variables.map { "\($0.name.fullName) = \($0.value)" }
+            return .okMultiLine(lines)
+
+        case .basicVar(let name):
+            if let value = await basicHandler.readVariableValue(name: name) {
+                let varName = BASICVariableName.parse(name)
+                return .ok("\(varName?.fullName ?? name) = \(value)")
             } else {
-                return .error(result.message)
+                return .error("Variable not found: \(name)")
             }
 
-        case .basicList:
-            // Use the detokenizer to list the program
-            let listing = await basicHandler.listProgram(range: nil)
-            if listing.isEmpty {
-                return .ok("No program in memory")
+        case .basicInfo:
+            let info = await basicHandler.getProgramInfo()
+            return .ok("\(info.lines) lines, \(info.bytes) bytes, \(info.variables) variables")
+
+        case .basicExport(let path):
+            do {
+                let message = try await basicHandler.exportProgram(to: path)
+                return .ok(message)
+            } catch {
+                return .error(error.localizedDescription)
             }
-            // Split by newlines and use okMultiLine to properly format for CLI protocol
-            let lines = listing.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-            return .okMultiLine(lines)
+
+        case .basicImport(let path):
+            do {
+                let result = try await basicHandler.importProgram(from: path)
+                return result.success ? .ok(result.message) : .error(result.message)
+            } catch {
+                return .error(error.localizedDescription)
+            }
+
+        case .basicRenumber(let start, let step):
+            let result = await basicHandler.renumberProgram(start: start, step: step)
+            return result.success ? .ok(result.message) : .error(result.message)
+
+        case .basicSave(let drive, let filename):
+            guard let data = await basicHandler.getRawProgram() else {
+                return .error("No program to save")
+            }
+            do {
+                let sectors = try await diskManager.writeFile(drive: drive, name: filename, data: data)
+                return .ok("Saved \(data.count) bytes to \(filename) (\(sectors) sectors)")
+            } catch {
+                return .error(error.localizedDescription)
+            }
+
+        case .basicLoad(let drive, let filename):
+            do {
+                let data = try await diskManager.readFile(drive: drive, name: filename)
+                let result = await basicHandler.loadRawProgram(data: data)
+                return result.success ? .ok(result.message) : .error(result.message)
+            } catch {
+                return .error(error.localizedDescription)
+            }
+
+        case .basicDir(let drive):
+            do {
+                let entries = try await diskManager.listDirectory(drive: drive)
+                if entries.isEmpty {
+                    return .ok("(empty disk)")
+                }
+                let lines = entries.map { entry in
+                    let lock = entry.isLocked ? "*" : " "
+                    return "\(lock) \(entry.fullName.padding(toLength: 12, withPad: " ", startingAt: 0)) \(entry.sectorCount) sectors"
+                }
+                return .okMultiLine(lines)
+            } catch {
+                return .error(error.localizedDescription)
+            }
+
+        // BASIC listing is read-only, so it remains enabled
+        case .basicList(let atascii):
+            // List the BASIC program using the detokenizer
+            let mode: ATASCIIRenderMode = atascii ? .rich : .plain
+            let listing = await basicHandler.listProgram(range: nil, renderMode: mode)
+            if listing.isEmpty {
+                return .ok("(no program)")
+            }
+            // Convert newlines to multi-line separator for CLI protocol
+            let lines = listing.split(separator: "\n", omittingEmptySubsequences: false)
+            return .okMultiLine(lines.map(String.init))
+
+        // DOS mode commands — all delegate to DiskManager which handles
+        // ATR filesystem operations and coordinates with EmulatorEngine.
+        case .dosChangeDrive(let drive):
+            do {
+                try await diskManager.changeDrive(to: drive)
+                return .ok("D\(drive):")
+            } catch {
+                return .error(error.localizedDescription)
+            }
+
+        case .dosDirectory(let pattern):
+            do {
+                let entries = try await diskManager.listDirectory(pattern: pattern)
+                if entries.isEmpty {
+                    return .ok("(empty disk)")
+                }
+                let lines = entries.map { entry in
+                    let lock = entry.isLocked ? "*" : " "
+                    return "\(lock) \(entry.fullName.padding(toLength: 12, withPad: " ", startingAt: 0)) \(String(format: "%3d", entry.sectorCount)) sectors"
+                }
+                return .okMultiLine(lines)
+            } catch {
+                return .error(error.localizedDescription)
+            }
+
+        case .dosFileInfo(let filename):
+            do {
+                let info = try await diskManager.getFileInfo(name: filename)
+                var lines: [String] = []
+                lines.append("Name:    \(info.entry.fullName)")
+                lines.append("Size:    \(info.fileSize) bytes (\(info.entry.sectorCount) sectors)")
+                lines.append("Locked:  \(info.entry.isLocked ? "yes" : "no")")
+                if info.isCorrupted {
+                    lines.append("WARNING: File appears corrupted")
+                }
+                return .okMultiLine(lines)
+            } catch {
+                return .error(error.localizedDescription)
+            }
+
+        case .dosType(let filename):
+            do {
+                let data = try await diskManager.readFile(name: filename)
+                // Convert to string, treating data as ATASCII/ASCII text
+                let text = String(data: data, encoding: .ascii) ?? String(data: data, encoding: .isoLatin1) ?? "(binary data)"
+                let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+                return .okMultiLine(lines.map(String.init))
+            } catch {
+                return .error(error.localizedDescription)
+            }
+
+        case .dosDump(let filename):
+            do {
+                let data = try await diskManager.readFile(name: filename)
+                let lines = formatHexDump(data: data)
+                return .okMultiLine(lines)
+            } catch {
+                return .error(error.localizedDescription)
+            }
+
+        case .dosCopy(let source, let destination):
+            do {
+                // Parse drive prefixes from source and destination
+                let (srcDrive, srcName) = parseDrivePrefix(source)
+                let (dstDrive, dstName) = parseDrivePrefix(destination)
+                // Resolve default drive outside ?? (actor isolation + autoclosure)
+                let defaultDrive = await diskManager.currentDrive
+                let fromDrive = srcDrive ?? defaultDrive
+                let toDrive = dstDrive ?? defaultDrive
+                let sectors = try await diskManager.copyFile(
+                    from: fromDrive, name: srcName,
+                    to: toDrive, as: dstName
+                )
+                return .ok("copied \(sectors) sectors")
+            } catch {
+                return .error(error.localizedDescription)
+            }
+
+        case .dosRename(let oldName, let newName):
+            do {
+                try await diskManager.renameFile(from: oldName, to: newName)
+                return .ok("renamed \(oldName) to \(newName)")
+            } catch {
+                return .error(error.localizedDescription)
+            }
+
+        case .dosDelete(let filename):
+            do {
+                try await diskManager.deleteFile(name: filename)
+                return .ok("deleted \(filename)")
+            } catch {
+                return .error(error.localizedDescription)
+            }
+
+        case .dosLock(let filename):
+            do {
+                try await diskManager.lockFile(name: filename)
+                return .ok("locked \(filename)")
+            } catch {
+                return .error(error.localizedDescription)
+            }
+
+        case .dosUnlock(let filename):
+            do {
+                try await diskManager.unlockFile(name: filename)
+                return .ok("unlocked \(filename)")
+            } catch {
+                return .error(error.localizedDescription)
+            }
+
+        case .dosExport(let filename, let hostPath):
+            do {
+                let bytes = try await diskManager.exportFile(name: filename, to: hostPath)
+                return .ok("exported \(bytes) bytes to \(hostPath)")
+            } catch {
+                return .error(error.localizedDescription)
+            }
+
+        case .dosImport(let hostPath, let filename):
+            do {
+                let sectors = try await diskManager.importFile(from: hostPath, name: filename)
+                return .ok("imported \(sectors) sectors")
+            } catch {
+                return .error(error.localizedDescription)
+            }
+
+        case .dosNewDisk(let path, let type):
+            do {
+                let diskType = parseDiskType(type)
+                let url = try await diskManager.createDisk(at: path, type: diskType)
+                return .ok("created \(url.path)")
+            } catch {
+                return .error(error.localizedDescription)
+            }
+
+        case .dosFormat:
+            do {
+                let drive = await diskManager.currentDrive
+                try await diskManager.formatDisk()
+                return .ok("formatted D\(drive):")
+            } catch {
+                return .error(error.localizedDescription)
+            }
         }
+    }
+
+    /// Parses a `Dn:FILENAME` prefix to extract drive number and filename.
+    ///
+    /// Used by DOS copy command to determine source/destination drives.
+    /// Supports: `D:FILE` (default drive), `D1:FILE` (specific drive), `FILE` (no prefix).
+    private func parseDrivePrefix(_ input: String) -> (drive: Int?, filename: String) {
+        let upper = input.uppercased()
+
+        if upper.hasPrefix("D") && upper.count > 1 {
+            let afterD = upper.dropFirst()
+            if afterD.hasPrefix(":") {
+                // D:FILENAME — default drive
+                let filename = String(input.dropFirst(2))
+                return (nil, filename)
+            }
+            if let colonIndex = afterD.firstIndex(of: ":") {
+                let driveStr = String(afterD[afterD.startIndex..<colonIndex])
+                if let drive = Int(driveStr), drive >= 1, drive <= 8 {
+                    let filenameStart = afterD.index(after: colonIndex)
+                    let filename = String(afterD[filenameStart...])
+                    return (drive, filename)
+                }
+            }
+        }
+
+        // No drive prefix
+        return (nil, input)
+    }
+
+    /// Converts a disk type string ("sd", "ed", "dd") to a DiskType enum value.
+    ///
+    /// Returns `.singleDensity` as the default if the string is nil or unrecognized.
+    private func parseDiskType(_ type: String?) -> DiskType {
+        switch type?.lowercased() {
+        case "sd", nil: return .singleDensity
+        case "ed": return .enhancedDensity
+        case "dd": return .doubleDensity
+        default: return .singleDensity
+        }
+    }
+
+    /// Formats raw data as a hex dump with 16 bytes per line.
+    ///
+    /// Output format: `0000: 48 65 6C 6C 6F 20 57 6F 72 6C 64 21 00 00 00 00  Hello World!....`
+    private func formatHexDump(data: Data) -> [String] {
+        var lines: [String] = []
+        let bytesPerLine = 16
+
+        for offset in stride(from: 0, to: data.count, by: bytesPerLine) {
+            let end = min(offset + bytesPerLine, data.count)
+            let chunk = data[offset..<end]
+
+            // Address
+            var line = String(format: "%04X: ", offset)
+
+            // Hex bytes
+            for (i, byte) in chunk.enumerated() {
+                line += String(format: "%02X ", byte)
+                if i == 7 { line += " " }  // Extra space at midpoint
+            }
+
+            // Pad if less than 16 bytes
+            let missing = bytesPerLine - chunk.count
+            for i in 0..<missing {
+                line += "   "
+                if chunk.count + i == 7 { line += " " }
+            }
+
+            // ASCII representation
+            line += " "
+            for byte in chunk {
+                if byte >= 0x20 && byte <= 0x7E {
+                    line += String(UnicodeScalar(byte))
+                } else {
+                    line += "."
+                }
+            }
+
+            lines.append(line)
+        }
+
+        return lines
+    }
+
+    /// Handles the screenshot command by capturing the current frame buffer and saving as PNG.
+    ///
+    /// The frame buffer is 384x240 pixels in BGRA format. This method converts it to
+    /// a PNG image and saves it to the specified path.
+    ///
+    /// - Parameter path: The file path to save the screenshot, or nil for auto-generated path.
+    /// - Returns: CLI response with the path where the screenshot was saved.
+    private func handleScreenshot(path: String?) async -> CLIResponse {
+        // Generate default path if not provided
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd-HHmmss"
+        let timestamp = dateFormatter.string(from: Date())
+        let defaultFilename = "Attic-\(timestamp).png"
+
+        let actualPath: String
+        if let providedPath = path {
+            // Expand ~ to home directory
+            actualPath = NSString(string: providedPath).expandingTildeInPath
+        } else {
+            // Save to Desktop by default
+            let desktopURL = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Desktop")
+            actualPath = desktopURL.appendingPathComponent(defaultFilename).path
+        }
+
+        // Get the frame buffer from the emulator
+        let frameBuffer = await emulator.getFrameBuffer()
+
+        // Frame buffer dimensions (Atari 800 XL standard)
+        let width = 384
+        let height = 240
+        let bytesPerPixel = 4  // BGRA
+        let bytesPerRow = width * bytesPerPixel
+
+        // Verify we have enough data
+        guard frameBuffer.count >= width * height * bytesPerPixel else {
+            return .error("Invalid frame buffer size: expected \(width * height * bytesPerPixel), got \(frameBuffer.count)")
+        }
+
+        // Create CGImage from BGRA data
+        guard let dataProvider = CGDataProvider(data: Data(frameBuffer) as CFData) else {
+            return .error("Failed to create data provider for screenshot")
+        }
+
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
+
+        guard let cgImage = CGImage(
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: bytesPerRow,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo,
+            provider: dataProvider,
+            decode: nil,
+            shouldInterpolate: false,
+            intent: .defaultIntent
+        ) else {
+            return .error("Failed to create CGImage for screenshot")
+        }
+
+        // Create destination URL
+        let destinationURL = URL(fileURLWithPath: actualPath)
+
+        // Create the directory if it doesn't exist
+        let directoryURL = destinationURL.deletingLastPathComponent()
+        do {
+            try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+        } catch {
+            return .error("Failed to create directory: \(error.localizedDescription)")
+        }
+
+        // Create PNG file
+        guard let destination = CGImageDestinationCreateWithURL(
+            destinationURL as CFURL,
+            UTType.png.identifier as CFString,
+            1,
+            nil
+        ) else {
+            return .error("Failed to create image destination for screenshot")
+        }
+
+        CGImageDestinationAddImage(destination, cgImage, nil)
+
+        guard CGImageDestinationFinalize(destination) else {
+            return .error("Failed to write screenshot to \(actualPath)")
+        }
+
+        return .ok("screenshot saved to \(actualPath)")
+    }
+
+    /// Handles the screen text command by reading GRAPHICS 0 display memory.
+    ///
+    /// Reads the 40x24 character screen RAM and converts Atari screen codes to
+    /// printable Unicode characters. Atari screen codes are NOT the same as
+    /// ATASCII — the mapping is:
+    ///   - Screen $00-$1F → ATASCII $20-$3F (space, digits, punctuation)
+    ///   - Screen $20-$3F → ATASCII $40-$5F (uppercase letters, @, [, etc.)
+    ///   - Screen $40-$5F → control characters → rendered as "."
+    ///   - Screen $60-$7F → ATASCII $60-$7F (lowercase letters)
+    ///   - Screen $80-$FF → inverse video of $00-$7F
+    ///
+    /// When `atascii` is true, inverse video characters (bit 7 set) are wrapped
+    /// with ANSI reverse video escape codes (`\e[7m`...`\e[27m`).
+    ///
+    /// Key memory locations:
+    ///   - DINDEX ($0057) — current display mode (must be 0 for text)
+    ///   - SAVMSC ($0058-$0059) — 16-bit pointer to screen RAM base
+    ///
+    /// - Parameter atascii: Whether to render inverse chars with ANSI codes.
+    /// - Returns: CLI response with the screen text as multi-line output.
+    private func handleScreenText(atascii: Bool = false) async -> CLIResponse {
+        // Check display mode — DINDEX at $0057 must be 0 (GRAPHICS 0)
+        let dindex = await emulator.readMemory(at: 0x0057)
+        guard dindex == 0 else {
+            return .error("Not in GRAPHICS 0 mode (DINDEX=\(dindex))")
+        }
+
+        // Read SAVMSC ($0058-$0059) — little-endian pointer to screen RAM
+        let savmscLo = await emulator.readMemory(at: 0x0058)
+        let savmscHi = await emulator.readMemory(at: 0x0059)
+        let screenBase = UInt16(savmscHi) << 8 | UInt16(savmscLo)
+
+        // Read 960 bytes (40 columns x 24 rows) of screen RAM
+        let screenData = await emulator.readMemoryBlock(at: screenBase, count: 960)
+
+        // Convert screen codes to printable characters and split into lines.
+        // screenCodeToString returns a String (not Character) because ANSI
+        // escape codes may wrap the character when atascii mode is enabled.
+        var lines: [String] = []
+        for row in 0..<24 {
+            var line = ""
+            for col in 0..<40 {
+                let screenCode = screenData[row * 40 + col]
+                line.append(screenCodeToString(screenCode, atascii: atascii))
+            }
+            lines.append(line)
+        }
+
+        // Trim trailing blank lines
+        while let last = lines.last, last.allSatisfy({ $0 == " " }) {
+            lines.removeLast()
+        }
+
+        return .okMultiLine(lines)
+    }
+
+    /// Converts an Atari screen code byte to a printable string.
+    ///
+    /// Screen codes differ from ATASCII. The mapping strips the inverse-video
+    /// bit (bit 7), then maps the low 7 bits:
+    ///   - $00-$1F → characters ' ' through '?' (ASCII $20-$3F)
+    ///   - $20-$3F → characters '@' through '_' (ASCII $40-$5F)
+    ///   - $40-$5F → control characters → rendered as "."
+    ///   - $60-$7F → characters '`' through DEL → lowercase letters, etc.
+    ///
+    /// When `atascii` is true and bit 7 is set, the character is wrapped with
+    /// ANSI reverse video codes (`\e[7m`...`\e[27m`) to visually indicate
+    /// inverse video.
+    ///
+    /// - Parameters:
+    ///   - code: The screen code byte from screen RAM.
+    ///   - atascii: Whether to use ANSI codes for inverse video characters.
+    /// - Returns: A string containing the character, possibly with ANSI codes.
+    private func screenCodeToString(_ code: UInt8, atascii: Bool) -> String {
+        let inverse = (code & 0x80) != 0
+        let base = code & 0x7F
+
+        // Map screen code to the base printable character
+        let char: Character
+        switch base {
+        case 0x00...0x1F:
+            // Screen $00-$1F → ASCII $20-$3F (space, digits, punctuation)
+            char = Character(UnicodeScalar(base + 0x20))
+        case 0x20...0x3F:
+            // Screen $20-$3F → ASCII $40-$5F (uppercase letters, @, [, etc.)
+            char = Character(UnicodeScalar(base + 0x20))
+        case 0x40...0x5F:
+            // Screen $40-$5F → control characters, render as "."
+            char = "."
+        case 0x60...0x7F:
+            // Screen $60-$7F → ASCII $60-$7F (lowercase letters)
+            char = Character(UnicodeScalar(base))
+        default:
+            char = "."
+        }
+
+        // Wrap with ANSI reverse video if inverse and atascii mode is enabled
+        if atascii && inverse {
+            return "\u{1B}[7m\(char)\u{1B}[27m"
+        }
+        return String(char)
     }
 
     /// Handles the disassemble command.
@@ -620,11 +1229,145 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
         return .ok(output)
     }
 
+    /// Handles the inject keys command by typing each character into the emulator.
+    ///
+    /// This injects keystrokes one at a time, executing frames between key presses
+    /// to ensure the emulator sees each key. This is the "natural input" method
+    /// that goes through the normal keyboard input pipeline.
+    ///
+    /// - Parameter text: The text to type, with escape sequences already parsed.
+    /// - Returns: CLI response indicating success or failure.
+    private func handleInjectKeys(text: String) async -> CLIResponse {
+        // Number of frames to hold each key down (for emulator to see it)
+        let framesPerKeyPress = 3
+        // Number of frames between key release and next key press
+        let framesBetweenKeys = 2
+        // Extra frames needed when pressing the same key twice in a row
+        // The Atari OS keyboard handler needs to see the key released for
+        // several frames before it will accept a new press of the same key
+        let extraFramesForRepeat = 4
+
+        var injectedCount = 0
+        var previousKeyChar: UInt8 = 0
+        var previousKeyCode: UInt8 = 0xFF
+
+        for char in text {
+            // Convert character to Atari key codes
+            let (keyChar, keyCode, shift, control) = characterToAtariKey(char)
+
+            // Skip if we couldn't map the character
+            if keyChar == 0 && keyCode == 0xFF {
+                continue
+            }
+
+            // Check if this is the same key as the previous one
+            let isSameKey = (keyChar == previousKeyChar && keyChar != 0) ||
+                           (keyCode == previousKeyCode && keyCode != 0xFF)
+
+            // If same key, add extra frames for keyboard debounce
+            if isSameKey {
+                for _ in 0..<extraFramesForRepeat {
+                    await emulator.executeFrame()
+                }
+            }
+
+            // Press the key
+            await emulator.pressKey(keyChar: keyChar, keyCode: keyCode, shift: shift, control: control)
+
+            // Execute frames while key is held
+            for _ in 0..<framesPerKeyPress {
+                await emulator.executeFrame()
+            }
+
+            // Release the key
+            await emulator.releaseKey()
+
+            // Execute frames for key release
+            for _ in 0..<framesBetweenKeys {
+                await emulator.executeFrame()
+            }
+
+            // Remember this key for repeat detection
+            previousKeyChar = keyChar
+            previousKeyCode = keyCode
+
+            injectedCount += 1
+        }
+
+        return .ok("injected \(injectedCount) keys")
+    }
+
+    /// Converts a character to Atari keyChar and keyCode values.
+    ///
+    /// - Parameter char: The character to convert.
+    /// - Returns: Tuple of (keyChar, keyCode, shift, control) for the emulator.
+    private func characterToAtariKey(_ char: Character) -> (keyChar: UInt8, keyCode: UInt8, shift: Bool, control: Bool) {
+        // Handle special characters
+        switch char {
+        case "\n", "\r":
+            // Return/Enter - use keyCode, not keyChar
+            return (0, AtariKeyCode.return, false, false)
+
+        case "\t":
+            // Tab
+            return (0, AtariKeyCode.tab, false, false)
+
+        case "\u{1B}":
+            // Escape
+            return (0, AtariKeyCode.escape, false, false)
+
+        case "\u{7F}", "\u{08}":
+            // Delete/Backspace
+            return (0, AtariKeyCode.backspace, false, false)
+
+        case " ":
+            // Space
+            return (0x20, AtariKeyCode.space, false, false)
+
+        default:
+            break
+        }
+
+        // Get ASCII value
+        guard let ascii = char.asciiValue else {
+            // Non-ASCII character - skip
+            return (0, 0xFF, false, false)
+        }
+
+        // Control characters (Ctrl+A through Ctrl+Z produce codes 1-26)
+        if ascii >= 1 && ascii <= 26 {
+            return (ascii, 0xFF, false, true)
+        }
+
+        // Lowercase letters - convert to uppercase for Atari
+        if ascii >= 0x61 && ascii <= 0x7A {
+            let uppercase = ascii - 0x20
+            return (uppercase, 0xFF, false, false)
+        }
+
+        // Uppercase letters - need shift
+        if ascii >= 0x41 && ascii <= 0x5A {
+            return (ascii, 0xFF, true, false)
+        }
+
+        // Numbers and most punctuation pass through as-is
+        if ascii >= 0x20 && ascii <= 0x7E {
+            return (ascii, 0xFF, false, false)
+        }
+
+        // Unknown character
+        return (0, 0xFF, false, false)
+    }
+
     func server(_ server: CLISocketServer, clientDidConnect clientId: UUID) async {
         print("[CLISocket] Client connected: \(clientId)")
     }
 
     func server(_ server: CLISocketServer, clientDidDisconnect clientId: UUID) async {
+        // Clean up any active assembly session for this client
+        if assemblySessions.removeValue(forKey: clientId) != nil {
+            print("[CLISocket] Cleaned up assembly session for \(clientId)")
+        }
         print("[CLISocket] Client disconnected: \(clientId)")
     }
 
@@ -640,6 +1383,7 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
         let state = await emulator.state
         let regs = await emulator.getRegisters()
         let bps = await emulator.getBreakpoints()
+        let drives = await diskManager.listDrives()
 
         var status = ""
         switch state {
@@ -655,8 +1399,16 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
 
         status += " PC=$\(String(format: "%04X", regs.pc))"
 
-        // TODO: Add disk mount status (D1=..., D2=..., etc.)
-        status += " D1=(none) D2=(none)"
+        // Show disk mount status for drives 1-8
+        for driveStatus in drives {
+            let d = driveStatus.drive
+            if driveStatus.mounted {
+                let filename = driveStatus.path.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "?"
+                status += " D\(d)=\(filename)"
+            } else {
+                status += " D\(d)=(none)"
+            }
+        }
 
         if bps.isEmpty {
             status += " BP=(none)"
@@ -742,6 +1494,10 @@ struct AtticServer {
             return
         }
 
+        // Create a DiskManager for AESP status responses.
+        // If CLI socket is enabled, this will be replaced by the shared one.
+        delegate.diskManager = DiskManager(emulator: emulator)
+
         // Create and start CLI socket server (if enabled)
         var cliServer: CLISocketServer?
         var cliDelegate: CLIServerDelegate?
@@ -753,6 +1509,13 @@ struct AtticServer {
 
             if let server = cliServer, let del = cliDelegate {
                 del.setServer(server)
+                // Share the CLI delegate's DiskManager with the AESP delegate
+                // so status responses include mounted disk information.
+                delegate.diskManager = del.diskManager
+                // Set shutdown callback to stop the main loop
+                del.onShutdown = { [delegate] in
+                    delegate.shouldRun = false
+                }
                 await server.setDelegate(del)
 
                 do {
@@ -773,14 +1536,26 @@ struct AtticServer {
         print("Emulation started")
         print("Press Ctrl+C to stop")
 
-        // Set up signal handler for graceful shutdown
+        // Set up signal handlers for graceful shutdown.
+        // SIGINT handles Ctrl+C from the terminal.
+        // SIGTERM handles Process.terminate() / kill(pid, SIGTERM) from parent
+        // processes like AtticGUI, which use process lifecycle management
+        // instead of the CLI protocol for shutdown.
         let sigintSource = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
         signal(SIGINT, SIG_IGN)
         sigintSource.setEventHandler {
-            print("\nShutting down...")
+            print("\nShutting down (SIGINT)...")
             delegate.shouldRun = false
         }
         sigintSource.resume()
+
+        let sigtermSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        signal(SIGTERM, SIG_IGN)
+        sigtermSource.setEventHandler {
+            print("\nShutting down (SIGTERM)...")
+            delegate.shouldRun = false
+        }
+        sigtermSource.resume()
 
         // Main emulation loop with proper frame timing
         // We measure elapsed time and only sleep for the remainder to maintain 60fps

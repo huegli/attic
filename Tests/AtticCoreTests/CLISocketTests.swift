@@ -209,10 +209,13 @@ final class CLISocketClientTests: XCTestCase {
     func testDiscoverSockets() {
         let client = CLISocketClient()
 
-        // Create some test socket files
+        // Use current process PID and parent PID so isServerProcessRunning()
+        // validates them as live processes (both are guaranteed to be running).
+        let pid = ProcessInfo.processInfo.processIdentifier
+        let ppid = getppid()
         let testPaths = [
-            "/tmp/attic-test1-\(UUID().uuidString.prefix(8)).sock",
-            "/tmp/attic-test2-\(UUID().uuidString.prefix(8)).sock"
+            "/tmp/attic-\(pid).sock",
+            "/tmp/attic-\(ppid).sock"
         ]
 
         for path in testPaths {
@@ -624,6 +627,51 @@ final class CLISocketIntegrationTests: XCTestCase {
         XCTAssertTrue(data.contains("D1:"))
     }
 
+    func testClientSendsBoot() async throws {
+        try await server.start()
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        serverDelegate.responseToReturn = .ok("booted /path/to/game.atr")
+        try await client.connect(to: testSocketPath)
+
+        let response = try await client.send(.boot(path: "/path/to/game.atr"))
+
+        guard case .ok(let data) = response else {
+            XCTFail("Expected ok response")
+            return
+        }
+        XCTAssertTrue(data.contains("booted"))
+
+        // Verify server received boot command with correct path
+        try await Task.sleep(nanoseconds: 50_000_000)
+        let bootCommands = serverDelegate.receivedCommands.filter {
+            if case .boot(let path) = $0.command {
+                return path == "/path/to/game.atr"
+            }
+            return false
+        }
+        XCTAssertGreaterThan(bootCommands.count, 0)
+    }
+
+    func testClientSendsBootError() async throws {
+        try await server.start()
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        serverDelegate.responseToReturn = .error("File not found: /nonexistent.atr")
+        try await client.connect(to: testSocketPath)
+
+        // Reset response after connect's ping
+        serverDelegate.responseToReturn = .error("File not found: /nonexistent.atr")
+
+        let response = try await client.send(.boot(path: "/nonexistent.atr"))
+
+        guard case .error(let message) = response else {
+            XCTFail("Expected error response")
+            return
+        }
+        XCTAssertTrue(message.contains("File not found"))
+    }
+
     func testClientSendsStateSave() async throws {
         try await server.start()
         try await Task.sleep(nanoseconds: 100_000_000)
@@ -737,21 +785,38 @@ final class CLISocketIntegrationTests: XCTestCase {
         try await server.start()
         try await Task.sleep(nanoseconds: 100_000_000)
 
+        // Wire up the client delegate before connecting so events are captured
+        await client.setDelegate(clientDelegate)
         try await client.connect(to: testSocketPath)
 
-        // Set up client delegate to receive events
-        await MainActor.run {
-            // Client delegate needs to be set on actor
-        }
+        // Wait for connection to stabilize
+        try await Task.sleep(nanoseconds: 100_000_000)
 
-        // Broadcast an event
+        // Broadcast a breakpoint event to all connected clients
         await server.broadcastEvent(.breakpoint(address: 0x0600, a: 0x50, x: 0x10, y: 0x00, s: 0xFF, p: 0x30))
 
-        // Give time for event to be received
-        try await Task.sleep(nanoseconds: 200_000_000)
+        // Give time for the event to arrive
+        try await Task.sleep(nanoseconds: 500_000_000)
 
-        // Note: Verifying event receipt would require the client delegate to be properly wired up
-        // For now, this tests that broadcasting doesn't crash
+        // Check that the client delegate received the event
+        let events = clientDelegate.receivedEvents
+        XCTAssertEqual(events.count, 1, "Client should have received exactly one event")
+        guard let event = events.first else {
+            XCTFail("No events received")
+            return
+        }
+
+        // Verify the received event matches what was broadcast
+        guard case .breakpoint(let address, let a, let x, let y, let s, let p) = event else {
+            XCTFail("Expected breakpoint event, got \(event)")
+            return
+        }
+        XCTAssertEqual(address, 0x0600, "Breakpoint address should match")
+        XCTAssertEqual(a, 0x50, "A register should match")
+        XCTAssertEqual(x, 0x10, "X register should match")
+        XCTAssertEqual(y, 0x00, "Y register should match")
+        XCTAssertEqual(s, 0xFF, "S register should match")
+        XCTAssertEqual(p, 0x30, "P register should match")
     }
 
     func testClientDisconnect() async throws {

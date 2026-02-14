@@ -45,7 +45,7 @@ AESP is a binary protocol for high-performance communication between the emulato
 
 | Port  | Channel   | Data Rate  | Purpose                              |
 |-------|-----------|------------|--------------------------------------|
-| 47800 | Control   | Low        | Commands, status, memory access      |
+| 47800 | Control   | Low        | Commands, status, input               |
 | 47801 | Video     | ~21 MB/s   | Raw BGRA frames (384×240×4 @ 60fps)  |
 | 47802 | Audio     | ~88 KB/s   | 16-bit PCM (44.1kHz mono)            |
 | 47803 | WebSocket | Variable   | Bridges all channels for web clients |
@@ -96,7 +96,7 @@ Message types are organized by category based on their numeric range:
 
 | Range     | Category | Description                           |
 |-----------|----------|---------------------------------------|
-| 0x00-0x3F | Control  | Commands, status, memory access       |
+| 0x00-0x3F | Control  | Commands, status, errors              |
 | 0x40-0x5F | Input    | Keyboard, joystick, console keys      |
 | 0x60-0x7F | Video    | Frame data, configuration             |
 | 0x80-0x9F | Audio    | PCM samples, sync                     |
@@ -184,6 +184,28 @@ Query emulator capabilities.
 | Request   | Empty                                |
 | Response  | UTF-8 JSON with version/capabilities |
 
+#### BOOT_FILE (0x07)
+Load and boot a file into the emulator.
+
+| Direction | Payload                                      |
+|-----------|----------------------------------------------|
+| Request   | UTF-8 file path string                       |
+| Response  | 1 byte status + UTF-8 message                |
+
+**Request Payload**: UTF-8 encoded absolute file path.
+
+**Response Payload**:
+```
+Offset 0: Status (1 byte)
+  0x00 = Success
+  0x01 = Failure
+Offset 1-N: UTF-8 status/error message
+```
+
+**Supported file types**: ATR, XFD, ATX, DCM, PRO (disk images), XEX/COM/EXE (executables), BAS/LST (BASIC programs), CART/ROM (cartridges), CAS (cassette images).
+
+**Test Case**: Send BOOT_FILE with valid ATR path, verify success response.
+
 #### ACK (0x0F)
 Generic acknowledgement.
 
@@ -198,126 +220,7 @@ Offset 0: Acknowledged message type (1 byte)
 
 **Test Case**: Send PAUSE, verify ACK received with payload 0x02.
 
-#### MEMORY_READ (0x10)
-Read memory from emulator.
-
-| Direction | Payload                          |
-|-----------|----------------------------------|
-| Request   | 4 bytes (address + count)        |
-| Response  | MEMORY_READ with requested bytes |
-
-**Request Payload Format**:
-```
-Offset 0-1: Address (2 bytes, big-endian)
-Offset 2-3: Count (2 bytes, big-endian, max 65535)
-```
-
-**Response Payload Format**:
-```
-Offset 0-N: Requested memory bytes
-```
-
-**Test Cases**:
-- Read single byte: MEMORY_READ($0600, 1), verify 1 byte returned
-- Read block: MEMORY_READ($0000, 256), verify 256 bytes returned
-- Read high memory: MEMORY_READ($E000, 16), verify ROM bytes returned
-- Maximum read: MEMORY_READ($0000, 65535), verify 65535 bytes returned
-
-#### MEMORY_WRITE (0x11)
-Write memory to emulator.
-
-| Direction | Payload                    |
-|-----------|----------------------------|
-| Request   | 2 bytes address + N bytes data |
-| Response  | ACK(0x11)                  |
-
-**Request Payload Format**:
-```
-Offset 0-1: Address (2 bytes, big-endian)
-Offset 2-N: Data bytes to write
-```
-
-**Test Cases**:
-- Write single byte: MEMORY_WRITE($0600, [0xA9]), read back to verify
-- Write block: MEMORY_WRITE($0600, [0xA9, 0x00, 0x60]), read back to verify
-- Write to page zero: MEMORY_WRITE($00, [0xFF]), read back to verify
-
-#### REGISTERS_READ (0x12)
-Read CPU registers.
-
-| Direction | Payload                  |
-|-----------|--------------------------|
-| Request   | Empty                    |
-| Response  | REGISTERS_READ (8 bytes) |
-
-**Response Payload Format**:
-```
-Offset 0: A register (1 byte)
-Offset 1: X register (1 byte)
-Offset 2: Y register (1 byte)
-Offset 3: S register (stack pointer, 1 byte)
-Offset 4: P register (processor status, 1 byte)
-Offset 5-6: PC register (program counter, 2 bytes big-endian)
-Offset 7: Reserved (1 byte, always 0x00)
-```
-
-**Test Case**: Send REGISTERS_READ, verify 8-byte response with valid values.
-
-#### REGISTERS_WRITE (0x13)
-Write CPU registers.
-
-| Direction | Payload      |
-|-----------|--------------|
-| Request   | 8 bytes (same format as REGISTERS_READ response) |
-| Response  | ACK(0x13)    |
-
-**Test Case**: Write A=$50, read back, verify A=$50.
-
-#### BREAKPOINT_SET (0x20)
-Set a breakpoint.
-
-| Direction | Payload                        |
-|-----------|--------------------------------|
-| Request   | 2 bytes address (big-endian)   |
-| Response  | ACK(0x20)                      |
-
-**Test Case**: Set breakpoint at $0600, run code to $0600, verify BREAKPOINT_HIT received.
-
-#### BREAKPOINT_CLEAR (0x21)
-Clear a breakpoint.
-
-| Direction | Payload                        |
-|-----------|--------------------------------|
-| Request   | 2 bytes address (big-endian)   |
-| Response  | ACK(0x21)                      |
-
-**Test Case**: Set breakpoint, clear it, verify execution continues past that address.
-
-#### BREAKPOINT_LIST (0x22)
-List all breakpoints.
-
-| Direction | Payload                        |
-|-----------|--------------------------------|
-| Request   | Empty                          |
-| Response  | Array of 2-byte addresses      |
-
-**Response Payload Format**:
-```
-Offset 0-1: First breakpoint address (big-endian)
-Offset 2-3: Second breakpoint address (big-endian)
-...
-```
-
-**Test Case**: Set 3 breakpoints, list, verify 6 bytes returned (3 × 2).
-
-#### BREAKPOINT_HIT (0x23)
-Notification that a breakpoint was hit (server → client).
-
-| Direction | Payload                        |
-|-----------|--------------------------------|
-| Notification | 2 bytes address (big-endian) |
-
-**Test Case**: Set breakpoint, run to it, verify BREAKPOINT_HIT received with correct address.
+**Note**: Memory access, register access, and breakpoint management are available through the CLI socket protocol (Part 2), not the AESP binary protocol. AESP focuses on streaming (video/audio) and real-time input.
 
 #### ERROR (0x3F)
 Error response from server.
@@ -618,7 +521,7 @@ The server should respond with ERROR (0x3F) for:
 3. **Unknown Type**: Send message with type 0xFE, verify ERROR response
 4. **Oversized Payload**: Send message with length > 16MB, verify ERROR response
 5. **Truncated Message**: Send header only, verify server waits for more data
-6. **Invalid Address**: MEMORY_READ from $FFFF+1, verify ERROR response
+6. **Empty Payload**: Send RESET with empty payload, verify ERROR response
 
 ## AESP Example Sessions
 
@@ -626,15 +529,6 @@ The server should respond with ERROR (0x3F) for:
 ```
 Client → Server: [0xAE, 0x50, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00]  // PING
 Server → Client: [0xAE, 0x50, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00]  // PONG
-```
-
-### Memory Read
-```
-Client → Server: [0xAE, 0x50, 0x01, 0x10, 0x00, 0x00, 0x00, 0x04, 0x06, 0x00, 0x00, 0x10]
-                 // MEMORY_READ, address=$0600, count=16
-
-Server → Client: [0xAE, 0x50, 0x01, 0x10, 0x00, 0x00, 0x00, 0x10, <16 bytes of memory>]
-                 // MEMORY_READ response with 16 bytes
 ```
 
 ### Video Subscription
@@ -780,6 +674,49 @@ OK:stepped A=$4F X=$03 Y=$00 S=$FD P=$30 PC=$E4A2
 - `CMD:step 100\n` - multiple steps, verify PC advanced
 - `CMD:step -1\n` - invalid count → `ERR:Invalid step count`
 
+#### stepover
+Step over JSR subroutine calls (treats JSR as atomic). Alias: `so`.
+```
+CMD:stepover
+OK:stepped A=$00 X=$00 Y=$00 S=$FF P=$34 PC=$E47B
+
+CMD:so
+OK:stepped A=$4F X=$03 Y=$00 S=$FD P=$30 PC=$E4A2
+```
+
+**Test Case**: Step over a JSR instruction, verify PC is at instruction after JSR.
+
+#### until
+Run emulator until PC reaches a specific address.
+```
+CMD:until $E480
+OK:stopped at $E480
+```
+
+**Test Cases**:
+- `CMD:until $0600\n` - run until address reached
+- `CMD:until xyz\n` → `ERR:Invalid address 'xyz'`
+
+#### boot
+Load and boot a file into the emulator.
+```
+CMD:boot /path/to/game.atr
+OK:booted /path/to/game.atr
+```
+
+**Supported file types**: ATR, XFD, ATX, DCM, PRO, XEX, COM, EXE, BAS, LST, CART, ROM, CAS.
+
+**Test Cases**:
+- `CMD:boot /valid/path.atr\n` - boot valid file
+- `CMD:boot /nonexistent.atr\n` → `ERR:File not found`
+
+#### version
+Query protocol version.
+```
+CMD:version
+OK:version 1.0
+```
+
 #### reset
 Reset the emulator.
 ```
@@ -841,6 +778,28 @@ Bytes are comma-separated hex values.
 - Write and read back: Write A9,00, read $0600, verify A9,00
 - `CMD:write $0600 GG\n` → `ERR:Invalid byte value 'GG'`
 - `CMD:write $0600\n` → `ERR:Missing data`
+
+#### fill
+Fill a memory range with a single byte value.
+```
+CMD:fill $0600 $06FF $00
+OK:filled 256 bytes
+```
+
+Address and value can be hex ($xxxx) or decimal.
+
+**Test Cases**:
+- `CMD:fill $0600 $06FF $EA\n` - fill range with NOP
+- `CMD:fill $0600\n` → `ERR:Missing end address`
+
+#### screen
+Read the text displayed on the GRAPHICS 0 screen as a 40×24 character string.
+```
+CMD:screen
+OK:<40x24 character text, lines joined with \x1E>
+```
+
+Only works when the emulator is in GRAPHICS 0 (text) mode.
 
 ### CPU State
 
@@ -906,6 +865,92 @@ OK:$0600  A9 00     LDA #$00
 - `CMD:d 1536 8\n` - decimal address
 - `CMD:d xyz\n` → `ERR:Invalid address 'xyz'`
 - `CMD:d $0600 0\n` → `ERR:Invalid line count '0'`
+
+### Assembly
+
+The assembler supports single-line and interactive (multi-line) modes. All
+instructions use standard 6502 mnemonics with MAC65-style syntax.
+
+#### assemble (single-line)
+Assemble one instruction at a specific address.
+```
+CMD:assemble $0600 LDA #$00
+OK:$0600: A9 00     LDA #$00
+```
+
+Alias: `asm`, `a`.
+
+**Test Cases**:
+- `CMD:a $0600 NOP\n` - assemble NOP, verify byte EA at $0600
+- `CMD:a $0600 INVALID\n` → `ERR:Assembly error: ...`
+
+#### assemble (start interactive session)
+Start an interactive assembly session at the given address. Subsequent
+instructions are fed with `assemble input` and the address advances
+automatically.
+```
+CMD:assemble $0600
+OK:ASM $0600
+```
+
+**Test Case**: Start session, verify `ASM $0600` response.
+
+#### assemble input
+Feed an instruction to the active interactive assembly session. The
+server assembles the instruction at the current address, writes the
+bytes to memory, and returns the formatted line plus the next address
+(separated by the record separator `\x1E`).
+```
+CMD:asm input LDA #$00
+OK:$0600: A9 00     LDA #$00\x1E$0602
+
+CMD:asm input STA $D400
+OK:$0602: 8D 00 D4  STA $D400\x1E$0605
+```
+
+If no session is active:
+```
+CMD:asm input NOP
+ERR:No active assembly session. Start one with: assemble $<address>
+```
+
+An invalid instruction returns an error but keeps the session alive so
+the caller can retry:
+```
+CMD:asm input INVALID
+ERR:Assembly error: Unknown mnemonic 'INVALID'
+```
+
+#### assemble end
+End the active interactive assembly session and return a summary.
+```
+CMD:asm end
+OK:Assembly complete: 5 bytes at $0600-$0604
+```
+
+If no session is active:
+```
+CMD:asm end
+ERR:No active assembly session
+```
+
+#### Complete interactive session example
+```
+CMD:assemble $0600
+OK:ASM $0600
+
+CMD:asm input LDA #$00
+OK:$0600: A9 00     LDA #$00\x1E$0602
+
+CMD:asm input STA $D400
+OK:$0602: 8D 00 D4  STA $D400\x1E$0605
+
+CMD:asm input RTS
+OK:$0605: 60        RTS\x1E$0606
+
+CMD:asm end
+OK:Assembly complete: 6 bytes at $0600-$0605
+```
 
 ### Breakpoints
 
@@ -1058,6 +1103,245 @@ Escape sequences:
 
 **Test Case**: Inject "PRINT 123\n", verify output appears on emulated screen.
 
+### BASIC Subsystem
+
+Commands for managing BASIC programs. All prefixed with `basic`.
+
+#### basic (line entry)
+Enter or replace a BASIC line (tokenized and injected into emulator memory).
+```
+CMD:basic 10 PRINT "HELLO"
+OK:injected
+```
+
+#### basic new
+Clear BASIC program from memory.
+```
+CMD:basic new
+OK:cleared
+```
+
+#### basic run
+Execute the BASIC program.
+```
+CMD:basic run
+OK:running
+```
+
+#### basic list
+List the BASIC program. Optional `atascii` flag enables rich ATASCII rendering.
+```
+CMD:basic list
+OK:10 PRINT "HELLO"\x1E20 GOTO 10
+
+CMD:basic list atascii
+OK:10 PRINT "HELLO"\x1E20 GOTO 10
+```
+
+#### basic del
+Delete BASIC line(s) by number or range.
+```
+CMD:basic del 10
+OK:deleted 1 lines
+
+CMD:basic del 10-50
+OK:deleted 5 lines
+```
+
+#### basic stop
+Stop a running BASIC program (equivalent to BREAK key).
+```
+CMD:basic stop
+OK:stopped
+```
+
+#### basic cont
+Continue a stopped BASIC program.
+```
+CMD:basic cont
+OK:running
+```
+
+#### basic vars
+Show all BASIC variables and their values.
+```
+CMD:basic vars
+OK:I=10\x1ECOUNT=42\x1ENAME$="CLAUDE"
+```
+
+#### basic var
+Show a specific BASIC variable.
+```
+CMD:basic var X
+OK:X=100 (integer)
+```
+
+#### basic info
+Show BASIC program metadata.
+```
+CMD:basic info
+OK:program size=1234 lines=42 ...
+```
+
+#### basic renum
+Renumber BASIC lines. Optional start and step arguments (defaults: 10, 10).
+```
+CMD:basic renum
+OK:renumbered to 10,20,30,...
+
+CMD:basic renum 100 20
+OK:renumbered to 100,120,140,...
+```
+
+#### basic save
+Save tokenized BASIC to ATR disk. Supports optional `D#:` drive prefix.
+```
+CMD:basic save D:MYPROG
+OK:saved to D1:MYPROG
+
+CMD:basic save D2:BACKUP
+OK:saved to D2:BACKUP
+```
+
+#### basic load
+Load tokenized BASIC from ATR disk. Supports optional `D#:` drive prefix.
+```
+CMD:basic load D:MYPROG
+OK:loaded from D1:MYPROG
+```
+
+#### basic export
+Export BASIC program to host filesystem as text.
+```
+CMD:basic export ~/game.bas
+OK:exported to /Users/nick/game.bas
+```
+
+#### basic import
+Import BASIC program from host filesystem text file.
+```
+CMD:basic import ~/game.bas
+OK:imported from /Users/nick/game.bas
+```
+
+#### basic dir
+List files on ATR disk. Optional drive number (default: current drive).
+```
+CMD:basic dir
+OK:<directory listing>
+
+CMD:basic dir 2
+OK:<D2: directory listing>
+```
+
+### DOS File System
+
+Commands for managing ATR disk images and files. All prefixed with `dos`.
+
+#### dos cd
+Change current working drive.
+```
+CMD:dos cd 2
+OK:changed to D2:
+```
+
+#### dos dir
+List files on current drive. Optional wildcard pattern.
+```
+CMD:dos dir
+OK:<directory listing>
+
+CMD:dos dir *.BAS
+OK:<filtered listing>
+```
+
+#### dos info
+Show detailed file information.
+```
+CMD:dos info GAME.BAS
+OK:GAME.BAS 2048 bytes 8 sectors locked=0
+```
+
+#### dos type
+Display text file contents (ATASCII decoded).
+```
+CMD:dos type README.TXT
+OK:Welcome to my disk!\x1EHave fun!
+```
+
+#### dos dump
+Hex dump of file contents.
+```
+CMD:dos dump PROG.COM
+OK:<hex dump output>
+```
+
+#### dos copy
+Copy file between drives. Supports `D#:` prefix on source and destination.
+```
+CMD:dos copy D1:SRC.BAS D2:DST.BAS
+OK:copied D1:SRC.BAS to D2:DST.BAS
+```
+
+#### dos rename
+Rename file on current drive.
+```
+CMD:dos rename OLDNAME.BAS NEWNAME.BAS
+OK:renamed to NEWNAME.BAS
+```
+
+#### dos delete
+Delete file from current drive.
+```
+CMD:dos delete TEMP.BAS
+OK:deleted TEMP.BAS
+```
+
+#### dos lock
+Set read-only flag on file.
+```
+CMD:dos lock READONLY.BAS
+OK:locked READONLY.BAS
+```
+
+#### dos unlock
+Clear read-only flag on file.
+```
+CMD:dos unlock READONLY.BAS
+OK:unlocked READONLY.BAS
+```
+
+#### dos export
+Export ATR file to host filesystem.
+```
+CMD:dos export GAME.BAS ~/game.bas
+OK:exported to ~/game.bas
+```
+
+#### dos import
+Import host file to ATR disk.
+```
+CMD:dos import ~/game.bas GAME.BAS
+OK:imported from ~/game.bas
+```
+
+#### dos newdisk
+Create a new blank ATR disk image. Types: `sd` (90K), `ed` (130K), `dd` (180K).
+```
+CMD:dos newdisk ~/disk.atr
+OK:created disk.atr (sd)
+
+CMD:dos newdisk ~/disk.atr ed
+OK:created disk.atr (ed)
+```
+
+#### dos format
+Format current drive (erases all data).
+```
+CMD:dos format
+OK:formatted current disk
+```
+
 ### Session Control
 
 #### quit
@@ -1189,15 +1473,8 @@ class SocketHandler {
 | Control  | RESET        | ✓      | ✓      | ✓          | Invalid type |
 | Control  | STATUS       | ✓      | ✓      | ✓          | -           |
 | Control  | INFO         | ✓      | ✓      | ✓          | -           |
+| Control  | BOOT_FILE    | ✓      | ✓      | ✓          | File not found |
 | Control  | ACK          | ✓      | ✓      | ✓          | -           |
-| Control  | MEMORY_READ  | ✓      | ✓      | ✓          | Invalid addr, Invalid count |
-| Control  | MEMORY_WRITE | ✓      | ✓      | ✓          | Invalid addr |
-| Control  | REGISTERS_READ | ✓    | ✓      | ✓          | -           |
-| Control  | REGISTERS_WRITE | ✓   | ✓      | ✓          | Invalid format |
-| Control  | BREAKPOINT_SET | ✓    | ✓      | ✓          | Duplicate   |
-| Control  | BREAKPOINT_CLEAR | ✓  | ✓      | ✓          | Not found   |
-| Control  | BREAKPOINT_LIST | ✓   | ✓      | ✓          | -           |
-| Control  | BREAKPOINT_HIT | ✓    | ✓      | ✓          | -           |
 | Control  | ERROR        | ✓      | ✓      | ✓          | -           |
 | Input    | KEY_DOWN     | ✓      | ✓      | ✓          | Invalid format |
 | Input    | KEY_UP       | ✓      | ✓      | ✓          | -           |
@@ -1238,11 +1515,21 @@ class SocketHandler {
 | pause | ✓ | - |
 | resume | ✓ | - |
 | step | ✓ | Invalid count, Negative count |
+| stepover | ✓ | - |
+| until | ✓ | Invalid address |
+| boot | ✓ | File not found |
+| version | ✓ | - |
 | reset | ✓ | Invalid type |
 | status | ✓ | - |
 | disassemble | ✓ | Invalid address, Invalid line count |
+| assemble (single) | ✓ | Invalid instruction |
+| assemble (session) | ✓ | - |
+| assemble input | ✓ | No session, Invalid instruction |
+| assemble end | ✓ | No session |
 | read | ✓ | Invalid address, Missing count |
 | write | ✓ | Invalid address, Invalid byte, Missing data |
+| fill | ✓ | Missing address, Invalid value |
+| screen | ✓ | - |
 | registers (get) | ✓ | - |
 | registers (set) | ✓ | Invalid register, Invalid value |
 | breakpoint set | ✓ | Already set |
@@ -1257,5 +1544,35 @@ class SocketHandler {
 | screenshot | ✓ | Permission denied |
 | inject basic | ✓ | Invalid base64 |
 | inject keys | ✓ | - |
+| basic (line entry) | ✓ | Syntax error |
+| basic new | ✓ | - |
+| basic run | ✓ | - |
+| basic list | ✓ | - |
+| basic del | ✓ | Invalid line, Invalid range |
+| basic stop | ✓ | - |
+| basic cont | ✓ | - |
+| basic vars | ✓ | - |
+| basic var | ✓ | Variable not found |
+| basic info | ✓ | - |
+| basic renum | ✓ | Invalid start/step |
+| basic save | ✓ | No disk, File error |
+| basic load | ✓ | File not found |
+| basic export | ✓ | Permission denied |
+| basic import | ✓ | File not found |
+| basic dir | ✓ | No disk mounted |
+| dos cd | ✓ | Invalid drive |
+| dos dir | ✓ | No disk mounted |
+| dos info | ✓ | File not found |
+| dos type | ✓ | File not found |
+| dos dump | ✓ | File not found |
+| dos copy | ✓ | File not found, Dest drive not mounted |
+| dos rename | ✓ | File not found |
+| dos delete | ✓ | File not found, File locked |
+| dos lock | ✓ | File not found |
+| dos unlock | ✓ | File not found |
+| dos export | ✓ | File not found, Permission denied |
+| dos import | ✓ | File not found, Disk full |
+| dos newdisk | ✓ | Permission denied, Invalid type |
+| dos format | ✓ | No disk mounted |
 | quit | ✓ | - |
 | shutdown | ✓ | - |

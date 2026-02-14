@@ -478,7 +478,6 @@ The following features are not yet implemented and should not be tested:
 - Screenshot capture (Phase 17)
 - BASIC injection via server (Phase 17)
 - Keyboard injection via server (Phase 17)
-- Window scaling menu items (Phase 17)
 - File open dialogs (Phase 17)
 - WebSocket bridge (Phase 18)
 - Web browser client (Phase 19)

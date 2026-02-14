@@ -360,11 +360,45 @@ extension AESPMessage {
         return AESPMessage(type: .info)
     }
 
-    /// Creates a STATUS response message.
+    /// Creates a STATUS response message (basic, no disk info).
     ///
     /// - Parameter isRunning: Whether the emulator is running.
     public static func statusResponse(isRunning: Bool) -> AESPMessage {
         return AESPMessage(type: .status, payload: [isRunning ? 0x01 : 0x00])
+    }
+
+    /// Creates a STATUS response message with mounted drive information.
+    ///
+    /// The payload format is backwards-compatible with the basic status response:
+    /// - Byte 0: isRunning flag (0x00 = paused, 0x01 = running)
+    /// - Byte 1: number of mounted drives (N)
+    /// - For each mounted drive:
+    ///   - 1 byte: drive number (1-8)
+    ///   - 1 byte: filename length (L)
+    ///   - L bytes: filename as UTF-8 string
+    ///
+    /// Clients that only read byte 0 (the old format) will still work correctly.
+    ///
+    /// - Parameters:
+    ///   - isRunning: Whether the emulator is running.
+    ///   - mountedDrives: Array of (drive number, filename) tuples for mounted drives.
+    public static func statusResponse(
+        isRunning: Bool,
+        mountedDrives: [(drive: Int, filename: String)]
+    ) -> AESPMessage {
+        var payload = Data()
+        // Byte 0: running flag
+        payload.append(isRunning ? 0x01 : 0x00)
+        // Byte 1: number of mounted drives
+        payload.append(UInt8(min(mountedDrives.count, 255)))
+        // Drive records
+        for (drive, filename) in mountedDrives {
+            payload.append(UInt8(drive & 0xFF))
+            let filenameBytes = Array(filename.utf8)
+            payload.append(UInt8(min(filenameBytes.count, 255)))
+            payload.append(contentsOf: filenameBytes.prefix(255))
+        }
+        return AESPMessage(type: .status, payload: payload)
     }
 
     /// Creates an INFO response message.
@@ -374,38 +408,36 @@ extension AESPMessage {
         return AESPMessage(type: .info, payload: Data(json.utf8))
     }
 
+    /// Creates a BOOT_FILE request message.
+    ///
+    /// Requests the server to load a file and reboot the emulator.
+    /// Supported file types include disk images (ATR, XFD, ATX, DCM, PRO),
+    /// executables (XEX, COM, EXE), BASIC programs (BAS, LST), cartridges
+    /// (CART, ROM), and cassettes (CAS).
+    ///
+    /// - Parameter filePath: Absolute path to the file to boot.
+    public static func bootFile(filePath: String) -> AESPMessage {
+        return AESPMessage(type: .bootFile, payload: Data(filePath.utf8))
+    }
+
+    /// Creates a BOOT_FILE response message.
+    ///
+    /// - Parameters:
+    ///   - success: Whether the boot was successful.
+    ///   - message: Description of outcome (e.g. file type on success,
+    ///     error message on failure).
+    public static func bootFileResponse(success: Bool, message: String) -> AESPMessage {
+        var payload = Data(capacity: 1 + message.utf8.count)
+        payload.append(success ? 0x00 : 0x01)
+        payload.append(contentsOf: message.utf8)
+        return AESPMessage(type: .bootFile, payload: payload)
+    }
+
     /// Creates an ACK message.
     ///
     /// - Parameter acknowledgedType: The message type being acknowledged.
     public static func ack(for acknowledgedType: AESPMessageType) -> AESPMessage {
         return AESPMessage(type: .ack, payload: [acknowledgedType.rawValue])
-    }
-
-    /// Creates a MEMORY_READ request message.
-    ///
-    /// - Parameters:
-    ///   - address: The memory address to read from.
-    ///   - count: The number of bytes to read.
-    public static func memoryRead(address: UInt16, count: UInt16) -> AESPMessage {
-        var payload = Data(capacity: 4)
-        payload.append(UInt8((address >> 8) & 0xFF))
-        payload.append(UInt8(address & 0xFF))
-        payload.append(UInt8((count >> 8) & 0xFF))
-        payload.append(UInt8(count & 0xFF))
-        return AESPMessage(type: .memoryRead, payload: payload)
-    }
-
-    /// Creates a MEMORY_WRITE message.
-    ///
-    /// - Parameters:
-    ///   - address: The memory address to write to.
-    ///   - bytes: The data to write.
-    public static func memoryWrite(address: UInt16, bytes: Data) -> AESPMessage {
-        var payload = Data(capacity: 2 + bytes.count)
-        payload.append(UInt8((address >> 8) & 0xFF))
-        payload.append(UInt8(address & 0xFF))
-        payload.append(bytes)
-        return AESPMessage(type: .memoryWrite, payload: payload)
     }
 
     /// Creates an ERROR message.
@@ -418,106 +450,6 @@ extension AESPMessage {
         payload.append(code)
         payload.append(contentsOf: message.utf8)
         return AESPMessage(type: .error, payload: payload)
-    }
-
-    /// Creates a REGISTERS_READ request message.
-    public static func registersRead() -> AESPMessage {
-        return AESPMessage(type: .registersRead)
-    }
-
-    /// Creates a REGISTERS_READ response message.
-    ///
-    /// - Parameters:
-    ///   - a: Accumulator register.
-    ///   - x: X index register.
-    ///   - y: Y index register.
-    ///   - s: Stack pointer.
-    ///   - p: Processor status.
-    ///   - pc: Program counter.
-    public static func registersResponse(
-        a: UInt8, x: UInt8, y: UInt8, s: UInt8, p: UInt8, pc: UInt16
-    ) -> AESPMessage {
-        var payload = Data(capacity: 8)
-        payload.append(a)
-        payload.append(x)
-        payload.append(y)
-        payload.append(s)
-        payload.append(p)
-        payload.append(UInt8((pc >> 8) & 0xFF))
-        payload.append(UInt8(pc & 0xFF))
-        payload.append(0x00) // Reserved
-        return AESPMessage(type: .registersRead, payload: payload)
-    }
-
-    /// Creates a REGISTERS_WRITE request message.
-    ///
-    /// - Parameters:
-    ///   - a: Accumulator register.
-    ///   - x: X index register.
-    ///   - y: Y index register.
-    ///   - s: Stack pointer.
-    ///   - p: Processor status.
-    ///   - pc: Program counter.
-    public static func registersWrite(
-        a: UInt8, x: UInt8, y: UInt8, s: UInt8, p: UInt8, pc: UInt16
-    ) -> AESPMessage {
-        var payload = Data(capacity: 8)
-        payload.append(a)
-        payload.append(x)
-        payload.append(y)
-        payload.append(s)
-        payload.append(p)
-        payload.append(UInt8((pc >> 8) & 0xFF))
-        payload.append(UInt8(pc & 0xFF))
-        payload.append(0x00) // Reserved
-        return AESPMessage(type: .registersWrite, payload: payload)
-    }
-
-    /// Creates a BREAKPOINT_SET message.
-    ///
-    /// - Parameter address: The address to set a breakpoint at.
-    public static func breakpointSet(address: UInt16) -> AESPMessage {
-        var payload = Data(capacity: 2)
-        payload.append(UInt8((address >> 8) & 0xFF))
-        payload.append(UInt8(address & 0xFF))
-        return AESPMessage(type: .breakpointSet, payload: payload)
-    }
-
-    /// Creates a BREAKPOINT_CLEAR message.
-    ///
-    /// - Parameter address: The address to clear a breakpoint at.
-    public static func breakpointClear(address: UInt16) -> AESPMessage {
-        var payload = Data(capacity: 2)
-        payload.append(UInt8((address >> 8) & 0xFF))
-        payload.append(UInt8(address & 0xFF))
-        return AESPMessage(type: .breakpointClear, payload: payload)
-    }
-
-    /// Creates a BREAKPOINT_LIST request message.
-    public static func breakpointList() -> AESPMessage {
-        return AESPMessage(type: .breakpointList)
-    }
-
-    /// Creates a BREAKPOINT_LIST response message.
-    ///
-    /// - Parameter addresses: The list of breakpoint addresses.
-    public static func breakpointListResponse(addresses: [UInt16]) -> AESPMessage {
-        var payload = Data(capacity: addresses.count * 2)
-        for address in addresses {
-            payload.append(UInt8((address >> 8) & 0xFF))
-            payload.append(UInt8(address & 0xFF))
-        }
-        return AESPMessage(type: .breakpointList, payload: payload)
-    }
-
-    /// Creates a BREAKPOINT_HIT notification message.
-    ///
-    /// - Parameter address: The address where the breakpoint was hit.
-    public static func breakpointHit(address: UInt16) -> AESPMessage {
-        var payload = Data(capacity: 2)
-        payload.append(UInt8((address >> 8) & 0xFF))
-        payload.append(UInt8(address & 0xFF))
-        return AESPMessage(type: .breakpointHit, payload: payload)
     }
 
     // =========================================================================
@@ -756,24 +688,27 @@ extension AESPMessage {
         )
     }
 
-    /// Parses the payload as a memory read request.
+    /// Parses the payload as a boot file request.
     ///
-    /// - Returns: Tuple of (address, count), or nil if invalid.
-    public func parseMemoryReadRequest() -> (address: UInt16, count: UInt16)? {
-        guard type == .memoryRead, payload.count >= 4 else { return nil }
-        let address = UInt16(payload[0]) << 8 | UInt16(payload[1])
-        let count = UInt16(payload[2]) << 8 | UInt16(payload[3])
-        return (address: address, count: count)
+    /// - Returns: The file path string, or nil if invalid.
+    public func parseBootFileRequest() -> String? {
+        guard type == .bootFile, !payload.isEmpty else { return nil }
+        return String(decoding: payload, as: UTF8.self)
     }
 
-    /// Parses the payload as a memory write request.
+    /// Parses the payload as a boot file response.
     ///
-    /// - Returns: Tuple of (address, data), or nil if invalid.
-    public func parseMemoryWriteRequest() -> (address: UInt16, data: Data)? {
-        guard type == .memoryWrite, payload.count >= 2 else { return nil }
-        let address = UInt16(payload[0]) << 8 | UInt16(payload[1])
-        let data = payload.count > 2 ? payload.subdata(in: 2..<payload.count) : Data()
-        return (address: address, data: data)
+    /// - Returns: Tuple of (success, message), or nil if invalid.
+    public func parseBootFileResponse() -> (success: Bool, message: String)? {
+        guard type == .bootFile, payload.count >= 1 else { return nil }
+        let success = payload[0] == 0x00
+        let message: String
+        if payload.count > 1 {
+            message = String(decoding: payload[1...], as: UTF8.self)
+        } else {
+            message = ""
+        }
+        return (success: success, message: message)
     }
 
     /// Parses the payload as an error response.
@@ -808,12 +743,60 @@ extension AESPMessage {
         return b0 | b1 | b2 | b3 | b4 | b5 | b6 | b7
     }
 
-    /// Parses the payload as a status response.
+    /// Parses the payload as a status response (basic, running flag only).
     ///
     /// - Returns: Whether the emulator is running, or nil if invalid.
     public func parseStatusPayload() -> Bool? {
         guard type == .status, payload.count >= 1 else { return nil }
         return payload[0] != 0
+    }
+
+    /// Enhanced status payload containing running state and mounted drive info.
+    public struct StatusPayload: Sendable {
+        /// Whether the emulator is currently running.
+        public let isRunning: Bool
+        /// Array of mounted drives with their drive number and filename.
+        public let mountedDrives: [(drive: Int, filename: String)]
+    }
+
+    /// Parses the payload as an enhanced status response with disk information.
+    ///
+    /// This parser is backwards-compatible: if the payload only has the single
+    /// running-flag byte (old format), it returns an empty mountedDrives array.
+    /// If the payload includes drive records (new format), those are parsed too.
+    ///
+    /// - Returns: A `StatusPayload` with running state and mounted drives,
+    ///   or nil if the payload is invalid.
+    public func parseStatusWithDisks() -> StatusPayload? {
+        guard type == .status, payload.count >= 1 else { return nil }
+        let isRunning = payload[0] != 0
+
+        // Old format: single byte payload, no disk info
+        guard payload.count >= 2 else {
+            return StatusPayload(isRunning: isRunning, mountedDrives: [])
+        }
+
+        let driveCount = Int(payload[1])
+        var drives: [(drive: Int, filename: String)] = []
+        var offset = 2
+
+        for _ in 0..<driveCount {
+            // Need at least 2 bytes (drive number + filename length)
+            guard offset + 2 <= payload.count else { break }
+            let driveNumber = Int(payload[offset])
+            let filenameLength = Int(payload[offset + 1])
+            offset += 2
+
+            // Read filename bytes
+            guard offset + filenameLength <= payload.count else { break }
+            let filenameData = payload[offset..<(offset + filenameLength)]
+            let filename = String(decoding: filenameData, as: UTF8.self)
+            offset += filenameLength
+
+            drives.append((drive: driveNumber, filename: filename))
+        }
+
+        return StatusPayload(isRunning: isRunning, mountedDrives: drives)
     }
 
     /// Parses the payload as an info response.
@@ -822,56 +805,6 @@ extension AESPMessage {
     public func parseInfoPayload() -> String? {
         guard type == .info, !payload.isEmpty else { return nil }
         return String(decoding: payload, as: UTF8.self)
-    }
-
-    /// CPU register values.
-    public struct CPURegisters {
-        public let a: UInt8
-        public let x: UInt8
-        public let y: UInt8
-        public let s: UInt8
-        public let p: UInt8
-        public let pc: UInt16
-    }
-
-    /// Parses the payload as a registers response.
-    ///
-    /// - Returns: The CPU register values, or nil if invalid.
-    public func parseRegistersPayload() -> CPURegisters? {
-        guard type == .registersRead || type == .registersWrite,
-              payload.count >= 7 else { return nil }
-        let pc = UInt16(payload[5]) << 8 | UInt16(payload[6])
-        return CPURegisters(
-            a: payload[0],
-            x: payload[1],
-            y: payload[2],
-            s: payload[3],
-            p: payload[4],
-            pc: pc
-        )
-    }
-
-    /// Parses the payload as a breakpoint list response.
-    ///
-    /// - Returns: Array of breakpoint addresses, or nil if invalid.
-    public func parseBreakpointListPayload() -> [UInt16]? {
-        guard type == .breakpointList else { return nil }
-        guard payload.count % 2 == 0 else { return nil }
-
-        var addresses: [UInt16] = []
-        for i in stride(from: 0, to: payload.count, by: 2) {
-            let address = UInt16(payload[i]) << 8 | UInt16(payload[i + 1])
-            addresses.append(address)
-        }
-        return addresses
-    }
-
-    /// Parses the payload as a breakpoint hit notification.
-    ///
-    /// - Returns: The address where breakpoint was hit, or nil if invalid.
-    public func parseBreakpointHitPayload() -> UInt16? {
-        guard type == .breakpointHit, payload.count >= 2 else { return nil }
-        return UInt16(payload[0]) << 8 | UInt16(payload[1])
     }
 
     /// Parses the payload as a paddle event.

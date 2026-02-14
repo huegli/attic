@@ -151,15 +151,18 @@ public final class LibAtari800Wrapper: @unchecked Sendable {
         // These configure the emulator for Atari 800 XL with BASIC
         //
         // Note: libatari800 parses these like command-line arguments.
-        // The library prints "Error opening" warnings for arguments it
-        // doesn't recognize as file paths - these warnings are harmless
-        // and occur because the library tries to open each argument as
-        // a file before processing it as an option.
+        // Each module's Initialise function consumes its recognized options
+        // from argv. Any unrecognized args left over get passed to the
+        // auto-start loop which tries to open them as disk image files,
+        // printing "Error opening" warnings. Use the exact option names
+        // from the libatari800 source (sysrom.c, sound.c, atari.c).
         let args = [
-            "attic",                           // Program name (argv[0], required)
+            "atari800",                        // Program name (argv[0]); must end with
+                                               // "atari800" so libatari800_init doesn't
+                                               // shift it into the arg list (api.c:106)
             "-xl",                             // Atari 800 XL machine type
-            "-xlrom", osRomPath.path,          // Path to XL OS ROM
-            "-basicrom", basicRomPath.path,    // Path to BASIC ROM
+            "-xlxe_rom", osRomPath.path,       // Path to XL/XE OS ROM (sysrom.c)
+            "-basic_rom", basicRomPath.path,   // Path to BASIC ROM (sysrom.c)
             "-basic",                          // Enable BASIC
             "-sound",                          // Enable sound
             "-audio16"                         // 16-bit audio
@@ -209,6 +212,7 @@ public final class LibAtari800Wrapper: @unchecked Sendable {
         currentInput.start = input.start ? 1 : 0
         currentInput.select = input.select ? 1 : 0
         currentInput.option = input.option ? 1 : 0
+        currentInput.special = input.special
         currentInput.joy0 = input.joystick0
         currentInput.trig0 = input.trigger0 ? 0 : 1  // 0 = pressed, 1 = released
         currentInput.joy1 = input.joystick1
@@ -268,6 +272,39 @@ public final class LibAtari800Wrapper: @unchecked Sendable {
             // Reboot without file by passing empty string
             return libatari800_reboot_with_file("") != 0
         }
+    }
+
+    /// Performs a warm start (like pressing RESET key on the Atari).
+    ///
+    /// This resets the CPU and restarts execution from the RESET vector,
+    /// but preserves RAM contents (unlike a cold reboot).
+    ///
+    /// The warmstart is triggered through the input system by setting
+    /// `special = 2` in the input template. libatari800 negates this value
+    /// to produce `AKEY_WARMSTART` (-2), which the emulator handles as
+    /// a reset key press during the next frame.
+    public func warmstart() {
+        guard isInitialized else { return }
+        stateIsCached = false
+        // Send warmstart through the input system: special=2 → -2 = AKEY_WARMSTART
+        var input = InputState()
+        input.special = 2
+        executeFrame(input: &input)
+    }
+
+    /// Sends a BREAK signal to the emulator.
+    ///
+    /// This simulates pressing the BREAK key on the Atari keyboard, which
+    /// stops a running BASIC program. The break is triggered through the
+    /// input system by setting `special = 1` in the input template.
+    /// libatari800 negates this value to produce `AKEY_BREAK` (-1).
+    public func sendBreak() {
+        guard isInitialized else { return }
+        stateIsCached = false
+        // Send break through the input system: special=1 → -1 = AKEY_BREAK
+        var input = InputState()
+        input.special = 1
+        executeFrame(input: &input)
     }
 
     // =========================================================================
@@ -788,6 +825,15 @@ public struct InputState: Sendable {
 
     /// OPTION console key.
     public var option: Bool = false
+
+    /// Special input code for system actions (e.g., warm/cold reset).
+    ///
+    /// This maps to the `special` field of `input_template_t`. The value
+    /// is negated by libatari800 to produce an AKEY_* code:
+    /// - 1 = AKEY_BREAK (-1): Break key (stops running BASIC program)
+    /// - 2 = AKEY_WARMSTART (-2): Warm reset (like pressing RESET key)
+    /// - 3 = AKEY_COLDSTART (-3): Cold reset (power cycle)
+    public var special: UInt8 = 0
 
     /// Joystick 0 direction (4-bit, RLDU).
     public var joystick0: UInt8 = 0x0F  // Centered

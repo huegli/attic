@@ -36,6 +36,8 @@
 // | F1            | START        | Console START key                  |
 // | F2            | SELECT       | Console SELECT key                 |
 // | F3            | OPTION       | Console OPTION key                 |
+// | F4            | HELP         | Help key (XL/XE only)              |
+// | F5            | RESET        | Warm reset (handled specially)     |
 // | Backtick (`)  | ATARI        | Inverse video toggle               |
 // | Arrow keys    | Arrow keys   | Cursor movement                    |
 // | Shift         | SHIFT        | Modifier                           |
@@ -312,6 +314,13 @@ public final class KeyboardInputHandler: ObservableObject {
         case MacKeyCode.f3:
             optionKeyPressed = true
             return nil
+
+        // F4 - HELP key
+        case MacKeyCode.f4:
+            return (0, AtariKeyCode.help, shift, control)
+
+        // F5 - RESET is handled specially in AtticApp (not a keyboard key)
+        // Returns nil here so AtticApp can intercept it
 
         // Escape
         // Note: keyChar must be 0 for special keys so libatari800 uses keyCode

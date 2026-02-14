@@ -84,6 +84,12 @@ public actor CLISocketClient {
     /// The delegate for receiving async events.
     public weak var delegate: CLISocketClientDelegate?
 
+    /// Sets the delegate for receiving async events from the server.
+    /// This method provides a way to set the delegate from outside the actor.
+    public func setDelegate(_ delegate: CLISocketClientDelegate?) {
+        self.delegate = delegate
+    }
+
     /// The socket file descriptor.
     private var socket: Int32 = -1
 
@@ -92,9 +98,6 @@ public actor CLISocketClient {
 
     /// Path to the connected socket.
     private var connectedPath: String?
-
-    /// Command parser (for building commands).
-    private let commandParser = CLICommandParser()
 
     /// Response parser.
     private let responseParser = CLIResponseParser()
@@ -132,6 +135,7 @@ public actor CLISocketClient {
     /// Discovers available AtticServer sockets.
     ///
     /// Scans /tmp for attic-*.sock files and returns the paths of valid sockets.
+    /// Only returns sockets whose server process is still running (validates PID).
     /// Sockets are sorted by modification time (most recent first).
     ///
     /// - Returns: Array of socket paths, or empty if none found.
@@ -149,6 +153,15 @@ public actor CLISocketClient {
             if file.hasPrefix("attic-") && file.hasSuffix(".sock") {
                 let fullPath = (tmpPath as NSString).appendingPathComponent(file)
 
+                // Extract PID from filename (attic-<PID>.sock)
+                // and verify the process is still running
+                guard isServerProcessRunning(socketFilename: file) else {
+                    // Stale socket - server process no longer running
+                    // Clean up the stale socket file
+                    try? fileManager.removeItem(atPath: fullPath)
+                    continue
+                }
+
                 // Check if socket exists and get modification time
                 if let attrs = try? fileManager.attributesOfItem(atPath: fullPath),
                    let modified = attrs[.modificationDate] as? Date {
@@ -161,6 +174,27 @@ public actor CLISocketClient {
         sockets.sort { $0.modified > $1.modified }
 
         return sockets.map { $0.path }
+    }
+
+    /// Checks if the server process for a socket file is still running.
+    ///
+    /// Extracts the PID from the socket filename (format: attic-<PID>.sock)
+    /// and checks if that process is still alive.
+    ///
+    /// - Parameter socketFilename: The socket filename (e.g., "attic-1234.sock").
+    /// - Returns: True if the process is running, false otherwise.
+    private nonisolated func isServerProcessRunning(socketFilename: String) -> Bool {
+        // Extract PID from filename: attic-<PID>.sock
+        let withoutPrefix = socketFilename.dropFirst("attic-".count)
+        let withoutSuffix = withoutPrefix.dropLast(".sock".count)
+
+        guard let pid = Int32(withoutSuffix) else {
+            return false
+        }
+
+        // Check if process is running using kill(pid, 0)
+        // This doesn't send a signal, just checks if the process exists
+        return kill(pid, 0) == 0
     }
 
     /// Discovers the most recently active AtticServer socket.
@@ -459,6 +493,8 @@ public actor CLISocketClient {
             return "unmount \(drive)"
         case .drives:
             return "drives"
+        case .boot(let path):
+            return "boot \(path)"
         case .stateSave(let path):
             return "state save \(path)"
         case .stateLoad(let path):
@@ -468,15 +504,18 @@ public actor CLISocketClient {
                 return "screenshot \(path)"
             }
             return "screenshot"
+        case .screenText(let atascii):
+            return atascii ? "screen atascii" : "screen"
         case .injectBasic(let base64Data):
             return "inject basic \(base64Data)"
         case .injectKeys(let text):
-            // Escape special characters
+            // Escape special characters (including space to prevent parser issues)
             let escaped = text
                 .replacingOccurrences(of: "\\", with: "\\\\")
                 .replacingOccurrences(of: "\n", with: "\\n")
                 .replacingOccurrences(of: "\t", with: "\\t")
                 .replacingOccurrences(of: "\r", with: "\\r")
+                .replacingOccurrences(of: " ", with: "\\s")
             return "inject keys \(escaped)"
         case .disassemble(let address, let lines):
             // Format: disassemble [address] [lines]
@@ -499,6 +538,10 @@ public actor CLISocketClient {
             return "assemble $\(String(format: "%04X", address))"
         case .assembleLine(let address, let instruction):
             return "assemble $\(String(format: "%04X", address)) \(instruction)"
+        case .assembleInput(let instruction):
+            return "asm input \(instruction)"
+        case .assembleEnd:
+            return "asm end"
         case .stepOver:
             return "stepover"
         case .runUntil(let address):
@@ -513,8 +556,78 @@ public actor CLISocketClient {
             return "basic NEW"
         case .basicRun:
             return "basic RUN"
-        case .basicList:
-            return "basic LIST"
+        case .basicList(let atascii):
+            return atascii ? "basic LIST ATASCII" : "basic LIST"
+
+        // BASIC editing commands
+        case .basicDelete(let lineOrRange):
+            return "basic DEL \(lineOrRange)"
+        case .basicStop:
+            return "basic STOP"
+        case .basicCont:
+            return "basic CONT"
+        case .basicVars:
+            return "basic VARS"
+        case .basicVar(let name):
+            return "basic VAR \(name)"
+        case .basicInfo:
+            return "basic INFO"
+        case .basicExport(let path):
+            return "basic EXPORT \(path)"
+        case .basicImport(let path):
+            return "basic IMPORT \(path)"
+        case .basicDir(let drive):
+            if let d = drive {
+                return "basic DIR \(d)"
+            }
+            return "basic DIR"
+        case .basicRenumber(let start, let step):
+            var cmd = "basic RENUM"
+            if let s = start { cmd += " \(s)" }
+            if let st = step { cmd += " \(st)" }
+            return cmd
+        case .basicSave(let drive, let filename):
+            if let d = drive {
+                return "basic SAVE D\(d):\(filename)"
+            }
+            return "basic SAVE D:\(filename)"
+        case .basicLoad(let drive, let filename):
+            if let d = drive {
+                return "basic LOAD D\(d):\(filename)"
+            }
+            return "basic LOAD D:\(filename)"
+
+        // DOS mode commands
+        case .dosChangeDrive(let drive):
+            return "dos cd \(drive)"
+        case .dosDirectory(let pattern):
+            if let p = pattern { return "dos dir \(p)" }
+            return "dos dir"
+        case .dosFileInfo(let filename):
+            return "dos info \(filename)"
+        case .dosType(let filename):
+            return "dos type \(filename)"
+        case .dosDump(let filename):
+            return "dos dump \(filename)"
+        case .dosCopy(let source, let destination):
+            return "dos copy \(source) \(destination)"
+        case .dosRename(let oldName, let newName):
+            return "dos rename \(oldName) \(newName)"
+        case .dosDelete(let filename):
+            return "dos delete \(filename)"
+        case .dosLock(let filename):
+            return "dos lock \(filename)"
+        case .dosUnlock(let filename):
+            return "dos unlock \(filename)"
+        case .dosExport(let filename, let hostPath):
+            return "dos export \(filename) \(hostPath)"
+        case .dosImport(let hostPath, let filename):
+            return "dos import \(hostPath) \(filename)"
+        case .dosNewDisk(let path, let type):
+            if let t = type { return "dos newdisk \(path) \(t)" }
+            return "dos newdisk \(path)"
+        case .dosFormat:
+            return "dos format"
         }
     }
 
@@ -634,34 +747,4 @@ public actor CLISocketClient {
         pendingResponse = nil
         continuation.resume(throwing: CLIProtocolError.timeout)
     }
-}
-
-// =============================================================================
-// MARK: - fd_set Helpers (Duplicated for client module)
-// =============================================================================
-
-/// Clears an fd_set.
-private func fdZero(_ set: inout fd_set) {
-    #if canImport(Darwin)
-    _ = withUnsafeMutablePointer(to: &set) { ptr in
-        memset(ptr, 0, MemoryLayout<fd_set>.size)
-    }
-    #else
-    __FD_ZERO(&set)
-    #endif
-}
-
-/// Adds a file descriptor to an fd_set.
-private func fdSet(_ fd: Int32, _ set: inout fd_set) {
-    #if canImport(Darwin)
-    let intOffset = Int(fd) / 32
-    let bitOffset = Int(fd) % 32
-    withUnsafeMutablePointer(to: &set) { ptr in
-        let rawPtr = UnsafeMutableRawPointer(ptr)
-        let arrayPtr = rawPtr.assumingMemoryBound(to: Int32.self)
-        arrayPtr[intOffset] |= Int32(1 << bitOffset)
-    }
-    #else
-    __FD_SET(fd, &set)
-    #endif
 }

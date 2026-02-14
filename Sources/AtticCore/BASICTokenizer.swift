@@ -554,8 +554,13 @@ public struct BASICTokenizer: Sendable {
         bytes.append(UInt8(lineNum & 0xFF))
         bytes.append(UInt8(lineNum >> 8))
 
-        // Line length (will be filled in)
-        let lengthIndex = bytes.count
+        // Line offset (will be filled in - offset to next line)
+        let lineOffsetIndex = bytes.count
+        bytes.append(0)  // Placeholder
+
+        // Statement offset (will be filled in - for multi-statement lines)
+        // For single-statement lines, this equals the line offset
+        let stmtOffsetIndex = bytes.count
         bytes.append(0)  // Placeholder
 
         // Tokenized content
@@ -564,12 +569,13 @@ public struct BASICTokenizer: Sendable {
         // End of line marker
         bytes.append(BASICLineFormat.endOfLineMarker)
 
-        // Fill in length
+        // Fill in offsets
         let totalLength = bytes.count
         guard totalLength <= BASICMemoryDefaults.maxLineLength else {
             throw BASICTokenizerError.lineTooLong(tokenizedLength: totalLength)
         }
-        bytes[lengthIndex] = UInt8(totalLength)
+        bytes[lineOffsetIndex] = UInt8(totalLength)
+        bytes[stmtOffsetIndex] = UInt8(totalLength)  // Same for single-statement lines
 
         return TokenizedLine(
             lineNumber: UInt16(lineNum),

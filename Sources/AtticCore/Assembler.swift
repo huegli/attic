@@ -152,6 +152,20 @@ public final class SymbolTable: @unchecked Sendable {
         forwardReferences
     }
 
+    /// Updates an existing symbol's value, or defines it if new.
+    ///
+    /// Unlike `define()`, this does not throw on duplicates.
+    /// Used by the EQU pseudo-op to set a symbol to an expression value.
+    ///
+    /// - Parameters:
+    ///   - name: The label name.
+    ///   - value: The value to assign.
+    public func update(_ name: String, value: UInt16) {
+        let upper = name.uppercased()
+        symbols[upper] = value
+        forwardReferences.remove(upper)
+    }
+
     /// Clears all symbols.
     public func clear() {
         symbols.removeAll()
@@ -547,6 +561,9 @@ public final class Assembler: @unchecked Sendable {
     /// Current assembly address (location counter).
     private var pc: UInt16
 
+    /// The initial start address (for resetting between passes).
+    private let startAddress: UInt16
+
     /// Whether we're in the first pass (collecting labels).
     private var firstPass: Bool = false
 
@@ -556,6 +573,7 @@ public final class Assembler: @unchecked Sendable {
     public init(startAddress: UInt16 = 0) {
         self.symbols = SymbolTable()
         self.pc = startAddress
+        self.startAddress = startAddress
     }
 
     /// Resets the assembler state.
@@ -593,10 +611,15 @@ public final class Assembler: @unchecked Sendable {
 
         let parsed = parseLine(line)
 
-        // Handle label if present
+        // Handle label if present.
+        // During the second pass of multi-line assembly, labels are already
+        // defined from the first pass, so we skip re-definition to avoid
+        // duplicateLabel errors.
         var definedLabel: String? = nil
         if let label = parsed.label {
-            try symbols.define(label, value: pc)
+            if firstPass || symbols.lookup(label) == nil {
+                try symbols.define(label, value: pc)
+            }
             definedLabel = label
         }
 
@@ -635,22 +658,30 @@ public final class Assembler: @unchecked Sendable {
     public func assemble(_ source: String) throws -> [AssemblyResult] {
         let lines = source.components(separatedBy: .newlines)
 
-        // First pass: collect labels
+        // First pass: collect label addresses.
+        // When a forward reference causes assembleLine to fail, we still need
+        // to advance the PC by the instruction's expected byte count so that
+        // subsequent labels get the correct addresses.
         reset()
         firstPass = true
         for line in lines {
-            _ = try? assembleLine(line)
+            let pcBefore = pc
+            do {
+                _ = try assembleLine(line)
+            } catch {
+                // If the line failed (e.g., undefined forward reference),
+                // estimate the instruction size from the mnemonic so we still
+                // advance the PC correctly for label address calculation.
+                if pc == pcBefore {
+                    let estimated = estimateInstructionSize(line)
+                    pc = pc &+ UInt16(estimated)
+                }
+            }
         }
 
-        // Check for unresolved forward references
-        let unresolved = symbols.unresolvedReferences
-        if !unresolved.isEmpty && !firstPass {
-            throw AssemblerError.undefinedLabel(unresolved.first!)
-        }
-
-        // Second pass: generate code
-        // Keep the symbols from first pass, just reset PC
-        pc = 0
+        // Second pass: generate code.
+        // Keep the symbols from first pass, just reset PC to original start.
+        pc = startAddress
         firstPass = false
 
         var results: [AssemblyResult] = []
@@ -662,6 +693,60 @@ public final class Assembler: @unchecked Sendable {
         }
 
         return results
+    }
+
+    // =========================================================================
+    // MARK: - Instruction Size Estimation
+    // =========================================================================
+
+    /// Estimates the byte size of an instruction from its source line.
+    ///
+    /// Used during the first pass of multi-line assembly when forward references
+    /// prevent full assembly. Parses the line to get the mnemonic and operand,
+    /// then estimates the size based on the addressing mode pattern.
+    ///
+    /// - Parameter line: The assembly source line.
+    /// - Returns: Estimated byte count (0 for comments/empty/pseudo-ops).
+    private func estimateInstructionSize(_ line: String) -> Int {
+        let parsed = parseLine(line)
+        guard let mnemonic = parsed.mnemonic else { return 0 }
+        let upper = mnemonic.uppercased()
+
+        // Pseudo-ops don't contribute to this estimate (ORG, EQU, etc.)
+        if isPseudoOp(upper) { return 0 }
+
+        // Not a valid instruction? Skip
+        guard isMnemonic(upper) else { return 0 }
+
+        // Branches are always 2 bytes (opcode + relative offset)
+        if OpcodeTable.isBranch(upper) { return 2 }
+
+        // No operand → implied (1 byte) or accumulator (1 byte)
+        guard let operand = parsed.operand else { return 1 }
+
+        // Immediate: # prefix → 2 bytes
+        if operand.hasPrefix("#") { return 2 }
+
+        // Indirect: parentheses → 2 bytes for zero-page indirect, 3 for absolute
+        if operand.hasPrefix("(") {
+            // ($nn,X) or ($nn),Y → 2 bytes, ($nnnn) → 3 bytes
+            return operand.contains(",") ? 2 : 3
+        }
+
+        // Accumulator: "A"
+        if operand.uppercased() == "A" {
+            if OpcodeTable.opcode(for: upper, mode: .accumulator) != nil {
+                return 1
+            }
+        }
+
+        // JMP and JSR are always 3 bytes (absolute addressing)
+        if upper == "JMP" || upper == "JSR" { return 3 }
+
+        // Default heuristic: if the operand looks like it could be zero-page
+        // (small number or label), assume absolute (3 bytes) for safety.
+        // Forward references typically refer to absolute addresses.
+        return 3
     }
 
     // =========================================================================
@@ -752,18 +837,18 @@ public final class Assembler: @unchecked Sendable {
             return AssemblyResult(bytes: [], address: pc, sourceLine: line, label: label)
 
         case "EQU", "=":
-            // Define symbol value
+            // Define symbol value.
+            // The label was already auto-defined at the current PC by assembleLine(),
+            // so we use update() to override it with the EQU expression value.
             guard let labelName = label else {
                 throw AssemblerError.invalidPseudoOp("EQU requires a label")
             }
             guard let op = operand else {
                 throw AssemblerError.invalidPseudoOp("EQU requires a value")
             }
-            // Remove the auto-defined label (at PC), redefine with expression value
-            symbols.clear() // Note: This is simplified - a real impl would handle this better
             let parser = ExpressionParser(symbols: symbols, currentPC: pc)
             let value = try parser.evaluate(op)
-            try symbols.define(labelName, value: UInt16(truncatingIfNeeded: value))
+            symbols.update(labelName, value: UInt16(truncatingIfNeeded: value))
             return AssemblyResult(bytes: [], address: pc, sourceLine: line, label: labelName)
 
         case "DB", "BYTE", "DFB":

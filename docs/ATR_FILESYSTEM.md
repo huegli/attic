@@ -228,6 +228,8 @@ struct SectorLink {
 
 ## File Operations
 
+All file operations described below are fully implemented in `ATRFileSystem.swift` and exposed through the `DiskManager` actor.
+
 ### Reading a File
 
 ```swift
@@ -527,3 +529,47 @@ func formatDisk(_ disk: inout ATRImage) {
     }
 }
 ```
+
+## DiskManager
+
+The `DiskManager` actor (`Sources/AtticCore/DiskManager.swift`) provides a high-level, thread-safe API for all disk operations. It wraps the low-level `ATRImage` and `ATRFileSystem` types and manages up to 8 drive slots.
+
+### Drive Operations
+
+| Method | Description |
+|--------|-------------|
+| `mount(drive:path:readOnly:)` | Mount an ATR image to a drive slot (1-8) |
+| `unmount(drive:save:)` | Unmount a drive, optionally saving changes |
+| `changeDrive(to:)` | Set the current working drive |
+| `listDrives()` | List all drive slots and their status |
+| `isDriveMounted(_:)` | Check if a drive has a mounted disk |
+
+### File System Operations
+
+| Method | Description |
+|--------|-------------|
+| `listDirectory(drive:pattern:)` | List files, optionally filtered by wildcard |
+| `getFileInfo(drive:name:)` | Get detailed file information |
+| `readFile(drive:name:)` | Read file contents as `Data` |
+| `writeFile(drive:name:data:)` | Write data to a new file |
+| `deleteFile(drive:name:)` | Delete a file |
+| `renameFile(drive:from:to:)` | Rename a file |
+| `lockFile(drive:name:)` | Set read-only flag |
+| `unlockFile(drive:name:)` | Clear read-only flag |
+
+### Host Transfer Operations
+
+| Method | Description |
+|--------|-------------|
+| `exportFile(drive:name:to:)` | Extract ATR file to host filesystem |
+| `importFile(from:drive:name:)` | Add host file to ATR disk |
+| `copyFile(from:name:to:as:)` | Copy file between drives |
+
+### Disk Creation & Formatting
+
+| Method | Description |
+|--------|-------------|
+| `createDisk(at:type:)` | Create a new blank ATR image |
+| `formatDisk(drive:)` | Format the disk in a drive slot |
+| `saveDisk(drive:)` | Write pending changes to disk file |
+| `saveAllDisks()` | Save all modified disks |

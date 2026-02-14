@@ -18,7 +18,7 @@ Both share a common core library (`AtticCore`) containing the emulator wrapper, 
 Four executables with protocol-based communication:
 
 1. **AtticServer** - Standalone emulator server process ✅ (Phase 7 complete)
-2. **AtticGUI** - Protocol client with Metal rendering ✅ (Phase 8 complete - supports client and embedded modes)
+2. **AtticGUI** - Protocol client with Metal rendering ✅ (Phase 8 complete)
 3. **attic** - Command-line REPL tool (connects via text protocol)
 4. **Web Client** - Browser-based client via WebSocket (Phases 18-19, future)
 
@@ -42,7 +42,15 @@ This separation enables:
 | 6 | AESP Protocol Library | ✅ Complete |
 | 7 | Emulator Server | ✅ Complete |
 | 8 | GUI as Protocol Client | ✅ Complete |
-| 9-17 | REPL, Debugging, BASIC | Pending |
+| 9 | CLI Socket Protocol | ✅ Complete |
+| 10 | Input Handling (Joystick) | ✅ Complete (keyboard emulation; no GameController) |
+| 11 | 6502 Disassembler | ✅ Complete |
+| 12 | Monitor/Debugger | ✅ Complete |
+| 13 | ATR Filesystem | ✅ Complete |
+| 14 | DOS Mode | ✅ Complete |
+| 15 | BASIC Tokenizer | ✅ Complete |
+| 16 | State Save/Load | ✅ Complete |
+| 17 | Polish | ✅ Complete |
 | 18-19 | Web Browser Support | Pending |
 
 ## Component Diagram
@@ -72,14 +80,15 @@ All AtticCore files are at the module top level (no subdirectories). Files are g
 │  └─────────────────────────────────────┘                                     │
 │                                                                              │
 │  ┌─ REPL ──────────────────────────────┐  ┌─ CLI Socket ───────────────────┐ │
-│  │ REPLEngine.swift                    │  │ CLIProtocol.swift              │ │
-│  │ REPLMode.swift                      │  │ CLISocketClient.swift          │ │
-│  │ CommandParser.swift                 │  │ CLISocketServer.swift          │ │
+│  │ REPLMode.swift                      │  │ CLIProtocol.swift              │ │
+│  │ CommandParser.swift                 │  │ CLISocketClient.swift          │ │
+│  │                                     │  │ CLISocketServer.swift          │ │
 │  └─────────────────────────────────────┘  └────────────────────────────────┘ │
 │                                                                              │
-│  ┌─ Audio/Input ───────────────────────┐  ┌─ Module ───────────────────────┐ │
+│  ┌─ Audio/Input ───────────────────────┐  ┌─ Module/Utilities ────────────┐ │
 │  │ AudioEngine.swift                   │  │ AtticCore.swift                │ │
-│  │ KeyboardInputHandler.swift          │  │ (public API exports)           │ │
+│  │ KeyboardInputHandler.swift          │  │ FrameRateMonitor.swift         │ │
+│  │                                     │  │ ServerLauncher.swift           │ │
 │  └─────────────────────────────────────┘  └────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────────────────┘
            │                           │
@@ -89,8 +98,8 @@ All AtticCore files are at the module top level (no subdirectories). Files are g
     │                 │  Unix   │                 │
     │  SwiftUI Views  │ Socket  │  REPL Server    │
     │  Metal Renderer │         │  (stdio)        │
-    │  GameController │         │                 │
     │  Core Audio     │         │                 │
+    │                 │         │                 │
     └─────────────────┘         └─────────────────┘
                                        │
                                        ▼
@@ -249,12 +258,12 @@ The CLI communicates with the GUI via Unix domain socket using a text-based prot
 ### Socket Architecture
 
 ```
-CLI Process                          GUI Process
+CLI Process (attic)                 AtticServer Process
 ┌──────────────┐                    ┌──────────────┐
 │   stdin ─────┼──► CommandParser   │              │
 │              │         │          │  Socket      │
-│   REPLEngine │         ▼          │  Listener    │
-│       │      │    SocketClient ──►│      │       │
+│  SocketClient│         ▼          │  Listener    │
+│       │      │  CommandTranslator │      │       │
 │       ▼      │         │          │      ▼       │
 │   stdout ◄───┼── ResponseHandler◄─┼─ CommandProc │
 └──────────────┘                    │      │       │
@@ -267,9 +276,9 @@ CLI Process                          GUI Process
 
 1. User types command in Emacs
 2. Emacs sends to CLI via stdin
-3. CLI parses command and sends to GUI via socket
-4. GUI executes command against EmulatorEngine
-5. GUI sends response via socket
+3. CLI translates command and sends to AtticServer via socket
+4. AtticServer executes command against EmulatorEngine
+5. AtticServer sends response via socket
 6. CLI formats response and writes to stdout
 7. Emacs displays in comint buffer
 
