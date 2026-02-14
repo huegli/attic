@@ -1095,14 +1095,16 @@ final class StateCommandParsingTests: XCTestCase {
         XCTAssertEqual(path, "/tmp/test.attic")
     }
 
-    /// `.state save` works with home-relative paths.
+    /// `.state save` expands tilde in home-relative paths.
     func test_stateSave_homeRelativePath() throws {
         let cmd = try parser.parse(".state save ~/saves/game.attic", mode: .monitor)
         guard case .saveState(let path) = cmd else {
             XCTFail("Expected saveState, got \(cmd)")
             return
         }
-        XCTAssertEqual(path, "~/saves/game.attic")
+        // Tilde should be expanded to the user's home directory
+        let expected = NSString(string: "~/saves/game.attic").expandingTildeInPath
+        XCTAssertEqual(path, expected)
     }
 
     /// `.state save` works in BASIC mode.

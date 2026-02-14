@@ -671,6 +671,10 @@ public struct CLICommandParser: Sendable {
         return .boot(path: expandedPath)
     }
 
+    /// Parses a `state save|load <path>` command.
+    ///
+    /// The path argument is required and may contain spaces. Tilde (~) is
+    /// expanded to the user's home directory.
     private func parseState(_ args: String) throws -> CLICommand {
         let parts = args.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
         guard let subcommand = parts.first else {
@@ -681,7 +685,8 @@ public struct CLICommandParser: Sendable {
             throw CLIProtocolError.missingArgument("state \(subcommand) requires path")
         }
 
-        let path = String(parts[1])
+        // Expand ~ to home directory, consistent with .boot and other path commands
+        let path = NSString(string: String(parts[1])).expandingTildeInPath
 
         switch String(subcommand).lowercased() {
         case "save":
