@@ -1461,6 +1461,10 @@ struct AtticServer {
 
         do {
             try await emulator.initialize(romPath: romPath)
+            // Run cold reset to complete boot sequence and initialize BASIC memory.
+            // Without this, BASIC pointers (MEMTOP, RUNSTK, etc.) are uninitialized,
+            // causing "Out of memory" errors when entering BASIC lines.
+            await emulator.reset(cold: true)
             print("Emulator initialized successfully")
         } catch {
             print("Error initializing emulator: \(error)")
