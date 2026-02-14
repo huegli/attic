@@ -471,6 +471,70 @@ final class BASICDetokenizerTests: XCTestCase {
         XCTAssertTrue(result?.text.contains("LEN") ?? false)
     }
 
+    func testDetokenizeSTRIG() {
+        // PRINT STRIG(0) — regression test for attic-owgq
+        // STRIG is the highest function token ($4F). The bug caused this byte
+        // to be misread as "?$54 USR" when BASIC memory pointers weren't
+        // initialized. This test verifies the detokenizer correctly maps $4F.
+        let variables: [BASICVariableName] = []
+
+        let bytes = makeLineBytes(
+            lineNumber: 10,
+            content: [
+                BASICStatementToken.print.rawValue,          // PRINT ($20)
+                BASICFunctionToken.strig.rawValue,           // STRIG ($4F)
+                BASICOperatorToken.leftParen.rawValue,       // (
+                0x0E, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,   // BCD 0
+                BASICOperatorToken.rightParen.rawValue       // )
+            ]
+        )
+
+        let result = detokenizer.detokenizeLine(bytes, variables: variables)
+
+        XCTAssertNotNil(result)
+        XCTAssertEqual(result?.lineNumber, 10)
+        XCTAssertTrue(result?.text.contains("STRIG") ?? false,
+                       "Expected STRIG function, got: \(result?.text ?? "nil")")
+        XCTAssertFalse(result?.text.contains("USR") ?? true,
+                        "STRIG ($4F) must not be decoded as USR ($3A)")
+        XCTAssertFalse(result?.text.contains("?$") ?? true,
+                        "STRIG ($4F) must not produce unknown-token hex output")
+    }
+
+    func testDetokenizeAllFunctionTokens() {
+        // Verify every function token ($38-$4F) decodes to its expected keyword.
+        // This catches any gaps in the function token table.
+        let expectedKeywords: [(BASICFunctionToken, String)] = [
+            (.str, "STR$"), (.chr, "CHR$"), (.usr, "USR"), (.asc, "ASC"),
+            (.val, "VAL"), (.len, "LEN"), (.adr, "ADR"), (.atn, "ATN"),
+            (.cos, "COS"), (.peek, "PEEK"), (.sin, "SIN"), (.rnd, "RND"),
+            (.fre, "FRE"), (.exp, "EXP"), (.log, "LOG"), (.clog, "CLOG"),
+            (.sqr, "SQR"), (.sgn, "SGN"), (.abs, "ABS"), (.int, "INT"),
+            (.paddle, "PADDLE"), (.stick, "STICK"), (.ptrig, "PTRIG"),
+            (.strig, "STRIG"),
+        ]
+
+        for (token, keyword) in expectedKeywords {
+            // PRINT <FUNC>(0)
+            let bytes = makeLineBytes(
+                lineNumber: 10,
+                content: [
+                    BASICStatementToken.print.rawValue,
+                    token.rawValue,
+                    BASICOperatorToken.leftParen.rawValue,
+                    0x0E, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  // BCD 0
+                    BASICOperatorToken.rightParen.rawValue,
+                ]
+            )
+
+            let result = detokenizer.detokenizeLine(bytes, variables: [])
+
+            XCTAssertNotNil(result, "Token \(token) (\(String(format: "$%02X", token.rawValue))) should produce a result")
+            XCTAssertTrue(result?.text.contains(keyword) ?? false,
+                           "Token \(String(format: "$%02X", token.rawValue)) should decode to \(keyword), got: \(result?.text ?? "nil")")
+        }
+    }
+
     // =========================================================================
     // MARK: - REM Comment Tests
     // =========================================================================
