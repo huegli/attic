@@ -687,10 +687,21 @@ final class CLIProtocolTests: XCTestCase {
     func testParseScreen() throws {
         let parser = CLICommandParser()
         let command = try parser.parse("screen")
-        guard case .screenText = command else {
+        guard case .screenText(let atascii) = command else {
             XCTFail("Expected .screenText, got \(command)")
             return
         }
+        XCTAssertFalse(atascii, "Plain 'screen' should have atascii=false")
+    }
+
+    func testParseScreenATASCII() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("screen atascii")
+        guard case .screenText(let atascii) = command else {
+            XCTFail("Expected .screenText, got \(command)")
+            return
+        }
+        XCTAssertTrue(atascii, "'screen atascii' should have atascii=true")
     }
 
     func testParseScreenshotWithPath() throws {

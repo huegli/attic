@@ -51,7 +51,8 @@ struct AtticCLI {
         /// Enable rich ATASCII rendering in program listings.
         /// When true, ANSI escape codes are used for inverse video and
         /// ATASCII graphics characters are mapped to Unicode equivalents.
-        var atascii: Bool = false
+        /// Defaults to true for accurate visual representation in terminals.
+        var atascii: Bool = true
 
         /// Show help and exit.
         var showHelp: Bool = false
@@ -75,6 +76,9 @@ struct AtticCLI {
 
             case "--atascii":
                 args.atascii = true
+
+            case "--plain":
+                args.atascii = false
 
             case "--socket":
                 if let path = arguments.popFirst() {
@@ -111,14 +115,19 @@ struct AtticCLI {
 
         OPTIONS:
           --silent            Disable audio output
-          --atascii           Rich ATASCII rendering (ANSI inverse + Unicode graphics)
+          --plain             Plain ASCII rendering (no ANSI codes or Unicode)
           --socket <path>     Connect to existing server at specific socket path
           --help, -h          Show this help
           --version, -v       Show version
 
+        DISPLAY:
+          By default, program listings use ANSI escape codes for inverse video
+          characters and Unicode glyphs for ATASCII graphics. Use --plain for
+          clean ASCII output compatible with text files and simple terminals.
+
         EXAMPLES:
           attic                                Launch server and connect REPL
-          attic --silent                       Launch without audio
+          attic --plain                        Use plain ASCII rendering
           attic --socket /tmp/attic-1234.sock  Connect to existing server
 
         MODES:
@@ -1169,7 +1178,8 @@ struct AtticCLI {
 
     /// Whether rich ATASCII rendering is enabled for this session.
     /// Set once during argument parsing (before REPL), read during command translation.
-    nonisolated(unsafe) static var atasciiMode: Bool = false
+    /// Defaults to true so inverse video and ATASCII graphics render correctly.
+    nonisolated(unsafe) static var atasciiMode: Bool = true
 
     /// Connects to AtticServer via Unix socket.
     ///

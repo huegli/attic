@@ -504,8 +504,8 @@ public actor CLISocketClient {
                 return "screenshot \(path)"
             }
             return "screenshot"
-        case .screenText:
-            return "screen"
+        case .screenText(let atascii):
+            return atascii ? "screen atascii" : "screen"
         case .injectBasic(let base64Data):
             return "inject basic \(base64Data)"
         case .injectKeys(let text):

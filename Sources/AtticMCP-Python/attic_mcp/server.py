@@ -468,7 +468,12 @@ async def emulator_press_key(
 
 
 @mcp.tool()
-async def emulator_get_screen_text() -> str:
+async def emulator_get_screen_text(
+    atascii: Annotated[bool, Field(description=(
+        "Use ANSI inverse video codes for inverse characters. "
+        "Set to False for plain text without escape codes."
+    ))] = True,
+) -> str:
     """Read the text displayed on the Atari GRAPHICS 0 screen.
 
     Returns the 40x24 character text screen as a multi-line string.
@@ -476,7 +481,8 @@ async def emulator_get_screen_text() -> str:
     Useful for reading prompts, BASIC listings, and other text output
     without taking a pixel screenshot.
     """
-    result = await _send("screen")
+    cmd = "screen atascii" if atascii else "screen"
+    result = await _send(cmd)
     return result.replace(MULTI_LINE_SEP, "\n")
 
 
@@ -520,12 +526,18 @@ async def emulator_screenshot(
 
 
 @mcp.tool()
-async def emulator_list_basic() -> str:
+async def emulator_list_basic(
+    atascii: Annotated[bool, Field(description=(
+        "Use ANSI inverse video and Unicode graphics for ATASCII characters. "
+        "Set to False for plain ASCII output suitable for text files."
+    ))] = True,
+) -> str:
     """List the BASIC program currently in emulator memory.
 
     Returns the detokenized BASIC source code with line numbers.
     """
-    result = await _send("basic LIST")
+    cmd = "basic LIST atascii" if atascii else "basic LIST"
+    result = await _send(cmd)
     return result.replace(MULTI_LINE_SEP, "\n")
 
 

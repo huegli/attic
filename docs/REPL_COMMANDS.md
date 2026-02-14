@@ -287,6 +287,10 @@ Stopped at line 100
 | `list` | `list <line>` | List single line |
 | `list` | `list <start>-<end>` | List range |
 
+By default, listings use rich ATASCII rendering: inverse video characters are
+shown with ANSI reverse video codes and ATASCII graphics are mapped to Unicode
+glyphs. Launch the CLI with `--plain` for clean ASCII output.
+
 **Examples:**
 ```
 [basic] > list

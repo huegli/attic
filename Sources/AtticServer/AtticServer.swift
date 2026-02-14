@@ -545,8 +545,8 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
         case .screenshot(let path):
             return await handleScreenshot(path: path)
 
-        case .screenText:
-            return await handleScreenText()
+        case .screenText(let atascii):
+            return await handleScreenText(atascii: atascii)
 
         // BASIC injection - DISABLED per attic-ahl (direct memory manipulation)
         case .injectBasic:
@@ -1093,14 +1093,18 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
     ///   - Screen $20-$3F → ATASCII $40-$5F (uppercase letters, @, [, etc.)
     ///   - Screen $40-$5F → control characters → rendered as "."
     ///   - Screen $60-$7F → ATASCII $60-$7F (lowercase letters)
-    ///   - Screen $80-$FF → inverse video of $00-$7F (bit 7 stripped)
+    ///   - Screen $80-$FF → inverse video of $00-$7F
+    ///
+    /// When `atascii` is true, inverse video characters (bit 7 set) are wrapped
+    /// with ANSI reverse video escape codes (`\e[7m`...`\e[27m`).
     ///
     /// Key memory locations:
     ///   - DINDEX ($0057) — current display mode (must be 0 for text)
     ///   - SAVMSC ($0058-$0059) — 16-bit pointer to screen RAM base
     ///
+    /// - Parameter atascii: Whether to render inverse chars with ANSI codes.
     /// - Returns: CLI response with the screen text as multi-line output.
-    private func handleScreenText() async -> CLIResponse {
+    private func handleScreenText(atascii: Bool = false) async -> CLIResponse {
         // Check display mode — DINDEX at $0057 must be 0 (GRAPHICS 0)
         let dindex = await emulator.readMemory(at: 0x0057)
         guard dindex == 0 else {
@@ -1115,13 +1119,15 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
         // Read 960 bytes (40 columns x 24 rows) of screen RAM
         let screenData = await emulator.readMemoryBlock(at: screenBase, count: 960)
 
-        // Convert screen codes to printable characters and split into lines
+        // Convert screen codes to printable characters and split into lines.
+        // screenCodeToString returns a String (not Character) because ANSI
+        // escape codes may wrap the character when atascii mode is enabled.
         var lines: [String] = []
         for row in 0..<24 {
             var line = ""
             for col in 0..<40 {
                 let screenCode = screenData[row * 40 + col]
-                line.append(screenCodeToChar(screenCode))
+                line.append(screenCodeToString(screenCode, atascii: atascii))
             }
             lines.append(line)
         }
@@ -1134,7 +1140,7 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
         return .okMultiLine(lines)
     }
 
-    /// Converts an Atari screen code byte to a printable Unicode character.
+    /// Converts an Atari screen code byte to a printable string.
     ///
     /// Screen codes differ from ATASCII. The mapping strips the inverse-video
     /// bit (bit 7), then maps the low 7 bits:
@@ -1142,26 +1148,43 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
     ///   - $20-$3F → characters '@' through '_' (ASCII $40-$5F)
     ///   - $40-$5F → control characters → rendered as "."
     ///   - $60-$7F → characters '`' through DEL → lowercase letters, etc.
-    private func screenCodeToChar(_ code: UInt8) -> Character {
-        // Strip inverse video bit
+    ///
+    /// When `atascii` is true and bit 7 is set, the character is wrapped with
+    /// ANSI reverse video codes (`\e[7m`...`\e[27m`) to visually indicate
+    /// inverse video.
+    ///
+    /// - Parameters:
+    ///   - code: The screen code byte from screen RAM.
+    ///   - atascii: Whether to use ANSI codes for inverse video characters.
+    /// - Returns: A string containing the character, possibly with ANSI codes.
+    private func screenCodeToString(_ code: UInt8, atascii: Bool) -> String {
+        let inverse = (code & 0x80) != 0
         let base = code & 0x7F
 
+        // Map screen code to the base printable character
+        let char: Character
         switch base {
         case 0x00...0x1F:
             // Screen $00-$1F → ASCII $20-$3F (space, digits, punctuation)
-            return Character(UnicodeScalar(base + 0x20))
+            char = Character(UnicodeScalar(base + 0x20))
         case 0x20...0x3F:
             // Screen $20-$3F → ASCII $40-$5F (uppercase letters, @, [, etc.)
-            return Character(UnicodeScalar(base + 0x20))
+            char = Character(UnicodeScalar(base + 0x20))
         case 0x40...0x5F:
             // Screen $40-$5F → control characters, render as "."
-            return "."
+            char = "."
         case 0x60...0x7F:
             // Screen $60-$7F → ASCII $60-$7F (lowercase letters)
-            return Character(UnicodeScalar(base))
+            char = Character(UnicodeScalar(base))
         default:
-            return "."
+            char = "."
         }
+
+        // Wrap with ANSI reverse video if inverse and atascii mode is enabled
+        if atascii && inverse {
+            return "\u{1B}[7m\(char)\u{1B}[27m"
+        }
+        return String(char)
     }
 
     /// Handles the disassemble command.

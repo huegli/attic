@@ -155,7 +155,9 @@ public enum CLICommand: Sendable {
     // Display
     case screenshot(path: String?)
     /// Read the text displayed on the GRAPHICS 0 screen as a string.
-    case screenText
+    /// When `atascii` is true, inverse video characters are wrapped with
+    /// ANSI escape codes for reverse video rendering.
+    case screenText(atascii: Bool)
 
     // BASIC injection
     case injectBasic(base64Data: String)
@@ -412,7 +414,8 @@ public struct CLICommandParser: Sendable {
         case "screenshot":
             return .screenshot(path: argsString.isEmpty ? nil : argsString)
         case "screen":
-            return .screenText
+            let atascii = argsString.uppercased() == "ATASCII"
+            return .screenText(atascii: atascii)
 
         // Injection
         case "inject":

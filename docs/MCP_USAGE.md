@@ -268,7 +268,7 @@ Result: Key pressed: RETURN
 | Tool | Description |
 |------|-------------|
 | `emulator_screenshot` | Capture screenshot of the Atari display as PNG |
-| `emulator_get_screen_text` | Read the GRAPHICS 0 text screen as a string (40x24 chars) |
+| `emulator_get_screen_text` | Read the GRAPHICS 0 text screen as a string (40x24 chars, supports ANSI inverse) |
 
 **Example - Take Screenshot:**
 ```
@@ -287,9 +287,11 @@ Result: screenshot saved to /Users/name/screenshots/atari-game.png
 
 | Tool | Description |
 |------|-------------|
-| `emulator_list_basic` | List the current BASIC program in memory |
+| `emulator_list_basic` | List the current BASIC program in memory (supports ANSI inverse + Unicode graphics) |
 
 **Note:** Direct BASIC memory injection tools (`emulator_enter_basic_line`, `emulator_run_basic`, `emulator_new_basic`) are disabled for safety. Use `emulator_press_key` to type BASIC commands interactively instead.
+
+Both `emulator_list_basic` and `emulator_get_screen_text` accept an optional `atascii` parameter (default: `true`). When enabled, inverse video characters are wrapped with ANSI escape codes and ATASCII graphics are mapped to Unicode. Set `atascii: false` for plain ASCII output.
 
 **Example - List BASIC Program:**
 ```
@@ -297,6 +299,12 @@ Tool: emulator_list_basic
 Result:
 10 PRINT "HELLO WORLD"
 20 GOTO 10
+```
+
+**Example - Plain ASCII Listing (no ANSI codes):**
+```
+Tool: emulator_list_basic
+Arguments: { "atascii": false }
 ```
 
 **Example - Type BASIC Commands:**
