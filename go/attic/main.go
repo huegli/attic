@@ -24,8 +24,37 @@
 //
 // =============================================================================
 
+// GO CONCEPT: Packages
+// --------------------
+// Every Go source file starts with a "package" declaration. All files in
+// the same directory must use the same package name. The special package
+// name "main" tells the Go compiler this is an executable program (not a
+// library). A "main" package must contain a func main() as the entry point.
+//
+// Compare to Swift: Swift uses @main on a struct or top-level code in
+// main.swift. Go always uses package main + func main().
 package main
 
+// GO CONCEPT: Imports
+// -------------------
+// The import block lists packages this file depends on. Go has a rich
+// standard library (everything without a domain prefix) and a module
+// system for external packages (with domain prefixes like "github.com/...").
+//
+// Standard library packages used here:
+//   - "fmt"     — formatted I/O (like Swift's print(), String(format:))
+//   - "os"      — operating system functions (args, exit, files, env)
+//   - "os/signal" — OS signal handling (SIGINT, SIGTERM)
+//   - "syscall" — low-level OS primitives (signal constants, process ops)
+//
+// External packages:
+//   - "github.com/attic/atticprotocol" — our CLI protocol client library
+//
+// Go enforces that every import is used. If you import "fmt" but never
+// call fmt.Println, the code won't compile. This keeps imports clean.
+//
+// Compare to Swift: similar to "import Foundation" or "import AtticCore",
+// but Go is stricter about unused imports.
 import (
 	"fmt"
 	"os"
@@ -39,6 +68,20 @@ import (
 // Version Information
 // =============================================================================
 
+// GO CONCEPT: Constants
+// ---------------------
+// Go's "const" declares compile-time constants. They can be grouped in a
+// block with parentheses. Unlike Swift's "let" (which can hold any value
+// computed at runtime), Go constants must be determinable at compile time
+// and are limited to basic types: strings, numbers, and booleans.
+//
+// Constants are untyped by default — the string "0.2.0" is just a string
+// constant, not specifically a string variable. This gives Go constants
+// more flexibility when used in expressions.
+//
+// Naming convention: Go uses camelCase for private (unexported) names and
+// PascalCase for public (exported) names. Since these constants start with
+// lowercase letters, they are private to this package.
 const (
 	// version is the current version of the Go CLI, kept in sync with the
 	// Swift AtticCore.version which is the single source of truth.
@@ -51,10 +94,38 @@ const (
 	copyright = "Copyright (c) 2024"
 )
 
+// GO CONCEPT: Functions
+// ---------------------
+// Functions are declared with "func". The return type comes AFTER the
+// parameter list (opposite of C/Java/Swift). If a function returns nothing,
+// you simply omit the return type.
+//
+// Syntax: func name(param1 type1, param2 type2) returnType { ... }
+//
+// Compare to Swift:
+//   Swift: func fullTitle() -> String { return "\(appName) v\(version)" }
+//   Go:    func fullTitle() string    { return fmt.Sprintf(...) }
+//
+// Note: Go has no string interpolation like Swift's "\(variable)". Instead
+// you use fmt.Sprintf() with format verbs like %s (string), %d (integer),
+// %v (default format for any value).
+
 // fullTitle returns the application name with version.
 func fullTitle() string {
 	return fmt.Sprintf("%s v%s (Go)", appName, version)
 }
+
+// GO CONCEPT: Raw String Literals
+// --------------------------------
+// Go has two kinds of string literals:
+//   - Interpreted: "hello\nworld"  (processes escape sequences like \n, \t)
+//   - Raw:         `hello\nworld`  (backticks, everything is literal)
+//
+// Raw strings are perfect for multi-line text — the backtick preserves
+// newlines, tabs, and backslashes exactly as written. This is similar to
+// Swift's multi-line strings (triple quotes """) but uses backticks instead.
+//
+// You can embed %s format verbs in raw strings and use them with Sprintf.
 
 // welcomeBanner returns the banner displayed when the REPL starts.
 func welcomeBanner() string {
@@ -70,13 +141,53 @@ Type '.quit' to exit.
 // Command-Line Arguments
 // =============================================================================
 
+// GO CONCEPT: Structs
+// -------------------
+// Go structs are the primary way to group related data, similar to Swift
+// structs. However, Go structs are simpler:
+//   - No initializers (constructors) — you use struct literals or factory
+//     functions
+//   - No computed properties — use methods or plain functions instead
+//   - No inheritance — Go uses composition and interfaces instead
+//   - Fields are public if capitalized, private if lowercase
+//
+// Compare to Swift:
+//
+//   Swift:
+//     struct Arguments {
+//         var silent: Bool = false
+//         var socketPath: String?
+//     }
+//
+//   Go:
+//     type arguments struct {
+//         silent     bool
+//         socketPath string   // empty string "" acts as "nil" / "none"
+//     }
+//
+// GO CONCEPT: Zero Values
+// -----------------------
+// In Go, every type has a "zero value" — the default when no value is
+// assigned. This eliminates the need for Swift-style optionals in many
+// cases:
+//   - bool    → false
+//   - int     → 0
+//   - string  → "" (empty string)
+//   - pointer → nil
+//   - slice   → nil (but behaves like empty slice)
+//
+// So instead of Swift's "var socketPath: String?" (optional), we use
+// "socketPath string" and check for "" (empty) to mean "not set".
+
 // arguments holds the parsed command-line arguments.
 type arguments struct {
 	// silent disables audio output when launching the server.
 	silent bool
 
 	// socketPath is the path to an existing server socket to connect to.
-	// If empty, the CLI will discover or launch a server automatically.
+	// If empty (""), the CLI will discover or launch a server automatically.
+	// In Swift this would be String? (optional); in Go we use the zero value
+	// (empty string) to mean "not specified".
 	socketPath string
 
 	// atascii enables rich ATASCII rendering in program listings.
@@ -92,23 +203,81 @@ type arguments struct {
 	showVersion bool
 }
 
+// GO CONCEPT: Slices and Slice Operations
+// ----------------------------------------
+// Go's "slice" is the primary dynamic array type. It's a view into an
+// underlying array, with a length and capacity.
+//
+//   os.Args         — a []string (slice of strings) containing command-line args
+//   os.Args[1:]     — a new slice starting from index 1 (skips program name)
+//   remaining[0]    — first element
+//   remaining[1:]   — everything after the first element
+//
+// Compare to Swift:
+//   Swift: CommandLine.arguments.dropFirst()
+//   Go:    os.Args[1:]
+//
+// len(slice) gives the length. Slices are passed by reference (the slice
+// header is copied but it points to the same underlying array).
+//
+// GO CONCEPT: Variable Declaration Styles
+// ----------------------------------------
+// Go has several ways to declare variables:
+//
+//   var x int            — explicit type, zero-initialized (x = 0)
+//   var x int = 42       — explicit type with initial value
+//   var x = 42           — type inferred from value (int)
+//   x := 42              — short declaration (type inferred, most common)
+//
+// The := operator is "short variable declaration" — it declares AND
+// assigns in one step. It can only be used inside functions (not at
+// package level). It's the most common way to declare local variables.
+//
+// Compare to Swift:
+//   Swift: let x = 42    (immutable) or var x = 42 (mutable)
+//   Go:    x := 42       (always mutable — Go has no "let" equivalent)
+
 // parseArguments parses command-line arguments.
 //
 // This is a simple hand-written parser matching the Swift CLI's behavior.
 // There are only 6 flags and no subcommands, so a framework like cobra
 // would be over-engineering.
 func parseArguments() arguments {
+	// Create an arguments struct with atascii defaulting to true.
+	// This is a "struct literal" — you can name specific fields and all
+	// others get their zero values (false for bool, "" for string).
 	args := arguments{
 		atascii: true, // Default: rich ATASCII rendering enabled
 	}
 
-	// Skip program name (os.Args[0])
+	// os.Args is a []string (slice of strings) with all command-line arguments.
+	// os.Args[0] is the program name, so [1:] skips it.
 	remaining := os.Args[1:]
 
+	// GO CONCEPT: For Loops
+	// ---------------------
+	// Go has only ONE loop keyword: "for". It replaces while, do-while,
+	// and traditional for loops from other languages.
+	//
+	//   for i := 0; i < 10; i++ { }  — traditional C-style for
+	//   for condition { }             — while loop
+	//   for { }                       — infinite loop (while true)
+	//   for i, v := range slice { }   — iterate over collection
+	//
+	// Here we use "for len(remaining) > 0" as a while loop, consuming
+	// arguments one at a time from the front of the slice.
 	for len(remaining) > 0 {
 		arg := remaining[0]
 		remaining = remaining[1:]
 
+		// GO CONCEPT: Switch Statements
+		// ------------------------------
+		// Go's switch is cleaner than C's: no "break" needed (cases don't
+		// fall through by default). You can match multiple values in one
+		// case with commas. If you DO want fallthrough, use the explicit
+		// "fallthrough" keyword.
+		//
+		// Compare to Swift: very similar behavior (no implicit fallthrough).
 		switch arg {
 		case "--silent":
 			args.silent = true
@@ -127,6 +296,7 @@ func parseArguments() arguments {
 			args.socketPath = remaining[0]
 			remaining = remaining[1:]
 
+		// Multiple values in one case — equivalent to Swift's "case "--help", "-h":"
 		case "--help", "-h":
 			args.showHelp = true
 
@@ -149,6 +319,9 @@ func parseArguments() arguments {
 
 // printUsage prints usage information to stdout.
 func printUsage() {
+	// Using a raw string literal (backticks) for the multi-line help text.
+	// fmt.Print (no "ln") prints without adding a trailing newline — the
+	// raw string already includes one at the end.
 	fmt.Print(`USAGE: attic-go [options]
 
 OPTIONS:
@@ -180,8 +353,18 @@ For Emacs integration, load emacs/atari800.el and use M-x atari800-run.
 
 // printVersion prints version information to stdout.
 func printVersion() {
+	// fmt.Println adds a trailing newline; fmt.Print does not.
 	fmt.Println(fullTitle())
 }
+
+// GO CONCEPT: Writing to stderr
+// ------------------------------
+// Go's fmt.Fprintf takes an io.Writer as first argument, letting you
+// write to any destination. os.Stderr is the standard error stream.
+//
+// Compare to Swift:
+//   Swift: FileHandle.standardError.write("Error: \(msg)\n".data(using: .utf8)!)
+//   Go:    fmt.Fprintf(os.Stderr, "Error: %s\n", msg)
 
 // printError prints an error message to stderr.
 func printError(message string) {
@@ -192,11 +375,52 @@ func printError(message string) {
 // Server Discovery and Connection
 // =============================================================================
 
+// GO CONCEPT: Multiple Return Values
+// ------------------------------------
+// Go functions can return multiple values. This is one of Go's most
+// distinctive features and is used extensively for error handling.
+//
+// Common patterns:
+//   value, err := someFunction()     — returns a result + error
+//   value, ok := someMap[key]        — returns value + existence boolean
+//
+// Compare to Swift:
+//   Swift uses Result<T, Error>, throws, or tuples for similar patterns.
+//   Go's approach is simpler but more verbose — you check "if err != nil"
+//   after every call that might fail.
+//
+// GO CONCEPT: Pointers
+// --------------------
+// Go has pointers, but they're much simpler than C pointers:
+//   - No pointer arithmetic (can't do ptr++ or ptr[5])
+//   - Garbage collected (no need to free memory)
+//   - &value gets the address of a value (creates a pointer)
+//   - *pointer dereferences (gets the value at the address)
+//   - *Type in a type declaration means "pointer to Type"
+//
+// The return type *atticprotocol.Client means "a pointer to a Client".
+// We use a pointer because Client is a large struct with internal state
+// (connection, mutexes), so we want to share one instance rather than
+// copying it.
+//
+// Compare to Swift: Swift classes are reference types (always passed by
+// reference), so there's no need for explicit pointers. Go structs are
+// value types by default, so you use pointers when you need reference
+// semantics.
+
 // discoverOrConnect discovers an existing AtticServer socket, or launches a
 // new server if none is found. Returns the connected client and the PID of
 // the launched server (0 if we connected to an existing server).
 func discoverOrConnect(args arguments) (*atticprotocol.Client, int) {
+	// NewClient() is a factory function (Go convention instead of constructors).
+	// It returns a *Client (pointer to Client).
 	client := atticprotocol.NewClient()
+
+	// GO CONCEPT: var vs :=
+	// ----------------------
+	// "var socketPath string" declares a variable with its zero value ("").
+	// We use "var" here instead of ":=" because we don't have an initial
+	// value to assign — we'll set it in one of the if/else branches below.
 	var socketPath string
 	var launchedPid int
 
@@ -211,15 +435,43 @@ func discoverOrConnect(args arguments) (*atticprotocol.Client, int) {
 	// If no socket found, launch a new server
 	if socketPath == "" {
 		fmt.Println("No running AtticServer found. Launching...")
+
+		// GO CONCEPT: Error Handling with Multiple Returns
+		// -------------------------------------------------
+		// launchServer returns three values: (socketPath, pid, error).
+		// The idiomatic pattern is to check "if err != nil" immediately.
+		//
+		// We use "var err error" here because socketPath and launchedPid are
+		// already declared above. Using ":=" would create NEW local variables
+		// that shadow the outer ones. But we can use ":=" for err since it's
+		// new in this scope, and plain "=" for the others... EXCEPT Go's
+		// short declaration ":=" requires at least one new variable on the
+		// left side. So we declare err with "var" first to use "=" for all.
 		var err error
 		socketPath, launchedPid, err = launchServer(args.silent)
 		if err != nil {
+			// %v is the "default format" verb — it prints any value in a
+			// human-readable way. For errors, it calls the Error() method.
 			printError(fmt.Sprintf("Failed to start AtticServer: %v", err))
 			printError("You can start it manually with: AtticServer")
 			os.Exit(1)
 		}
 		fmt.Printf("AtticServer started (PID: %d)\n", launchedPid)
 	}
+
+	// GO CONCEPT: Short Variable Scoping in if
+	// ------------------------------------------
+	// Go allows a short statement before the condition in "if":
+	//   if err := doSomething(); err != nil { ... }
+	//
+	// The variable "err" is scoped to the if/else block only. This is a
+	// very common pattern for error handling — declare the error, check it,
+	// and handle it all in one statement. The variable doesn't leak into
+	// the surrounding scope.
+	//
+	// Compare to Swift:
+	//   if let error = try? doSomething() { ... }  (not quite the same)
+	//   guard let result = ... else { ... }         (more similar in spirit)
 
 	// Connect to the socket
 	fmt.Printf("Connecting to %s...\n", socketPath)
@@ -235,16 +487,68 @@ func discoverOrConnect(args arguments) (*atticprotocol.Client, int) {
 // Signal Handling
 // =============================================================================
 
+// GO CONCEPT: Channels and Goroutines
+// ------------------------------------
+// Channels and goroutines are Go's core concurrency primitives. They're
+// what makes Go unique compared to most other languages.
+//
+// GOROUTINE: A goroutine is a lightweight thread managed by the Go runtime.
+// You start one with the "go" keyword before a function call:
+//   go myFunction()          — runs myFunction concurrently
+//   go func() { ... }()     — runs an anonymous function concurrently
+//
+// Goroutines are extremely cheap (a few KB of stack each) compared to OS
+// threads (typically 1-8 MB each). You can easily run thousands of them.
+//
+// CHANNEL: A channel is a typed communication pipe between goroutines.
+// Think of it as a thread-safe queue.
+//   ch := make(chan int)      — create an unbuffered channel of ints
+//   ch := make(chan int, 5)   — create a buffered channel (capacity 5)
+//   ch <- value               — send a value into the channel (blocks if full)
+//   value := <-ch             — receive a value from the channel (blocks if empty)
+//
+// Compare to Swift:
+//   Swift uses async/await and actors for concurrency.
+//   Go uses goroutines (lightweight threads) and channels (message passing).
+//   Both avoid manual thread management, but the mental models differ:
+//   - Swift: "await" suspends the current task until a result is ready
+//   - Go: goroutines run independently, channels synchronize them
+//
+// GO CONCEPT: Function Values (First-Class Functions)
+// ---------------------------------------------------
+// In Go, functions are first-class values — you can assign them to
+// variables, pass them as arguments, and return them from other functions.
+//
+// The parameter "cleanup func()" means: "a function that takes no
+// arguments and returns nothing". This is similar to Swift closures:
+//   Swift: func setupSignalHandler(cleanup: @escaping () -> Void)
+//   Go:    func setupSignalHandler(cleanup func())
+
 // setupSignalHandler installs handlers for SIGINT and SIGTERM so the CLI can
 // clean up (save history, disconnect, optionally stop the server) on exit.
 func setupSignalHandler(cleanup func()) {
+	// make(chan os.Signal, 1) creates a buffered channel with capacity 1.
+	// The buffer size of 1 is important: signal.Notify requires a buffered
+	// channel so the signal delivery doesn't block if we're not ready to
+	// receive it yet.
 	sigCh := make(chan os.Signal, 1)
+
+	// signal.Notify tells the Go runtime to send SIGINT and SIGTERM signals
+	// to our channel instead of using the default behavior (which would
+	// kill the process immediately).
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
+	// "go func() { ... }()" launches an anonymous goroutine.
+	// This goroutine will block on "<-sigCh" (waiting to receive from the
+	// channel) until a signal arrives. It runs concurrently with the rest
+	// of the program.
+	//
+	// The trailing "()" is important — it immediately CALLS the anonymous
+	// function. "go func() { ... }" without "()" would be a syntax error.
 	go func() {
-		<-sigCh
-		fmt.Println() // Newline after ^C
-		cleanup()
+		<-sigCh       // Block until a signal is received (the value is discarded)
+		fmt.Println() // Print a newline after ^C for clean terminal output
+		cleanup()     // Run the cleanup function passed by the caller
 		os.Exit(0)
 	}()
 }
@@ -253,6 +557,19 @@ func setupSignalHandler(cleanup func()) {
 // Main
 // =============================================================================
 
+// GO CONCEPT: The main() Function
+// --------------------------------
+// Every Go executable must have a func main() in package main. This is the
+// program's entry point — Go calls it automatically when the program starts.
+//
+// Unlike Swift's @main struct (which can be async), Go's main() is always
+// synchronous. For async operations, you launch goroutines from main() and
+// use channels or sync primitives to coordinate.
+//
+// When main() returns, the entire program exits — even if other goroutines
+// are still running. This is different from many languages where background
+// threads keep the process alive.
+
 func main() {
 	// Parse arguments
 	args := parseArguments()
@@ -260,7 +577,7 @@ func main() {
 	// Handle --help
 	if args.showHelp {
 		printUsage()
-		return
+		return // Returning from main() exits the program with code 0
 	}
 
 	// Handle --version
@@ -272,9 +589,24 @@ func main() {
 	// Discover or launch server, then connect
 	client, launchedPid := discoverOrConnect(args)
 
+	// GO CONCEPT: Closures (Anonymous Functions with Captured Variables)
+	// ------------------------------------------------------------------
+	// Go supports closures — anonymous functions that capture variables
+	// from their surrounding scope. The function literal below captures
+	// "event" from its parameter, plus it has access to any variables
+	// in the enclosing scope.
+	//
+	// This is identical in concept to Swift closures:
+	//   Swift: client.setEventHandler { event in ... }
+	//   Go:    client.SetEventHandler(func(event atticprotocol.Event) { ... })
+	//
+	// Note the naming convention: Go uses PascalCase for exported
+	// (public) methods: SetEventHandler, not setEventHandler.
+
 	// Set up event handler for async events (breakpoints, stops, errors)
 	client.SetEventHandler(func(event atticprotocol.Event) {
-		// Print async events to stdout as they arrive
+		// This closure runs in the client's reader goroutine (a background
+		// goroutine). It prints async events to stdout as they arrive.
 		switch event.Type {
 		case atticprotocol.EventBreakpoint:
 			fmt.Printf("\n*** Breakpoint at $%04X  A=$%02X X=$%02X Y=$%02X S=$%02X P=$%02X\n",
@@ -291,18 +623,32 @@ func main() {
 		fmt.Fprintf(os.Stderr, "\nDisconnected from AtticServer: %v\n", err)
 	})
 
+	// GO CONCEPT: Closures Capture by Reference
+	// -------------------------------------------
+	// This closure captures "client" and "launchedPid" from the enclosing
+	// scope. In Go, closures capture variables by reference (they see the
+	// current value at the time they run, not the value when they were
+	// created). This is the same as Swift's default capture behavior.
+	//
+	// We define cleanup as a variable holding a function value so we can
+	// pass it to setupSignalHandler AND call it at the end of main().
+
 	// Cleanup function for signal handling and normal exit
 	cleanup := func() {
 		client.Disconnect()
 		if launchedPid > 0 {
-			// We launched the server, so terminate it on exit
+			// We launched the server, so terminate it on exit.
+			// os.FindProcess gets a handle to a process by PID.
+			// On Unix it always succeeds, even if the process is gone.
 			if proc, err := os.FindProcess(launchedPid); err == nil {
+				// Send SIGTERM (graceful shutdown request) to the server
 				proc.Signal(syscall.SIGTERM)
 			}
 		}
 	}
 
-	// Install signal handlers
+	// Install signal handlers (runs cleanup in a background goroutine when
+	// SIGINT or SIGTERM is received)
 	setupSignalHandler(cleanup)
 
 	// Print welcome banner
@@ -310,9 +656,10 @@ func main() {
 	fmt.Println("Connected to AtticServer via CLI protocol")
 	fmt.Println()
 
-	// Run the REPL (placeholder - will be implemented in Phase 4)
+	// Run the REPL — this blocks until the user types .quit or Ctrl-D.
+	// (Stub implementation for Phase 1; full version in Phase 4.)
 	runREPL(client, args.atascii)
 
-	// Clean up on normal exit
+	// Clean up on normal exit (REPL returned because user typed .quit)
 	cleanup()
 }
