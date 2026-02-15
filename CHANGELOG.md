@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - `LIST` command now supports line number ranges: `LIST 10`, `LIST 10-50`, `LIST 10-`, `LIST -50`. Works in both CLI BASIC mode and over the socket protocol.
+- Emacs-style line editing in the CLI REPL via libedit (Ctrl-A/E/K, arrow keys, word movement, kill/yank, etc.)
+- Persistent command history across sessions, saved to `~/.attic_history`
 
 ## [0.1.2] - 2026-02-14
 

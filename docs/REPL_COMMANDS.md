@@ -522,16 +522,72 @@ Error: File 'LOCKED.COM' is locked
   Suggestion: Use 'unlock LOCKED.COM' first
 ```
 
-## Keyboard Shortcuts
+## Line Editing
 
-When focused on the REPL (in compatible terminal/Emacs):
+When running in a terminal, the CLI uses libedit (macOS's built-in editline library)
+to provide Emacs-style line editing and persistent command history. When running under
+Emacs comint mode or piped input, libedit is bypassed and Emacs provides its own editing.
+
+Command history is saved to `~/.attic_history` between sessions.
+
+### Cursor Movement
 
 | Key | Action |
 |-----|--------|
-| Ctrl-C | Interrupt current operation / send BREAK |
-| Ctrl-D | Exit (same as .quit) |
-| Up/Down | Command history |
-| Tab | Command completion |
+| Ctrl-A | Move to beginning of line |
+| Ctrl-E | Move to end of line |
+| Ctrl-B / Left | Move back one character |
+| Ctrl-F / Right | Move forward one character |
+| Meta-B | Move back one word |
+| Meta-F | Move forward one word |
+
+### Editing
+
+| Key | Action |
+|-----|--------|
+| Ctrl-D | Delete character under cursor (EOF on empty line) |
+| Ctrl-H / Backspace | Delete previous character |
+| Ctrl-K | Kill from cursor to end of line |
+| Ctrl-U | Kill entire line |
+| Ctrl-W | Kill region (from mark to cursor) |
+| Ctrl-T | Transpose characters |
+| Ctrl-V | Insert next character literally |
+| Meta-D | Delete next word |
+| Ctrl-Meta-H | Delete previous word |
+| Meta-C | Capitalize word |
+| Meta-U | Uppercase word |
+| Meta-L | Lowercase word |
+
+### Kill/Yank (Cut/Paste)
+
+| Key | Action |
+|-----|--------|
+| Ctrl-@ | Set mark at cursor |
+| Ctrl-W | Kill region (mark to cursor) |
+| Ctrl-Y | Yank (paste) killed text |
+| Meta-W | Copy region (without killing) |
+| Ctrl-Meta-_ | Copy previous word |
+
+### History
+
+| Key | Action |
+|-----|--------|
+| Ctrl-P / Up | Previous history entry |
+| Ctrl-N / Down | Next history entry |
+| Meta-P | Search previous history (prefix match) |
+| Meta-N | Search next history (prefix match) |
+
+### Display & Signals
+
+| Key | Action |
+|-----|--------|
+| Ctrl-L | Clear screen and redisplay |
+| Ctrl-R | Redisplay line |
+| Ctrl-C | Interrupt (SIGINT) |
+| Ctrl-D | Exit on empty line (same as .quit) |
+
+> **Note:** "Meta" is typically the Option/Alt key on macOS. In Terminal.app,
+> enable "Use Option as Meta Key" in Preferences > Profiles > Keyboard.
 
 ## Output Formatting
 
