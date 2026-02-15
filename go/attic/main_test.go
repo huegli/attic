@@ -30,6 +30,12 @@
 // becomes:
 //   if got := fullTitle(); got != "Attic v0.2.0 (Go)" { t.Errorf(...) }
 //
+// Compare with Python: Python's pytest is the standard: test files are
+// `test_*.py`, functions start with `test_`. Assertions use plain
+// `assert`: `assert full_title() == "Attic v0.2.0 (Go)"`. For setup
+// and teardown, pytest uses fixtures (`@pytest.fixture`). Python's
+// `unittest` module is closer to XCTest with setUp/tearDown methods.
+//
 // =============================================================================
 
 package main
@@ -82,6 +88,11 @@ func TestWelcomeBanner(t *testing.T) {
 	// Compare to Swift XCTest: you'd typically write separate test methods
 	// or use parameterized tests. Go's table-driven approach is more
 	// concise for many cases testing the same thing.
+	//
+	// Compare with Python: pytest uses `@pytest.mark.parametrize`:
+	//   `@pytest.mark.parametrize("name,val", [("app", APP_NAME), ...])`
+	//   `def test_banner(name, val): assert val in banner`
+	// This is even more concise than Go's table-driven approach.
 	checks := []struct {
 		name     string
 		contains string
@@ -102,6 +113,10 @@ func TestWelcomeBanner(t *testing.T) {
 		//   - You can run a single subtest: go test -run TestWelcomeBanner/version
 		//   - Subtests can run in parallel with t.Parallel()
 		//   - If one subtest fails, others still run
+		//
+		// Compare with Python: pytest parametrize generates separate test items
+		// automatically. With unittest, use `self.subTest(name=name):` for
+		// named subtests. Both give individual test reporting like Go's t.Run().
 		t.Run(tc.name, func(t *testing.T) {
 			if !strings.Contains(banner, tc.contains) {
 				t.Errorf("welcomeBanner() missing %q:\n%s", tc.contains, banner)
@@ -134,6 +149,11 @@ func TestWelcomeBannerEndsWithNewline(t *testing.T) {
 // This is a common Go testing pattern for functions that read global state.
 // It's not thread-safe (tests using os.Args can't run in parallel), but
 // it's acceptable for unit tests.
+//
+// Compare with Python: pytest provides `monkeypatch.setattr("sys", "argv",
+// [...])` for safe patching. `unittest.mock.patch` works too:
+// `@patch("sys.argv", ["prog", "--flag"])`. Both automatically restore
+// the original value — no manual cleanup needed.
 
 // TestParseArgumentsDefaults verifies default argument values.
 func TestParseArgumentsDefaults(t *testing.T) {
