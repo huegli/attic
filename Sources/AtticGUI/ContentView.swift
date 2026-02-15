@@ -24,6 +24,7 @@
 import SwiftUI
 import AtticCore
 import AppKit
+import UniformTypeIdentifiers
 
 /// The main content view for the Attic window.
 ///
@@ -91,6 +92,20 @@ struct ContentView: View {
 struct EmulatorDisplayView: View {
     @EnvironmentObject var viewModel: AtticViewModel
 
+    /// Tracks whether a file is currently being dragged over the view.
+    /// Used to show a visual highlight during drag operations.
+    @State private var isDragTargeted = false
+
+    /// File extensions supported for drag-and-drop.
+    /// Matches the extensions accepted by the File > Open menu.
+    private static nonisolated let supportedExtensions: Set<String> = [
+        "atr", "xfd", "atx", "dcm", "pro",  // Disk images
+        "xex", "com", "exe",                  // Executables
+        "bas", "lst",                         // BASIC programs
+        "rom", "car",                         // Cartridges
+        "cas",                                // Cassettes
+    ]
+
     var body: some View {
         ZStack {
             // Metal view for rendering (always present)
@@ -115,7 +130,72 @@ struct EmulatorDisplayView: View {
             if !viewModel.isInitialized {
                 InitializationOverlay(viewModel: viewModel)
             }
+
+            // Visual feedback during drag-and-drop.
+            // Shows a blue tinted overlay with a label when a file is dragged
+            // over the emulator display.
+            if isDragTargeted {
+                ZStack {
+                    Color.blue.opacity(0.2)
+                    Text("Drop to Open")
+                        .font(.system(size: 24, weight: .semibold, design: .monospaced))
+                        .foregroundColor(.white)
+                        .padding(12)
+                        .background(Color.black.opacity(0.6))
+                        .cornerRadius(8)
+                }
+                .allowsHitTesting(false)
+            }
+
+            // Brief CRT-like flash overlay on reset.
+            // Appears instantly and fades out over 0.4s, mimicking the screen
+            // flash a real Atari produces on reset.  Color varies by reset type
+            // (white = cold, gray = warm).  allowsHitTesting(false) ensures
+            // keyboard/mouse input passes through during the animation.
+            if viewModel.showResetFlash {
+                viewModel.resetFlashColor
+                    .opacity(0.6)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+                    .onAppear {
+                        withAnimation(.easeOut(duration: 0.4)) {
+                            viewModel.showResetFlash = false
+                        }
+                    }
+            }
         }
+        // Accept file URL drops on the emulator display.
+        // We accept .fileURL and filter by extension in the handler,
+        // since Atari file types don't have registered UTTypes.
+        .onDrop(of: [.fileURL], isTargeted: $isDragTargeted) { providers in
+            handleFileDrop(providers)
+        }
+    }
+
+    /// Handles a file drop by extracting the URL and booting it if the
+    /// file extension is supported.
+    ///
+    /// - Parameter providers: The drop item providers from SwiftUI.
+    /// - Returns: `true` if the drop was accepted, `false` otherwise.
+    private func handleFileDrop(_ providers: [NSItemProvider]) -> Bool {
+        guard let provider = providers.first else { return false }
+
+        // Load the file URL from the drop provider.
+        // NSItemProvider uses the UTType identifier string to load typed data.
+        provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier) { item, _ in
+            guard let data = item as? Data,
+                  let url = URL(dataRepresentation: data, relativeTo: nil) else { return }
+
+            let ext = url.pathExtension.lowercased()
+            guard Self.supportedExtensions.contains(ext) else { return }
+
+            // Boot the file on the main actor since bootFile updates UI state.
+            Task { @MainActor in
+                await viewModel.bootFile(url: url)
+            }
+        }
+        return true
     }
 }
 
