@@ -131,6 +131,95 @@ class SubprocessHelper {
         return nil
     }
 
+    /// Kills any orphan AtticServer processes left over from previous test runs.
+    ///
+    /// When a test run is interrupted (e.g., Ctrl-C, Xcode stop, or a hung test),
+    /// the tearDown method never runs and AtticServer child processes are left
+    /// alive. These orphans hold the AESP ports (47800-47802) and leave socket
+    /// files in /tmp, which causes the next test run to hang waiting for resources
+    /// that are already in use. This method finds and terminates those orphans
+    /// before the test suite begins.
+    ///
+    /// Sends SIGTERM first (graceful), then SIGKILL if the process survives.
+    /// This mirrors the AESPTestProcessGuard pattern used by the protocol tests.
+    static func killStaleProcesses() {
+        let pids = findAtticServerPIDs()
+        guard !pids.isEmpty else { return }
+
+        // Send SIGTERM for graceful shutdown.
+        for pid in pids {
+            kill(pid, SIGTERM)
+        }
+        Thread.sleep(forTimeInterval: 0.5)
+
+        // Check if any survived and force-kill them.
+        let remaining = findAtticServerPIDs()
+        if !remaining.isEmpty {
+            for pid in remaining {
+                kill(pid, SIGKILL)
+            }
+            Thread.sleep(forTimeInterval: 0.3)
+        }
+    }
+
+    /// Finds PIDs of running AtticServer processes using `pgrep -x`.
+    ///
+    /// The `-x` flag ensures exact name matching so we don't accidentally
+    /// match processes like "swift test --filter AtticServer".
+    private static func findAtticServerPIDs() -> [Int32] {
+        let pgrep = Process()
+        pgrep.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+        pgrep.arguments = ["-x", "AtticServer"]
+        let pipe = Pipe()
+        pgrep.standardOutput = pipe
+        pgrep.standardError = FileHandle.nullDevice
+
+        do {
+            try pgrep.run()
+            pgrep.waitUntilExit()
+        } catch {
+            return []
+        }
+
+        guard pgrep.terminationStatus == 0 else { return [] }
+
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        let output = String(data: data, encoding: .utf8) ?? ""
+
+        return output
+            .split(separator: "\n")
+            .compactMap { Int32(String($0).trimmingCharacters(in: .whitespaces)) }
+    }
+
+    /// Terminates a subprocess with a SIGKILL fallback to prevent tearDown hangs.
+    ///
+    /// AtticServer installs `signal(SIGTERM, SIG_IGN)` and handles SIGTERM via a
+    /// GCD DispatchSource. If the server's main queue is busy (e.g. stuck in an
+    /// `await emulator.executeFrame()` call), the DispatchSource handler may never
+    /// fire, making `Process.terminate()` (which sends SIGTERM) ineffective.
+    /// Calling `process.waitUntilExit()` then hangs forever.
+    ///
+    /// This helper sends SIGTERM, waits briefly, then falls back to SIGKILL
+    /// (which cannot be caught or ignored) to guarantee the process exits.
+    static func terminateProcess(_ process: Process) {
+        guard process.isRunning else { return }
+
+        // Try graceful termination first (SIGTERM).
+        process.terminate()
+
+        // Wait up to 2 seconds for graceful exit.
+        let deadline = Date().addingTimeInterval(2.0)
+        while process.isRunning && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+
+        // If still running, force-kill (SIGKILL cannot be caught or ignored).
+        if process.isRunning {
+            kill(process.processIdentifier, SIGKILL)
+            process.waitUntilExit()
+        }
+    }
+
     /// Cleans up any stale socket files.
     static func cleanupStaleSockets() {
         if let files = try? FileManager.default.contentsOfDirectory(atPath: "/tmp") {
@@ -154,19 +243,17 @@ final class AtticServerSubprocessTests: XCTestCase {
     var serverProcess: Process?
 
     override func setUp() async throws {
-        // Clean up any stale sockets from previous runs
+        // Kill any orphan AtticServer processes from previous interrupted runs,
+        // then clean up stale socket files so this test starts with a clean slate.
+        SubprocessHelper.killStaleProcesses()
         SubprocessHelper.cleanupStaleSockets()
     }
 
     override func tearDown() async throws {
-        // Terminate server if running
-        if let process = serverProcess, process.isRunning {
-            process.terminate()
-            process.waitUntilExit()
+        if let process = serverProcess {
+            SubprocessHelper.terminateProcess(process)
         }
         serverProcess = nil
-
-        // Clean up sockets
         SubprocessHelper.cleanupStaleSockets()
     }
 
@@ -607,13 +694,13 @@ final class AtticCLISubprocessTests: XCTestCase {
     var serverProcess: Process?
 
     override func setUp() async throws {
+        SubprocessHelper.killStaleProcesses()
         SubprocessHelper.cleanupStaleSockets()
     }
 
     override func tearDown() async throws {
-        if let process = serverProcess, process.isRunning {
-            process.terminate()
-            process.waitUntilExit()
+        if let process = serverProcess {
+            SubprocessHelper.terminateProcess(process)
         }
         serverProcess = nil
         SubprocessHelper.cleanupStaleSockets()
@@ -708,13 +795,13 @@ final class CLIMemoryCommandTests: XCTestCase {
     var serverProcess: Process?
 
     override func setUp() async throws {
+        SubprocessHelper.killStaleProcesses()
         SubprocessHelper.cleanupStaleSockets()
     }
 
     override func tearDown() async throws {
-        if let process = serverProcess, process.isRunning {
-            process.terminate()
-            process.waitUntilExit()
+        if let process = serverProcess {
+            SubprocessHelper.terminateProcess(process)
         }
         serverProcess = nil
         SubprocessHelper.cleanupStaleSockets()
@@ -895,13 +982,13 @@ final class CLIAdvancedCommandTests: XCTestCase {
     var serverProcess: Process?
 
     override func setUp() async throws {
+        SubprocessHelper.killStaleProcesses()
         SubprocessHelper.cleanupStaleSockets()
     }
 
     override func tearDown() async throws {
-        if let process = serverProcess, process.isRunning {
-            process.terminate()
-            process.waitUntilExit()
+        if let process = serverProcess {
+            SubprocessHelper.terminateProcess(process)
         }
         serverProcess = nil
         SubprocessHelper.cleanupStaleSockets()

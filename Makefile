@@ -14,9 +14,34 @@
 #
 # See docs/TESTING.md for detailed test categorization.
 
-.PHONY: app clean-app \
+.PHONY: app clean-app kill-stale \
         test test-smoke test-unit \
         test-protocol test-cli test-basic test-asm test-atr test-core test-state test-server test-perf test-error test-multiclient
+
+# ---------------------------------------------------------------------------
+# Pre-test cleanup
+# ---------------------------------------------------------------------------
+
+## Kill orphan Attic processes and remove stale sockets before running tests.
+## Prevents hangs caused by leftover AtticServer/xctest processes from
+## interrupted previous runs holding ports or socket files.
+kill-stale:
+	@for name in AtticServer AtticGUI attic; do \
+		pids=$$(pgrep -x "$$name" 2>/dev/null); \
+		if [ -n "$$pids" ]; then \
+			echo "[kill-stale] Terminating $$name (PIDs: $$pids)"; \
+			kill -TERM $$pids 2>/dev/null; \
+		fi; \
+	done
+	@sleep 0.5
+	@for name in AtticServer AtticGUI attic; do \
+		pids=$$(pgrep -x "$$name" 2>/dev/null); \
+		if [ -n "$$pids" ]; then \
+			echo "[kill-stale] $$name still running, sending SIGKILL (PIDs: $$pids)"; \
+			kill -KILL $$pids 2>/dev/null; \
+		fi; \
+	done
+	@rm -f /tmp/attic-*.sock
 
 # ---------------------------------------------------------------------------
 # App bundle
@@ -35,7 +60,7 @@ clean-app:
 # ---------------------------------------------------------------------------
 
 ## Run the complete test suite (~61s, 1170+ tests)
-test:
+test: kill-stale
 	swift test
 
 # ---------------------------------------------------------------------------
@@ -43,7 +68,7 @@ test:
 # ---------------------------------------------------------------------------
 
 ## Fast smoke tests – skip the 15 slowest integration suites (~3s)
-test-smoke:
+test-smoke: kill-stale
 	swift test \
 		--skip CLISocketIntegrationTests \
 		--skip AtticServerSubprocessTests \
@@ -62,7 +87,7 @@ test-smoke:
 		--skip AESPCLIAndGUITogetherTests
 
 ## Pure unit tests only – skip ALL integration & E2E suites (~2s)
-test-unit:
+test-unit: kill-stale
 	swift test \
 		--skip CLISocketIntegrationTests \
 		--skip AtticServerSubprocessTests \
@@ -96,11 +121,11 @@ test-unit:
 # ---------------------------------------------------------------------------
 
 ## AESP protocol tests – message encoding, server, client, E2E (~15s)
-test-protocol:
+test-protocol: kill-stale
 	swift test --filter 'AtticProtocolTests'
 
 ## CLI parsing, socket, and subprocess tests (~37s)
-test-cli:
+test-cli: kill-stale
 	swift test --filter 'CLI|AtticServerSubprocess|AtticCLISubprocess'
 
 ## BASIC tokenizer and detokenizer (<1s)
@@ -124,7 +149,7 @@ test-state:
 	swift test --filter 'StatePersistence|StateSaveIntegration|StateLoadIntegration|StateIntegrityIntegration|StateCommandParsing'
 
 ## AtticServer subprocess tests (~7s)
-test-server:
+test-server: kill-stale
 	swift test --filter 'AtticServerSubprocess'
 
 ## Performance tests – frame rate, audio latency, memory usage (<1s)
@@ -136,5 +161,5 @@ test-error:
 	swift test --filter 'MissingROMs|InvalidFiles|NetworkErrors'
 
 ## Multi-client tests – multiple GUI clients and CLI+GUI together (~12s)
-test-multiclient:
+test-multiclient: kill-stale
 	swift test --filter 'AESPMultipleGUIClient|AESPCLIAndGUITogether'

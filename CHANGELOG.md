@@ -5,12 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] - 2026-02-15
 
 ### Added
-- `LIST` command now supports line number ranges: `LIST 10`, `LIST 10-50`, `LIST 10-`, `LIST -50`. Works in both CLI BASIC mode and over the socket protocol.
 - Emacs-style line editing in the CLI REPL via libedit (Ctrl-A/E/K, arrow keys, word movement, kill/yank, etc.)
 - Persistent command history across sessions, saved to `~/.attic_history`
+- `LIST` command now supports line number ranges: `LIST 10`, `LIST 10-50`, `LIST 10-`, `LIST -50`. Works in both CLI BASIC mode and over the socket protocol.
+- Drag-and-drop file loading in the GUI — drop ATR, XEX, BAS, CAS, or ROM files directly onto the emulator display
+- CRT-like flash overlay on reset for visual feedback (white flash for cold reset, gray for warm)
+
+### Fixed
+- Reset flash animation uses opacity animation instead of transition for reliability
+
+### Improved
+- Test suite no longer hangs on interrupted runs: `make test` kills orphan processes before starting, and subprocess tearDown uses SIGKILL fallback
 
 ## [0.1.2] - 2026-02-14
 
