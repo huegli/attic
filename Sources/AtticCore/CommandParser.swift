@@ -321,7 +321,9 @@ public struct CommandParser {
         }
 
         let subcommand = String(parts[0]).lowercased()
-        let path = String(parts[1])
+        // Expand ~ to the user's home directory, consistent with CLIProtocol.parseState()
+        // and other path commands (.boot, dos export/import, basic import/export).
+        let path = NSString(string: String(parts[1])).expandingTildeInPath
 
         switch subcommand {
         case "save":

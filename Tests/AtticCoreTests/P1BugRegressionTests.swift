@@ -2,7 +2,7 @@
 // P1BugRegressionTests.swift - Regression Tests for P1 Bug Fixes
 // =============================================================================
 //
-// Regression tests for three P1 bugs fixed after v0.1.0:
+// Regression tests for five P1 bugs fixed after v0.1.0:
 //
 // 1. attic-ut99: 'vars' command shows incorrect variable values
 //    Root cause: VVT decoder read from bytes 0-5 instead of 2-7, including
@@ -14,6 +14,17 @@
 //    processing AKEY_BREAK via the special input mechanism. The fix writes
 //    $00 to $0011 after sending the break. These tests verify the BRKKEY
 //    address constant and sendBreak() safety when uninitialized.
+//
+// 3. attic-dw3f: .state load fails with tilde (~) paths
+//    Root cause: parseState() didn't expand tilde in file paths, unlike
+//    .boot and other path commands. The fix adds NSString.expandingTildeInPath.
+//    Tests verify tilde expansion for .state load (save was already tested).
+//
+// 4. attic-nw7g: Loading ROM file via Open File dialog launches BASIC
+//    Root cause: Raw .rom files lack the CART header that libatari800 needs
+//    to determine cartridge type. The fix wraps raw ROMs in a CART header.
+//    Tests verify header construction, size-to-type mapping, detection logic,
+//    and checksum calculation.
 //
 // Running:
 //   swift test --filter P1BugRegressionTests
@@ -330,5 +341,331 @@ final class SendBreakRegressionTests: XCTestCase {
         XCTAssertNotEqual(breakValue, warmValue)
         XCTAssertNotEqual(breakValue, coldValue)
         XCTAssertNotEqual(warmValue, coldValue)
+    }
+}
+
+// =============================================================================
+// MARK: - attic-dw3f: State Load Tilde Expansion Tests
+// =============================================================================
+
+/// Regression test for attic-dw3f: `.state load` fails with tilde paths.
+///
+/// The existing StatePersistenceIntegrationTests cover `.state save` tilde
+/// expansion, but `.state load` was missing a symmetric test. Both subcommands
+/// share the same `parseState()` code path, but this test ensures the load
+/// path specifically expands tildes — which was the reported symptom.
+final class StateLoadTildeExpansionTests: XCTestCase {
+    let parser = CommandParser()
+
+    /// `.state load ~/saves/game.attic` should expand tilde to home directory.
+    /// This is the exact scenario from the attic-dw3f bug report.
+    func test_stateLoad_homeRelativePath() throws {
+        let cmd = try parser.parse(".state load ~/saves/game.attic", mode: .monitor)
+        guard case .loadState(let path) = cmd else {
+            XCTFail("Expected loadState, got \(cmd)")
+            return
+        }
+        // Tilde should be expanded to the user's home directory
+        let expected = NSString(string: "~/saves/game.attic").expandingTildeInPath
+        XCTAssertEqual(path, expected,
+                       "Tilde must be expanded in .state load paths (attic-dw3f)")
+        XCTAssertFalse(path.hasPrefix("~"),
+                       "Path must not start with ~ after expansion")
+    }
+
+    /// `.state load` with absolute path should be unchanged.
+    func test_stateLoad_absolutePath_unchanged() throws {
+        let cmd = try parser.parse(".state load /tmp/test.attic", mode: .monitor)
+        guard case .loadState(let path) = cmd else {
+            XCTFail("Expected loadState, got \(cmd)")
+            return
+        }
+        XCTAssertEqual(path, "/tmp/test.attic",
+                       "Absolute paths should pass through unchanged")
+    }
+
+    /// `.state load` with path containing spaces should preserve them.
+    func test_stateLoad_pathWithSpaces() throws {
+        let cmd = try parser.parse(
+            ".state load ~/my saves/test game.attic", mode: .monitor
+        )
+        guard case .loadState(let path) = cmd else {
+            XCTFail("Expected loadState, got \(cmd)")
+            return
+        }
+        let expected = NSString(string: "~/my saves/test game.attic").expandingTildeInPath
+        XCTAssertEqual(path, expected,
+                       "Tilde expansion must work with spaces in path")
+    }
+}
+
+// =============================================================================
+// MARK: - attic-nw7g: CART Header Construction Tests
+// =============================================================================
+
+/// Regression tests for attic-nw7g: ROM files launch BASIC instead of cartridge.
+///
+/// The fix wraps raw .rom files in a CART header before passing to libatari800.
+/// These tests verify the header construction, ROM detection, size-to-type
+/// mapping, and checksum calculation without requiring a running emulator.
+///
+/// The three static methods under test:
+/// - `EmulatorEngine.isRawROMFile(_:)` — detects files needing conversion
+/// - `EmulatorEngine.createTemporaryCARFile(from:)` — builds the .car wrapper
+/// - `EmulatorEngine.romSizeToCartType` — maps ROM sizes to cartridge types
+final class CARTHeaderRegressionTests: XCTestCase {
+
+    /// Temporary directory for test ROM files, cleaned up after each test.
+    var tempDir: URL!
+
+    override func setUp() {
+        super.setUp()
+        tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CARTHeaderTests-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+    }
+
+    override func tearDown() {
+        try? FileManager.default.removeItem(at: tempDir)
+        super.tearDown()
+    }
+
+    /// Helper: create a temp file with given name and contents.
+    private func createTempFile(name: String, data: Data) -> String {
+        let url = tempDir.appendingPathComponent(name)
+        try! data.write(to: url)
+        return url.path
+    }
+
+    /// Helper: create a raw ROM file filled with a repeating byte pattern.
+    private func createRawROM(name: String, size: Int, fillByte: UInt8 = 0xFF) -> String {
+        let data = Data(repeating: fillByte, count: size)
+        return createTempFile(name: name, data: data)
+    }
+
+    // =========================================================================
+    // MARK: - isRawROMFile Detection
+    // =========================================================================
+
+    /// A .rom file without CART header should be detected as raw ROM.
+    func test_isRawROMFile_rawROM_returnsTrue() {
+        let path = createRawROM(name: "game.rom", size: 8192)
+        XCTAssertTrue(EmulatorEngine.isRawROMFile(path),
+                      "8KB .rom file without CART header should be detected as raw ROM")
+    }
+
+    /// A .rom file that already has a CART header should NOT be detected.
+    func test_isRawROMFile_withCARTHeader_returnsFalse() {
+        // Create a file with "CART" signature at offset 0
+        var data = Data(EmulatorEngine.cartSignature)  // "CART"
+        data.append(Data(repeating: 0x00, count: 8192))
+        let path = createTempFile(name: "game.rom", data: data)
+
+        XCTAssertFalse(EmulatorEngine.isRawROMFile(path),
+                       ".rom file with existing CART header must not be double-wrapped")
+    }
+
+    /// A .car file should NOT be detected as raw ROM (wrong extension).
+    func test_isRawROMFile_carExtension_returnsFalse() {
+        let path = createRawROM(name: "game.car", size: 8192)
+        XCTAssertFalse(EmulatorEngine.isRawROMFile(path),
+                       ".car files should not be treated as raw ROMs")
+    }
+
+    /// A .xex file should NOT be detected as raw ROM.
+    func test_isRawROMFile_xexExtension_returnsFalse() {
+        let path = createRawROM(name: "game.xex", size: 8192)
+        XCTAssertFalse(EmulatorEngine.isRawROMFile(path),
+                       ".xex files should not be treated as raw ROMs")
+    }
+
+    /// A .atr file should NOT be detected as raw ROM.
+    func test_isRawROMFile_atrExtension_returnsFalse() {
+        let path = createRawROM(name: "game.atr", size: 8192)
+        XCTAssertFalse(EmulatorEngine.isRawROMFile(path),
+                       ".atr disk images should not be treated as raw ROMs")
+    }
+
+    /// A nonexistent file should return false (not crash).
+    func test_isRawROMFile_nonexistentFile_returnsFalse() {
+        let path = tempDir.appendingPathComponent("nonexistent.rom").path
+        XCTAssertFalse(EmulatorEngine.isRawROMFile(path),
+                       "Missing file should return false, not crash")
+    }
+
+    /// Extension check should be case-insensitive.
+    func test_isRawROMFile_uppercaseExtension_returnsTrue() {
+        let path = createRawROM(name: "GAME.ROM", size: 16384)
+        XCTAssertTrue(EmulatorEngine.isRawROMFile(path),
+                      ".ROM (uppercase) should be detected as raw ROM")
+    }
+
+    // =========================================================================
+    // MARK: - ROM Size to Cartridge Type Mapping
+    // =========================================================================
+
+    /// 8KB ROM maps to CART type 1 (standard 8KB at $A000-$BFFF).
+    func test_romSizeToCartType_8KB() {
+        XCTAssertEqual(EmulatorEngine.romSizeToCartType[8192], 1,
+                       "8KB ROM must map to CART type 1")
+    }
+
+    /// 16KB ROM maps to CART type 2 (standard 16KB at $8000-$BFFF).
+    func test_romSizeToCartType_16KB() {
+        XCTAssertEqual(EmulatorEngine.romSizeToCartType[16384], 2,
+                       "16KB ROM must map to CART type 2")
+    }
+
+    /// Unsupported sizes should have no mapping (e.g., 4KB, 32KB).
+    func test_romSizeToCartType_unsupportedSizes() {
+        XCTAssertNil(EmulatorEngine.romSizeToCartType[4096],
+                     "4KB ROM should have no type mapping")
+        XCTAssertNil(EmulatorEngine.romSizeToCartType[32768],
+                     "32KB ROM should have no type mapping (not yet supported)")
+        XCTAssertNil(EmulatorEngine.romSizeToCartType[1024],
+                     "1KB ROM should have no type mapping")
+    }
+
+    // =========================================================================
+    // MARK: - CART Header Construction
+    // =========================================================================
+
+    /// 8KB ROM produces a valid .car file with correct header.
+    func test_createTemporaryCARFile_8KB_validHeader() {
+        let romPath = createRawROM(name: "test8k.rom", size: 8192, fillByte: 0xAA)
+        guard let carPath = EmulatorEngine.createTemporaryCARFile(from: romPath) else {
+            XCTFail("createTemporaryCARFile returned nil for valid 8KB ROM")
+            return
+        }
+        defer { try? FileManager.default.removeItem(atPath: carPath) }
+
+        let carData = FileManager.default.contents(atPath: carPath)!
+
+        // Total size = 16-byte header + 8192 bytes ROM
+        XCTAssertEqual(carData.count, 16 + 8192,
+                       "CAR file should be header (16) + ROM data (8192)")
+
+        // Bytes 0-3: "CART" signature
+        let signature = [UInt8](carData[0..<4])
+        XCTAssertEqual(signature, [0x43, 0x41, 0x52, 0x54],
+                       "First 4 bytes must be 'CART' signature")
+
+        // Bytes 4-7: cartridge type (big-endian) = 1 for 8KB
+        let typeBytes = [UInt8](carData[4..<8])
+        XCTAssertEqual(typeBytes, [0x00, 0x00, 0x00, 0x01],
+                       "Type field must be 1 (8KB standard) in big-endian")
+
+        // Bytes 12-15: unused (zeros)
+        let unused = [UInt8](carData[12..<16])
+        XCTAssertEqual(unused, [0x00, 0x00, 0x00, 0x00],
+                       "Unused field must be zeros")
+
+        // ROM data should follow the header unchanged
+        let romData = [UInt8](carData[16...])
+        XCTAssertEqual(romData.count, 8192)
+        XCTAssertTrue(romData.allSatisfy { $0 == 0xAA },
+                      "ROM data must be preserved unchanged after header")
+    }
+
+    /// 16KB ROM produces CART type 2.
+    func test_createTemporaryCARFile_16KB_correctType() {
+        let romPath = createRawROM(name: "test16k.rom", size: 16384, fillByte: 0xBB)
+        guard let carPath = EmulatorEngine.createTemporaryCARFile(from: romPath) else {
+            XCTFail("createTemporaryCARFile returned nil for valid 16KB ROM")
+            return
+        }
+        defer { try? FileManager.default.removeItem(atPath: carPath) }
+
+        let carData = FileManager.default.contents(atPath: carPath)!
+
+        // Total size = 16-byte header + 16384 bytes ROM
+        XCTAssertEqual(carData.count, 16 + 16384)
+
+        // Bytes 4-7: cartridge type = 2 for 16KB
+        let typeBytes = [UInt8](carData[4..<8])
+        XCTAssertEqual(typeBytes, [0x00, 0x00, 0x00, 0x02],
+                       "Type field must be 2 (16KB standard) in big-endian")
+    }
+
+    /// Checksum is the sum of all ROM bytes (wrapping on overflow).
+    func test_createTemporaryCARFile_checksumCalculation() {
+        // Create a small ROM with known bytes so we can verify the checksum.
+        // 8KB of 0x01 → checksum = 8192 * 1 = 0x00002000
+        let romPath = createRawROM(name: "checksum.rom", size: 8192, fillByte: 0x01)
+        guard let carPath = EmulatorEngine.createTemporaryCARFile(from: romPath) else {
+            XCTFail("createTemporaryCARFile returned nil")
+            return
+        }
+        defer { try? FileManager.default.removeItem(atPath: carPath) }
+
+        let carData = FileManager.default.contents(atPath: carPath)!
+
+        // Bytes 8-11: checksum (big-endian)
+        let checksumBytes = [UInt8](carData[8..<12])
+        // 8192 * 0x01 = 0x00002000
+        XCTAssertEqual(checksumBytes, [0x00, 0x00, 0x20, 0x00],
+                       "Checksum for 8192 bytes of 0x01 should be 0x00002000 big-endian")
+    }
+
+    /// Checksum wraps correctly for large byte values (no overflow crash).
+    func test_createTemporaryCARFile_checksumWrapping() {
+        // 8192 bytes of 0xFF → checksum = 8192 * 255 = 2_088_960 = 0x001FE000
+        let romPath = createRawROM(name: "wrap.rom", size: 8192, fillByte: 0xFF)
+        guard let carPath = EmulatorEngine.createTemporaryCARFile(from: romPath) else {
+            XCTFail("createTemporaryCARFile returned nil")
+            return
+        }
+        defer { try? FileManager.default.removeItem(atPath: carPath) }
+
+        let carData = FileManager.default.contents(atPath: carPath)!
+        let checksumBytes = [UInt8](carData[8..<12])
+        // 8192 * 255 = 2_088_960 = 0x001FE000
+        XCTAssertEqual(checksumBytes, [0x00, 0x1F, 0xE0, 0x00],
+                       "Checksum should handle large sums without overflow")
+    }
+
+    /// Unsupported ROM size (5KB) returns nil.
+    func test_createTemporaryCARFile_unsupportedSize_returnsNil() {
+        let romPath = createRawROM(name: "odd.rom", size: 5000)
+        let result = EmulatorEngine.createTemporaryCARFile(from: romPath)
+        XCTAssertNil(result,
+                     "Unsupported ROM size should return nil, not create invalid CART")
+    }
+
+    /// Nonexistent file returns nil.
+    func test_createTemporaryCARFile_nonexistent_returnsNil() {
+        let path = tempDir.appendingPathComponent("missing.rom").path
+        let result = EmulatorEngine.createTemporaryCARFile(from: path)
+        XCTAssertNil(result, "Missing file should return nil")
+    }
+
+    /// Output file has .car extension.
+    func test_createTemporaryCARFile_outputHasCarExtension() {
+        let romPath = createRawROM(name: "ext.rom", size: 8192)
+        guard let carPath = EmulatorEngine.createTemporaryCARFile(from: romPath) else {
+            XCTFail("createTemporaryCARFile returned nil")
+            return
+        }
+        defer { try? FileManager.default.removeItem(atPath: carPath) }
+
+        XCTAssertTrue(carPath.hasSuffix(".car"),
+                      "Output file must have .car extension for libatari800")
+    }
+
+    // =========================================================================
+    // MARK: - Constants
+    // =========================================================================
+
+    /// CART header is exactly 16 bytes.
+    func test_cartHeaderSize() {
+        XCTAssertEqual(EmulatorEngine.cartHeaderSize, 16,
+                       "CART header must be exactly 16 bytes")
+    }
+
+    /// CART signature is "CART" in ASCII.
+    func test_cartSignature() {
+        XCTAssertEqual(EmulatorEngine.cartSignature,
+                       [0x43, 0x41, 0x52, 0x54],
+                       "CART signature must be 'C','A','R','T' in ASCII")
     }
 }

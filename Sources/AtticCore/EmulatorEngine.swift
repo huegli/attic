@@ -324,10 +324,10 @@ public actor EmulatorEngine {
     // =========================================================================
 
     /// CART file header signature bytes: "CART" in ASCII.
-    private static let cartSignature: [UInt8] = [0x43, 0x41, 0x52, 0x54]
+    static let cartSignature: [UInt8] = [0x43, 0x41, 0x52, 0x54]
 
     /// CART header size in bytes (signature + type + checksum + unused).
-    private static let cartHeaderSize = 16
+    static let cartHeaderSize = 16
 
     /// Mapping from raw ROM file size (in bytes) to CART cartridge type.
     ///
@@ -337,7 +337,7 @@ public actor EmulatorEngine {
     /// - Type 1: Standard 8KB cartridge, mapped at $A000-$BFFF
     /// - Type 2: Standard 16KB cartridge, mapped at $8000-$BFFF
     /// - Type 14: Standard 32KB cartridge (MegaCart/XEGS-like), mapped at $8000-$BFFF with banking
-    private static let romSizeToCartType: [Int: UInt32] = [
+    static let romSizeToCartType: [Int: UInt32] = [
         8192:  1,   // Standard 8KB  ($A000-$BFFF)
         16384: 2,   // Standard 16KB ($8000-$BFFF)
     ]
@@ -346,10 +346,12 @@ public actor EmulatorEngine {
     ///
     /// Checks the file extension and verifies the file doesn't already
     /// start with the "CART" signature (which would make it a .car file).
+    /// This is a static method (no actor state needed) so it can be called
+    /// from tests via `@testable import`.
     ///
     /// - Parameter filePath: Path to the file to check.
     /// - Returns: True if this is a raw ROM file needing a CART header.
-    private func isRawROMFile(_ filePath: String) -> Bool {
+    static func isRawROMFile(_ filePath: String) -> Bool {
         let ext = (filePath as NSString).pathExtension.lowercased()
         guard ext == "rom" else { return false }
 
@@ -357,7 +359,7 @@ public actor EmulatorEngine {
         guard let handle = FileHandle(forReadingAtPath: filePath) else { return false }
         defer { handle.closeFile() }
         let header = handle.readData(ofLength: 4)
-        return header.count < 4 || [UInt8](header) != Self.cartSignature
+        return header.count < 4 || [UInt8](header) != cartSignature
     }
 
     /// Creates a temporary `.car` file from a raw ROM dump.
@@ -365,6 +367,8 @@ public actor EmulatorEngine {
     /// Raw ROM files (`.rom`) lack the CART header that libatari800 needs
     /// to determine the cartridge type and memory mapping. This method
     /// wraps the raw ROM data in a proper CART header based on file size.
+    /// This is a static method (no actor state needed) so it can be called
+    /// from tests via `@testable import`.
     ///
     /// The CART file format (from the atari800 emulator):
     /// ```
@@ -378,18 +382,18 @@ public actor EmulatorEngine {
     ///
     /// - Parameter filePath: Path to the raw ROM file.
     /// - Returns: Path to the temporary `.car` file, or nil if conversion failed.
-    private func createTemporaryCARFile(from filePath: String) -> String? {
+    static func createTemporaryCARFile(from filePath: String) -> String? {
         guard let romData = FileManager.default.contents(atPath: filePath) else { return nil }
 
         // Determine cartridge type from ROM size
-        guard let cartType = Self.romSizeToCartType[romData.count] else { return nil }
+        guard let cartType = romSizeToCartType[romData.count] else { return nil }
 
         // Calculate checksum (sum of all ROM bytes)
         let checksum: UInt32 = romData.reduce(0) { $0 &+ UInt32($1) }
 
         // Build CART header (16 bytes, big-endian)
-        var header = Data(capacity: Self.cartHeaderSize)
-        header.append(contentsOf: Self.cartSignature)                         // "CART"
+        var header = Data(capacity: cartHeaderSize)
+        header.append(contentsOf: cartSignature)                              // "CART"
         header.append(contentsOf: withUnsafeBytes(of: cartType.bigEndian) {   // Type
             Data($0)
         })
@@ -436,8 +440,8 @@ public actor EmulatorEngine {
         var bootPath = filePath
         var tempCARPath: String? = nil
 
-        if isRawROMFile(filePath) {
-            if let carPath = createTemporaryCARFile(from: filePath) {
+        if Self.isRawROMFile(filePath) {
+            if let carPath = Self.createTemporaryCARFile(from: filePath) {
                 bootPath = carPath
                 tempCARPath = carPath
             } else {
