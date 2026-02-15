@@ -33,6 +33,10 @@
 //
 // Compare to Swift: Swift uses @main on a struct or top-level code in
 // main.swift. Go always uses package main + func main().
+//
+// Compare with Python: Python uses `if __name__ == "__main__":` as the
+// entry point. Any .py file can be both a script and a module. There's
+// no package-name requirement for executables.
 package main
 
 // GO CONCEPT: Imports
@@ -55,6 +59,11 @@ package main
 //
 // Compare to Swift: similar to "import Foundation" or "import AtticCore",
 // but Go is stricter about unused imports.
+//
+// Compare with Python: Python's `import os`, `from os import path` is
+// similar. Python doesn't enforce unused imports at the language level,
+// though linters like flake8 flag them. Python also has no automatic
+// import formatting built into the compiler.
 import (
 	"fmt"
 	"os"
@@ -82,6 +91,11 @@ import (
 // Naming convention: Go uses camelCase for private (unexported) names and
 // PascalCase for public (exported) names. Since these constants start with
 // lowercase letters, they are private to this package.
+//
+// Compare with Python: Python has no `const` keyword. By convention,
+// constants use UPPER_CASE (e.g., `VERSION = "0.2.0"`), but nothing
+// prevents reassignment. `typing.Final` provides type-checker enforcement
+// (`VERSION: Final = "0.2.0"`) but is not enforced at runtime.
 const (
 	// version is the current version of the Go CLI, kept in sync with the
 	// Swift AtticCore.version which is the single source of truth.
@@ -109,6 +123,11 @@ const (
 // Note: Go has no string interpolation like Swift's "\(variable)". Instead
 // you use fmt.Sprintf() with format verbs like %s (string), %d (integer),
 // %v (default format for any value).
+//
+// Compare with Python:
+//   Python: def full_title() -> str: return f"{APP_NAME} v{VERSION}"
+// Python uses `def`, return type annotations are optional (PEP 484),
+// and f-strings provide string interpolation similar to Swift's \().
 
 // fullTitle returns the application name with version.
 func fullTitle() string {
@@ -126,6 +145,11 @@ func fullTitle() string {
 // Swift's multi-line strings (triple quotes """) but uses backticks instead.
 //
 // You can embed %s format verbs in raw strings and use them with Sprintf.
+//
+// Compare with Python: Python has triple-quoted strings (`"""..."""`)
+// for multi-line text and raw strings (`r"..."`) that don't process
+// escapes. For formatted multi-line text, use triple-quoted f-strings:
+// `f"""Hello {name}"""`.
 
 // welcomeBanner returns the banner displayed when the REPL starts.
 func welcomeBanner() string {
@@ -150,6 +174,15 @@ Type '.quit' to exit.
 //   - No computed properties — use methods or plain functions instead
 //   - No inheritance — Go uses composition and interfaces instead
 //   - Fields are public if capitalized, private if lowercase
+//
+// Compare with Python: Python uses `@dataclass` for data-holding classes:
+//   @dataclass
+//   class Arguments:
+//       silent: bool = False
+//       socket_path: str = ""
+// Named tuples (`NamedTuple`) are another option for immutable data.
+// Python has no built-in visibility enforcement — `_private` prefix is
+// convention only.
 //
 // Compare to Swift:
 //
@@ -178,6 +211,11 @@ Type '.quit' to exit.
 //
 // So instead of Swift's "var socketPath: String?" (optional), we use
 // "socketPath string" and check for "" (empty) to mean "not set".
+//
+// Compare with Python: Python uses `None` as the universal "no value"
+// sentinel, with `Optional[str]` type hints. There are no automatic
+// zero values — uninitialized variables cause `NameError`. Default
+// arguments serve a similar purpose: `def __init__(self, path: str | None = None)`.
 
 // arguments holds the parsed command-line arguments.
 type arguments struct {
@@ -220,6 +258,11 @@ type arguments struct {
 // len(slice) gives the length. Slices are passed by reference (the slice
 // header is copied but it points to the same underlying array).
 //
+// Compare with Python: Python lists have nearly identical slicing:
+// `sys.argv[1:]` skips the program name, `remaining[0]` gets the first
+// element. `len(my_list)` gives the length. Python lists are always
+// passed by reference (the list object is shared).
+//
 // GO CONCEPT: Variable Declaration Styles
 // ----------------------------------------
 // Go has several ways to declare variables:
@@ -236,6 +279,10 @@ type arguments struct {
 // Compare to Swift:
 //   Swift: let x = 42    (immutable) or var x = 42 (mutable)
 //   Go:    x := 42       (always mutable — Go has no "let" equivalent)
+//
+// Compare with Python: Python needs no declarations — just assign:
+// `x = 42`. Variables are always mutable. For type hints: `x: int = 42`.
+// Python has no short-declaration operator; every assignment uses `=`.
 
 // parseArguments parses command-line arguments.
 //
@@ -266,6 +313,10 @@ func parseArguments() arguments {
 	//
 	// Here we use "for len(remaining) > 0" as a while loop, consuming
 	// arguments one at a time from the front of the slice.
+	//
+	// Compare with Python: Python uses `for x in iterable:` (like Go's
+	// range) and `while condition:`. There's no C-style for loop.
+	// `while remaining:` is the Python equivalent of `for len(remaining) > 0`.
 	for len(remaining) > 0 {
 		arg := remaining[0]
 		remaining = remaining[1:]
@@ -278,6 +329,10 @@ func parseArguments() arguments {
 		// "fallthrough" keyword.
 		//
 		// Compare to Swift: very similar behavior (no implicit fallthrough).
+		//
+		// Compare with Python: Python 3.10+ has `match`/`case` (structural
+		// pattern matching): `match arg: case "--silent": ...`. Earlier Python
+		// uses `if`/`elif` chains. Multiple values: `case "--help" | "-h":`.
 		switch arg {
 		case "--silent":
 			args.silent = true
@@ -365,6 +420,10 @@ func printVersion() {
 // Compare to Swift:
 //   Swift: FileHandle.standardError.write("Error: \(msg)\n".data(using: .utf8)!)
 //   Go:    fmt.Fprintf(os.Stderr, "Error: %s\n", msg)
+//
+// Compare with Python: `print(f"Error: {msg}", file=sys.stderr)`.
+// Python's print() takes a `file` keyword argument. You can also use
+// `sys.stderr.write(f"Error: {msg}\n")`.
 
 // printError prints an error message to stderr.
 func printError(message string) {
@@ -389,6 +448,11 @@ func printError(message string) {
 //   Go's approach is simpler but more verbose — you check "if err != nil"
 //   after every call that might fail.
 //
+// Compare with Python: Python returns tuples for multiple values:
+// `def launch() -> tuple[str, int, Exception | None]:`. Callers unpack:
+// `path, pid, err = launch()`. But Python's idiomatic approach uses
+// exceptions (`try`/`except`) instead of returning errors.
+//
 // GO CONCEPT: Pointers
 // --------------------
 // Go has pointers, but they're much simpler than C pointers:
@@ -407,6 +471,11 @@ func printError(message string) {
 // reference), so there's no need for explicit pointers. Go structs are
 // value types by default, so you use pointers when you need reference
 // semantics.
+//
+// Compare with Python: Python has no pointers — all objects are accessed
+// by reference. Mutable objects (lists, dicts, class instances) are
+// always shared, never copied. There's no need to choose between value
+// and reference semantics.
 
 // discoverOrConnect discovers an existing AtticServer socket, or launches a
 // new server if none is found. Returns the connected client and the PID of
@@ -421,6 +490,10 @@ func discoverOrConnect(args arguments) (*atticprotocol.Client, int) {
 	// "var socketPath string" declares a variable with its zero value ("").
 	// We use "var" here instead of ":=" because we don't have an initial
 	// value to assign — we'll set it in one of the if/else branches below.
+	//
+	// Compare with Python: Python doesn't distinguish declaration from
+	// assignment. Just write `socket_path = ""` or leave it unassigned until
+	// the if/else block. Variables come into existence on first assignment.
 	var socketPath string
 	var launchedPid int
 
@@ -447,6 +520,13 @@ func discoverOrConnect(args arguments) (*atticprotocol.Client, int) {
 		// new in this scope, and plain "=" for the others... EXCEPT Go's
 		// short declaration ":=" requires at least one new variable on the
 		// left side. So we declare err with "var" first to use "=" for all.
+		//
+		// Compare with Python: Python uses try/except instead of error returns:
+		//   try:
+		//       path, pid = launch_server(silent)
+		//   except LaunchError as e:
+		//       print_error(str(e)); sys.exit(1)
+		// This is more concise but hides the error path in a separate block.
 		var err error
 		socketPath, launchedPid, err = launchServer(args.silent)
 		if err != nil {
@@ -472,6 +552,11 @@ func discoverOrConnect(args arguments) (*atticprotocol.Client, int) {
 	// Compare to Swift:
 	//   if let error = try? doSomething() { ... }  (not quite the same)
 	//   guard let result = ... else { ... }         (more similar in spirit)
+	//
+	// Compare with Python: Python 3.8+ has the walrus operator (`:=`) for
+	// assignment expressions: `if (err := do_something()) is not None:`.
+	// However, the variable leaks into the surrounding scope — Python has
+	// no block scoping for if/while statements.
 
 	// Connect to the socket
 	fmt.Printf("Connecting to %s...\n", socketPath)
@@ -514,6 +599,11 @@ func discoverOrConnect(args arguments) (*atticprotocol.Client, int) {
 //   - Swift: "await" suspends the current task until a result is ready
 //   - Go: goroutines run independently, channels synchronize them
 //
+// Compare with Python: Python has `threading.Thread` (OS threads,
+// limited by GIL), `multiprocessing.Process` (separate processes), and
+// `asyncio` (cooperative coroutines with async/await). `queue.Queue` is
+// Python's closest equivalent to Go channels for thread communication.
+//
 // GO CONCEPT: Function Values (First-Class Functions)
 // ---------------------------------------------------
 // In Go, functions are first-class values — you can assign them to
@@ -523,6 +613,11 @@ func discoverOrConnect(args arguments) (*atticprotocol.Client, int) {
 // arguments and returns nothing". This is similar to Swift closures:
 //   Swift: func setupSignalHandler(cleanup: @escaping () -> Void)
 //   Go:    func setupSignalHandler(cleanup func())
+//
+// Compare with Python: Python functions are first-class too:
+//   `def setup_signal_handler(cleanup: Callable[[], None]):`
+// Python also has `lambda` for inline functions:
+//   `cleanup = lambda: client.disconnect()`
 
 // setupSignalHandler installs handlers for SIGINT and SIGTERM so the CLI can
 // clean up (save history, disconnect, optionally stop the server) on exit.
@@ -569,6 +664,11 @@ func setupSignalHandler(cleanup func()) {
 // When main() returns, the entire program exits — even if other goroutines
 // are still running. This is different from many languages where background
 // threads keep the process alive.
+//
+// Compare with Python: Python uses `if __name__ == "__main__": main()`
+// as the entry point convention. Unlike Go, Python doesn't exit when the
+// main function returns if non-daemon threads are still running. Python's
+// `atexit` module provides cleanup hooks similar to Go's deferred cleanup.
 
 func main() {
 	// Parse arguments
@@ -602,6 +702,11 @@ func main() {
 	//
 	// Note the naming convention: Go uses PascalCase for exported
 	// (public) methods: SetEventHandler, not setEventHandler.
+	//
+	// Compare with Python: Python closures work the same way:
+	//   `client.set_event_handler(lambda event: print(event))`
+	// Python's `lambda` is limited to single expressions; for multi-line
+	// closures, define a nested function: `def handler(event): ...`.
 
 	// Set up event handler for async events (breakpoints, stops, errors)
 	client.SetEventHandler(func(event atticprotocol.Event) {
@@ -629,6 +734,12 @@ func main() {
 	// scope. In Go, closures capture variables by reference (they see the
 	// current value at the time they run, not the value when they were
 	// created). This is the same as Swift's default capture behavior.
+	//
+	// Compare with Python: Python closures also capture by reference, with
+	// a well-known gotcha in loops: `for i in range(3): funcs.append(lambda: i)`
+	// — all three lambdas return 2. The fix is a default argument:
+	// `lambda i=i: i`. Go avoids this because loop variables are re-scoped
+	// per iteration since Go 1.22.
 	//
 	// We define cleanup as a variable holding a function value so we can
 	// pass it to setupSignalHandler AND call it at the end of main().

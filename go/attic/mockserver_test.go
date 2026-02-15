@@ -14,6 +14,11 @@
 // All files in the same package's test suite share the same test binary,
 // so types defined here are visible to main_test.go, server_test.go, etc.
 //
+// Compare with Python: pytest uses `conftest.py` files for shared test
+// infrastructure. Fixtures defined there are automatically available to
+// all test files in the directory. This is analogous to Go's shared
+// `_test.go` helpers but with automatic dependency injection.
+//
 // =============================================================================
 
 package main
@@ -42,6 +47,11 @@ import (
 // Embedding sync.Mutex in a struct gives it Lock()/Unlock() methods
 // directly. We use it to protect concurrent access from multiple test
 // goroutines and the server's accept loop.
+//
+// Compare with Python: Python uses `threading.Lock()` with context
+// managers: `self.lock = threading.Lock()` and `with self.lock:` blocks.
+// The `with` statement ensures the lock is released even on exception —
+// similar to Go's `defer mu.Unlock()` pattern.
 type mockServer struct {
 	// listener is the Unix socket listener accepting client connections.
 	listener net.Listener
@@ -75,6 +85,11 @@ type mockServer struct {
 // t.Cleanup(func) registers a function to run when the test finishes,
 // whether it passed or failed. This is Go's way of doing test teardown —
 // similar to Swift's addTeardownBlock() in XCTest.
+//
+// Compare with Python: pytest fixtures with `yield` provide setup and
+// teardown: `@pytest.fixture def mock_server(): srv = start(); yield srv;
+// srv.stop()`. The `request.addfinalizer()` method is equivalent to
+// `t.Cleanup()`. Unlike Go, pytest fixtures are injected by name.
 
 // startMockServer creates and starts a mock AtticServer on a temporary
 // Unix socket. The server is automatically cleaned up when the test

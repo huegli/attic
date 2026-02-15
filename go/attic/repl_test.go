@@ -37,6 +37,10 @@ func TestREPLModeValues(t *testing.T) {
 	// While iota values are implementation details, testing them ensures
 	// we don't accidentally reorder the constants (which would break
 	// any serialized state that depends on the numeric values).
+	//
+	// Compare with Python: Python's `IntEnum` values can be tested the same
+	// way: `assert REPLMode.MONITOR == 0`. Since Python enum values are
+	// explicit (or use `auto()`), accidental reordering is less of a concern.
 	tests := []struct {
 		mode     REPLMode
 		expected int
@@ -132,6 +136,11 @@ func TestREPLModePromptsContainModeName(t *testing.T) {
 // This technique is also called "pipe redirection" and is common in
 // Unix-style programs. It's similar to Swift's Pipe class but at the
 // OS file descriptor level.
+//
+// Compare with Python: Python uses `io.StringIO` for in-memory streams:
+// `sys.stdin = io.StringIO("input\n")`. For real pipes, use
+// `subprocess.Popen(stdin=PIPE, stdout=PIPE)` or `os.pipe()`.
+// `unittest.mock.patch` can redirect `sys.stdin`/`sys.stdout` cleanly.
 
 // captureREPL runs the REPL with simulated stdin input and a mock server,
 // returning everything written to stdout.
@@ -141,6 +150,10 @@ func TestREPLModePromptsContainModeName(t *testing.T) {
 // We need to run the REPL (which blocks reading stdin) while also feeding
 // it input. Solution: run the REPL in a goroutine and feed input from the
 // test goroutine. A sync.WaitGroup coordinates completion.
+//
+// Compare with Python: Python uses `threading.Thread` for concurrent
+// test phases: `t = Thread(target=run_repl); t.start(); t.join()`.
+// `concurrent.futures.ThreadPoolExecutor` is a higher-level alternative.
 func captureREPL(t *testing.T, input string, handler func(cmd string) string) string {
 	t.Helper()
 
@@ -180,6 +193,10 @@ func captureREPL(t *testing.T, input string, handler func(cmd string) string) st
 	//   3. Call wg.Wait() to block until all goroutines finish
 	//
 	// This is the Go equivalent of Swift's DispatchGroup.
+	//
+	// Compare with Python: Python uses `Thread.join()` to wait for threads,
+	// or `concurrent.futures.wait()` for a group. There's no direct WaitGroup
+	// equivalent, but joining all threads in a loop achieves the same effect.
 	var wg sync.WaitGroup
 	var output string
 
@@ -349,6 +366,10 @@ func TestREPLServerErrorResponse(t *testing.T) {
 	// ----------------------------------------
 	// Error responses are written to stderr. To capture them we redirect
 	// os.Stderr the same way we redirect os.Stdout.
+	//
+	// Compare with Python: `contextlib.redirect_stderr(io.StringIO())` works
+	// as a context manager. pytest provides `capsys` and `capfd` fixtures
+	// that capture stdout/stderr automatically — no manual redirection needed.
 	handler := func(cmd string) string {
 		switch cmd {
 		case "ping":
@@ -551,6 +572,10 @@ func TestClientEventHandler(t *testing.T) {
 	// When testing async behavior, channels are perfect for waiting
 	// for an expected event without busy-polling. The test blocks on
 	// channel receive until the event arrives or a timeout occurs.
+	//
+	// Compare with Python: `queue.Queue` is Python's channel equivalent:
+	// `q.put(event)` / `event = q.get(timeout=2.0)`. For simple boolean
+	// signals, `threading.Event` works: `evt.set()` / `evt.wait(timeout=2)`.
 	eventReceived := make(chan atticprotocol.Event, 1)
 
 	ms := startMockServer(t, func(cmd string) string {
