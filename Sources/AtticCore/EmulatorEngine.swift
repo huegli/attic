@@ -319,10 +319,109 @@ public actor EmulatorEngine {
         state = .paused
     }
 
+    // =========================================================================
+    // MARK: - Cartridge Handling
+    // =========================================================================
+
+    /// CART file header signature bytes: "CART" in ASCII.
+    private static let cartSignature: [UInt8] = [0x43, 0x41, 0x52, 0x54]
+
+    /// CART header size in bytes (signature + type + checksum + unused).
+    private static let cartHeaderSize = 16
+
+    /// Mapping from raw ROM file size (in bytes) to CART cartridge type.
+    ///
+    /// These type values come from the atari800 emulator's cartridge.h.
+    /// When libatari800 receives a `.car` file with a valid header, it uses
+    /// the type field to determine how to map the ROM into the address space:
+    /// - Type 1: Standard 8KB cartridge, mapped at $A000-$BFFF
+    /// - Type 2: Standard 16KB cartridge, mapped at $8000-$BFFF
+    /// - Type 14: Standard 32KB cartridge (MegaCart/XEGS-like), mapped at $8000-$BFFF with banking
+    private static let romSizeToCartType: [Int: UInt32] = [
+        8192:  1,   // Standard 8KB  ($A000-$BFFF)
+        16384: 2,   // Standard 16KB ($8000-$BFFF)
+    ]
+
+    /// Returns true if a file is a raw ROM dump (no CART header).
+    ///
+    /// Checks the file extension and verifies the file doesn't already
+    /// start with the "CART" signature (which would make it a .car file).
+    ///
+    /// - Parameter filePath: Path to the file to check.
+    /// - Returns: True if this is a raw ROM file needing a CART header.
+    private func isRawROMFile(_ filePath: String) -> Bool {
+        let ext = (filePath as NSString).pathExtension.lowercased()
+        guard ext == "rom" else { return false }
+
+        // Verify it doesn't already have a CART header
+        guard let handle = FileHandle(forReadingAtPath: filePath) else { return false }
+        defer { handle.closeFile() }
+        let header = handle.readData(ofLength: 4)
+        return header.count < 4 || [UInt8](header) != Self.cartSignature
+    }
+
+    /// Creates a temporary `.car` file from a raw ROM dump.
+    ///
+    /// Raw ROM files (`.rom`) lack the CART header that libatari800 needs
+    /// to determine the cartridge type and memory mapping. This method
+    /// wraps the raw ROM data in a proper CART header based on file size.
+    ///
+    /// The CART file format (from the atari800 emulator):
+    /// ```
+    /// Offset  Size  Description
+    /// 0       4     Signature: "CART" (0x43, 0x41, 0x52, 0x54)
+    /// 4       4     Cartridge type (big-endian 32-bit)
+    /// 8       4     Checksum: sum of all ROM bytes (big-endian 32-bit)
+    /// 12      4     Unused (zeros)
+    /// 16+     N     ROM data
+    /// ```
+    ///
+    /// - Parameter filePath: Path to the raw ROM file.
+    /// - Returns: Path to the temporary `.car` file, or nil if conversion failed.
+    private func createTemporaryCARFile(from filePath: String) -> String? {
+        guard let romData = FileManager.default.contents(atPath: filePath) else { return nil }
+
+        // Determine cartridge type from ROM size
+        guard let cartType = Self.romSizeToCartType[romData.count] else { return nil }
+
+        // Calculate checksum (sum of all ROM bytes)
+        let checksum: UInt32 = romData.reduce(0) { $0 &+ UInt32($1) }
+
+        // Build CART header (16 bytes, big-endian)
+        var header = Data(capacity: Self.cartHeaderSize)
+        header.append(contentsOf: Self.cartSignature)                         // "CART"
+        header.append(contentsOf: withUnsafeBytes(of: cartType.bigEndian) {   // Type
+            Data($0)
+        })
+        header.append(contentsOf: withUnsafeBytes(of: checksum.bigEndian) {   // Checksum
+            Data($0)
+        })
+        header.append(contentsOf: [0, 0, 0, 0])                              // Unused
+
+        // Write to temporary file
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("car")
+        let carData = header + romData
+        do {
+            try carData.write(to: tempURL)
+            return tempURL.path
+        } catch {
+            return nil
+        }
+    }
+
     /// Boots the emulator with a file (disk image, executable, BASIC program, etc.).
     ///
     /// Validates the file exists, calls `libatari800_reboot_with_file`, and
     /// sets the emulator running so the boot process continues naturally.
+    ///
+    /// For raw ROM cartridge files (`.rom`), the ROM data is wrapped in a
+    /// CART header before passing to libatari800. Raw ROM dumps lack the
+    /// type information that libatari800 needs to determine the memory
+    /// mapping (8KB at $A000-$BFFF, 16KB at $8000-$BFFF, etc.). Without
+    /// the header, libatari800 reports UNIDENTIFIED_CART_TYPE and the
+    /// cartridge silently fails to load.
     ///
     /// - Parameter filePath: Absolute path to the file to boot.
     /// - Returns: Tuple with success flag and optional error message.
@@ -332,7 +431,26 @@ public actor EmulatorEngine {
             return (success: false, errorMessage: "File not found: \(filePath)")
         }
 
-        let success = wrapper.reboot(with: filePath)
+        // For raw ROM files, create a temporary .car file with proper header.
+        // libatari800 needs the CART header to identify the cartridge type.
+        var bootPath = filePath
+        var tempCARPath: String? = nil
+
+        if isRawROMFile(filePath) {
+            if let carPath = createTemporaryCARFile(from: filePath) {
+                bootPath = carPath
+                tempCARPath = carPath
+            } else {
+                return (success: false, errorMessage: "Unsupported ROM size for: \(filePath)")
+            }
+        }
+
+        let success = wrapper.reboot(with: bootPath)
+
+        // Clean up temporary file
+        if let tempPath = tempCARPath {
+            try? FileManager.default.removeItem(atPath: tempPath)
+        }
 
         if success {
             // Execute frames to let the boot process complete before returning.
