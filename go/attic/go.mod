@@ -27,6 +27,12 @@
 // To tidy unused deps:       go mod tidy
 // To verify checksums:       go mod verify
 //
+// Compare with Python: Python uses `pyproject.toml` (modern) or
+// `requirements.txt` / `setup.py` (legacy) for dependency management.
+// `pip install -e ../atticprotocol` is the equivalent of Go's `replace`
+// directive for local development. Virtual environments (`venv`) isolate
+// dependencies per project, similar to Go modules' per-project scope.
+//
 // =============================================================================
 
 module github.com/attic/attic-cli

@@ -34,6 +34,11 @@ import (
 // Unix file permissions in Go use octal literals:
 //   0755 = rwxr-xr-x (user: read/write/execute, group/other: read/execute)
 //   0644 = rw-r--r-- (user: read/write, group/other: read only)
+//
+// Compare with Python: pytest provides the `tmp_path` fixture:
+//   `def test_exec(tmp_path): exe = tmp_path / "testbin"; exe.chmod(0o755)`
+// Python's `tempfile.TemporaryDirectory()` is the manual equivalent.
+// File permissions use the same octal notation: `os.chmod(path, 0o755)`.
 
 // TestIsExecutableWithExecutableFile verifies that an executable file is detected.
 func TestIsExecutableWithExecutableFile(t *testing.T) {
@@ -116,6 +121,11 @@ func TestHomeDirIsAbsolute(t *testing.T) {
 	// a test can't run in the current environment (e.g., missing
 	// dependencies, OS-specific features). Skipped tests appear in
 	// verbose output but don't count as failures.
+	//
+	// Compare with Python: pytest uses `pytest.skip("reason")` or the
+	// `@pytest.mark.skip` decorator. Conditional skipping:
+	// `@pytest.mark.skipif(sys.platform != "linux", reason="Linux only")`.
+	// unittest has `self.skipTest("reason")`.
 	if !filepath.IsAbs(home) {
 		t.Errorf("homeDir() = %q, expected absolute path", home)
 	}
@@ -184,6 +194,11 @@ func TestWaitForSocketTimesOut(t *testing.T) {
 	// simple checks, you can inspect the error message string. For
 	// more robust checks, use errors.Is() or errors.As() with
 	// sentinel errors or typed errors.
+	//
+	// Compare with Python: Python uses `"timeout" in str(err)` or, more
+	// robustly, `isinstance(err, TimeoutError)`. pytest provides
+	// `pytest.raises(TimeoutError, match="timeout")` which combines type
+	// checking and message matching in one assertion.
 	if got := err.Error(); !containsAny(got, "timeout", "Timeout") {
 		t.Errorf("error should mention timeout, got: %v", err)
 	}
