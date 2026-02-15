@@ -7,8 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-02-14
+
 ### Fixed
 - ROM cartridge files (.rom) now load correctly instead of launching BASIC. Raw ROM dumps are auto-wrapped in a CART header so libatari800 can identify the cartridge type.
+- `var` command no longer shows IEEE 754 rounding errors for integer BASIC variables (e.g. 114.99999999999999 instead of 115). BCD mantissa is now built as an integer before converting to Double.
+- `.state save/load` now expands tilde (`~`) in file paths, consistent with other path-handling commands.
 
 ## [0.1.1] - 2026-02-14
 
