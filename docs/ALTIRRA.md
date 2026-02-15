@@ -66,41 +66,9 @@ The only tool required to build the ROMs is **MADS** (Mad Assembler), a 6502/658
 
 #### Installing MADS on macOS
 
-**Option A: Build from source (recommended)**
-
 1. Install Free Pascal Compiler:
    ```bash
    brew install fpc
-   ```
-
-2. Clone and build MADS:
-   ```bash
-   git clone https://github.com/tebe6502/Mad-Assembler.git
-   cd Mad-Assembler
-   fpc -Mdelphi -vh -O3 mads.pas
-   ```
-
-3. Copy the resulting `mads` binary to your PATH:
-   ```bash
-   sudo cp mads /usr/local/bin/
-   ```
-
-**Option B: Use a pre-built binary**
-
-Pre-built Windows binaries are available on the [MADS website](http://mads.atari8.info/). For macOS/Linux, building from source is the recommended approach.
-
-#### Installing MADS on Linux
-
-1. Install Free Pascal Compiler:
-   ```bash
-   # Debian/Ubuntu
-   sudo apt-get install fp-compiler
-
-   # Fedora
-   sudo dnf install fpc
-
-   # Arch Linux
-   sudo pacman -S fpc
    ```
 
 2. Clone and build MADS:
@@ -215,7 +183,7 @@ OUTPUT_DIR="${1:-${SCRIPT_DIR}/Resources/ROM}"
 # Check for MADS
 if ! command -v mads &> /dev/null; then
     echo "Error: MADS assembler not found in PATH."
-    echo "See ALTIRRA.md for installation instructions."
+    echo "See docs/ALTIRRA.md for installation instructions."
     exit 1
 fi
 

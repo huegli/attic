@@ -6,6 +6,7 @@
 # development and only run the full suite when needed.
 #
 # Usage:
+#   make altirra      # Build Altirra ROMs and copy to Resources/ROM/
 #   make app          # Build Attic.app bundle (release)
 #   make clean-app    # Remove build/ directory
 #   make test-smoke   # Fast feedback (~3s) – skips slow integration suites
@@ -14,7 +15,7 @@
 #
 # See docs/TESTING.md for detailed test categorization.
 
-.PHONY: app clean-app kill-stale \
+.PHONY: app clean-app kill-stale altirra \
         test test-smoke test-unit \
         test-protocol test-cli test-basic test-asm test-atr test-core test-state test-server test-perf test-error test-multiclient
 
@@ -54,6 +55,40 @@ app:
 ## Remove the build/ directory (app bundle and generated icon)
 clean-app:
 	rm -rf build
+
+# ---------------------------------------------------------------------------
+# Altirra ROMs
+# ---------------------------------------------------------------------------
+
+## Build AltirraOS Kernel and Altirra BASIC ROMs, copy to Resources/ROM/
+altirra:
+	@command -v mads >/dev/null 2>&1 || { echo "Error: MADS assembler not found in PATH. See docs/ALTIRRA.md for installation instructions."; exit 1; }
+	@echo "=== Building AltirraOS Kernel (XL/XE) ==="
+	@mkdir -p Altirra/src/Kernel/out Altirra/src/Kernel/autobuild_default
+	cd Altirra/src/Kernel && mads -i:autobuild -i:autobuild_default \
+		-d:_KERNEL_XLXE=1 \
+		-s -p \
+		-i:source/Shared \
+		-b:'$$c000' \
+		-l:out/kernelxl.lst \
+		-t:out/kernelxl.lab \
+		-o:out/kernelxl.rom \
+		source/main.xasm
+	@echo "=== Building Altirra BASIC ==="
+	@mkdir -p Altirra/src/ATBasic/out
+	cd Altirra/src/ATBasic && mads -c -s \
+		-d:CART=1 \
+		-b:'$$a000' \
+		-o:out/atbasic.bin \
+		-l:out/atbasic.lst \
+		-t:out/atbasic.lab \
+		source/atbasic.s
+	@echo "=== Copying ROMs to Resources/ROM/ ==="
+	@mkdir -p Resources/ROM
+	cp Altirra/src/Kernel/out/kernelxl.rom Resources/ROM/ATARIXL.ROM
+	cp Altirra/src/ATBasic/out/atbasic.bin Resources/ROM/ATARIBAS.ROM
+	@echo "=== Done ==="
+	@ls -la Resources/ROM/ATARIXL.ROM Resources/ROM/ATARIBAS.ROM
 
 # ---------------------------------------------------------------------------
 # Full suite
