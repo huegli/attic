@@ -235,6 +235,16 @@ class AtticViewModel: ObservableObject {
     /// Set to true by the heartbeat monitor when the server stops responding.
     @Published var showServerLostAlert: Bool = false
 
+    /// Whether the reset flash overlay is currently visible.
+    /// Set to true by `reset()` and animated back to false by the SwiftUI
+    /// overlay's `.onAppear` handler, producing a brief CRT-like flash.
+    @Published var showResetFlash: Bool = false
+
+    /// The color of the reset flash overlay.
+    /// White for cold reset (full hardware reinit), gray-blue for warm reset
+    /// (memory preserved), giving the user a visual cue of which type occurred.
+    @Published var resetFlashColor: Color = .white
+
     /// Whether audio is enabled.
     @Published var isAudioEnabled: Bool = true {
         didSet {
@@ -634,6 +644,12 @@ class AtticViewModel: ObservableObject {
         keyboardHandler.reset()
         if isJoystickEmulationEnabled { resetJoystickState() }
         statusMessage = cold ? "Cold Reset" : "Warm Reset"
+
+        // Trigger a brief CRT-like flash overlay so the user gets immediate
+        // visual feedback that the reset occurred.  White for cold (full
+        // hardware reinit), subtle gray-blue for warm (memory preserved).
+        resetFlashColor = cold ? .white : Color(white: 0.7)
+        showResetFlash = true
     }
 
     // =========================================================================
