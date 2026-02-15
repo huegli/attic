@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Improved
 - Test suite no longer hangs on interrupted runs: `make test` kills orphan processes before starting, and subprocess tearDown uses SIGKILL fallback
 
+### Added
+- Emacs-style line editing in the CLI REPL via libedit (Ctrl-A/E/K, arrow keys, word movement, kill/yank, etc.)
+- Persistent command history across sessions, saved to `~/.attic_history`
+
 ## [0.1.2] - 2026-02-14
 
 ### Fixed
