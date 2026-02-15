@@ -96,6 +96,10 @@ struct EmulatorDisplayView: View {
     /// Used to show a visual highlight during drag operations.
     @State private var isDragTargeted = false
 
+    /// Current opacity of the reset flash overlay.
+    /// Jumps to 0.6 on reset, then animates back to 0.
+    @State private var resetFlashOpacity: Double = 0.0
+
     /// File extensions supported for drag-and-drop.
     /// Matches the extensions accepted by the File > Open menu.
     private static nonisolated let supportedExtensions: Set<String> = [
@@ -148,22 +152,26 @@ struct EmulatorDisplayView: View {
             }
 
             // Brief CRT-like flash overlay on reset.
-            // Appears instantly and fades out over 0.4s, mimicking the screen
-            // flash a real Atari produces on reset.  Color varies by reset type
-            // (white = cold, gray = warm).  allowsHitTesting(false) ensures
-            // keyboard/mouse input passes through during the animation.
-            if viewModel.showResetFlash {
-                viewModel.resetFlashColor
-                    .opacity(0.6)
-                    .ignoresSafeArea()
-                    .allowsHitTesting(false)
-                    .transition(.opacity)
-                    .onAppear {
+            // Always present in the view hierarchy but normally invisible
+            // (opacity 0).  When `showResetFlash` becomes true, we set full
+            // opacity then animate it back to 0 over 0.4s.  This avoids
+            // SwiftUI transition quirks with conditional view insertion/removal.
+            viewModel.resetFlashColor
+                .opacity(resetFlashOpacity)
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+                .onChange(of: viewModel.showResetFlash) { _, flashing in
+                    if flashing {
+                        // Immediately show at full intensity (no animation)
+                        resetFlashOpacity = 0.6
+                        // Then fade out
                         withAnimation(.easeOut(duration: 0.4)) {
-                            viewModel.showResetFlash = false
+                            resetFlashOpacity = 0.0
                         }
+                        // Reset the trigger so it can fire again
+                        viewModel.showResetFlash = false
                     }
-            }
+                }
         }
         // Accept file URL drops on the emulator display.
         // We accept .fileURL and filter by extension in the handler,
