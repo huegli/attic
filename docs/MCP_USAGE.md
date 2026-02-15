@@ -70,7 +70,9 @@ Replace `/path/to/attic` with the absolute path to your Attic repository.
 | `emulator_pause` | Pause emulation for inspection/debugging |
 | `emulator_resume` | Resume emulation after pause |
 | `emulator_reset` | Reset the emulator (cold or warm reset) |
-| `emulator_boot_file` | Load and boot a file (ATR, XEX, BAS, CAS, ROM) |
+| `emulator_boot_file` | Load and boot a file (ATR, XEX, BAS, CAS, ROM, CAR) |
+
+> **Note:** Raw ROM cartridge files (`.rom`) are automatically wrapped in a CART header before loading. This allows libatari800 to identify the cartridge type from file size (8KB or 16KB standard cartridges). Files with a `.car` extension are assumed to already have a valid CART header.
 
 **Example - Check Status:**
 ```
