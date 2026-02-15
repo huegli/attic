@@ -203,8 +203,9 @@ final class LineEditor {
     /// prompt manually and use Swift's readLine(). This preserves the
     /// existing behavior for non-terminal usage.
     private func getLineNonInteractive(prompt: String) -> String? {
-        // Print prompt and flush so it appears before waiting for input
-        print(prompt, terminator: " ")
+        // Print prompt and flush so it appears before waiting for input.
+        // The trailing space is already included in the prompt string.
+        print(prompt, terminator: "")
         fflush(stdout)
         return readLine()
     }

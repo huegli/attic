@@ -166,11 +166,11 @@ struct AtticCLI {
         var prompt: String {
             switch self {
             case .monitor:
-                return "[monitor] >"
+                return "[monitor] > "
             case .basic:
-                return "[basic] >"
+                return "[basic] > "
             case .dos:
-                return "[dos] D1:>"
+                return "[dos] D1:> "
             }
         }
     }
@@ -211,7 +211,7 @@ struct AtticCLI {
             // Determine the appropriate prompt based on current state
             let prompt: String
             if inAssemblyMode {
-                prompt = "$\(String(format: "%04X", assemblyAddress)):"
+                prompt = "$\(String(format: "%04X", assemblyAddress)): "
             } else {
                 prompt = currentMode.prompt
             }
