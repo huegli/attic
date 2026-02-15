@@ -19,6 +19,18 @@
 
 package main
 
+// GO CONCEPT: Multiple Packages from Standard Library
+// ---------------------------------------------------
+// Go's standard library is organized into packages by functionality.
+// You can import multiple sub-packages from the same parent, like
+// "os" and "os/exec" — these are separate packages, not submodules.
+//
+// Packages used here:
+//   - "fmt"           — formatted I/O
+//   - "os"            — file system operations, process info, environment
+//   - "os/exec"       — running external commands (subprocess management)
+//   - "path/filepath" — cross-platform file path manipulation
+//   - "time"          — time operations (durations, timers, sleep)
 import (
 	"fmt"
 	"os"
@@ -29,6 +41,19 @@ import (
 	"github.com/attic/atticprotocol"
 )
 
+// GO CONCEPT: Typed Constants with time.Duration
+// -----------------------------------------------
+// Go's time package uses a Duration type (which is really an int64 counting
+// nanoseconds). You create durations by multiplying a number with a time unit:
+//   4 * time.Second       → 4 seconds (4,000,000,000 nanoseconds)
+//   100 * time.Millisecond → 100 milliseconds
+//
+// This is type-safe: you can't accidentally mix seconds and milliseconds
+// because the compiler enforces the Duration type.
+//
+// Compare to Swift:
+//   Swift: TimeInterval is a Double (seconds), so 4.0 means 4 seconds
+//   Go:    time.Duration is an int64 (nanoseconds), written as 4 * time.Second
 const (
 	// serverExecutableName is the name of the AtticServer binary.
 	serverExecutableName = "AtticServer"
@@ -42,6 +67,38 @@ const (
 	serverSocketPollInterval = 100 * time.Millisecond
 )
 
+// GO CONCEPT: Named Return Values
+// --------------------------------
+// Go allows you to name the return values in a function signature:
+//   func launchServer(silent bool) (socketPath string, pid int, err error)
+//
+// Named returns serve as documentation — they tell callers what each
+// returned value represents. They also create local variables with those
+// names, pre-initialized to their zero values.
+//
+// You CAN use a bare "return" (no values) to return the current values of
+// the named variables, but most Go developers prefer explicit returns for
+// clarity. We use named returns here purely for documentation.
+//
+// GO CONCEPT: The error Interface
+// --------------------------------
+// Go's error handling is based on a simple interface:
+//   type error interface {
+//       Error() string
+//   }
+//
+// Any type that has an Error() string method satisfies the error interface.
+// Functions return error as their last return value by convention. The
+// caller checks "if err != nil" to detect failure.
+//
+// fmt.Errorf("message: %w", err) creates a new error that wraps another.
+// The %w verb (not %v!) preserves the error chain so callers can unwrap it
+// with errors.Is() or errors.As().
+//
+// Compare to Swift:
+//   Swift: func launch() throws -> String  (uses throw/catch)
+//   Go:    func launch() (string, error)    (returns error as a value)
+
 // launchServer launches a new AtticServer subprocess and waits for its socket
 // to become available. Returns the socket path, the server's PID, and any error.
 //
@@ -51,30 +108,63 @@ func launchServer(silent bool) (socketPath string, pid int, err error) {
 	// Find the AtticServer executable
 	exePath, err := findServerExecutable()
 	if err != nil {
+		// fmt.Errorf with %w wraps the original error, preserving the chain.
+		// This is like Swift's error chaining with underlying errors.
 		return "", 0, fmt.Errorf("could not find %s executable: %w", serverExecutableName, err)
 	}
 
-	// Build command arguments
+	// GO CONCEPT: Slice Literals and append()
+	// ----------------------------------------
+	// []string{} creates an empty string slice (dynamic array).
+	// append(slice, elem) adds an element, growing the slice if needed.
+	//
+	// Slices in Go are like Swift Arrays but with explicit capacity management:
+	//   - make([]string, 0, 10) — length 0, capacity 10 (pre-allocated)
+	//   - []string{}            — length 0, capacity 0 (grows on append)
+	//   - []string{"a", "b"}   — length 2, initialized with values
+	//
+	// append() returns a new slice header (possibly pointing to new memory
+	// if the old capacity was exceeded), so you must assign the result back.
 	cmdArgs := []string{}
 	if silent {
 		cmdArgs = append(cmdArgs, "--silent")
 	}
 
+	// GO CONCEPT: Running External Commands (os/exec)
+	// ------------------------------------------------
+	// exec.Command creates a command but doesn't run it yet. It's similar
+	// to Swift's Process class (formerly NSTask).
+	//
+	//   exec.Command(name, arg1, arg2) — create the command
+	//   cmd.Start()                    — start it asynchronously (non-blocking)
+	//   cmd.Run()                      — start AND wait for completion (blocking)
+	//   cmd.Wait()                     — wait for a started command to finish
+	//   cmd.Process.Pid                — get the process ID after Start()
+	//
+	// cmd.Stdout and cmd.Stderr control where the subprocess output goes:
+	//   - nil means output is discarded (like redirecting to /dev/null)
+	//   - os.Stdout would forward to our own stdout
+	//   - &bytes.Buffer would capture it in memory
+
 	// Launch the server as a subprocess
 	cmd := exec.Command(exePath, cmdArgs...)
 
-	// Redirect server output to /dev/null to keep CLI output clean
+	// Discard server output to keep CLI output clean.
+	// Setting Stdout/Stderr to nil means the subprocess output goes nowhere.
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 
-	// Start the server process
+	// Start() launches the process without waiting for it to finish.
+	// This is what we want — the server runs in the background while
+	// the CLI continues to set up and connect.
 	if err := cmd.Start(); err != nil {
 		return "", 0, fmt.Errorf("failed to launch %s: %w", serverExecutableName, err)
 	}
 
+	// After Start(), cmd.Process is populated with the running process info.
 	pid = cmd.Process.Pid
 
-	// Wait for the server socket to appear
+	// Wait for the server socket to appear (polls the filesystem)
 	socketPath, err = waitForSocket(pid)
 	if err != nil {
 		return "", pid, fmt.Errorf("%s started (PID: %d) but socket not found: %w", serverExecutableName, pid, err)
@@ -83,10 +173,28 @@ func launchServer(silent bool) (socketPath string, pid int, err error) {
 	return socketPath, pid, nil
 }
 
+// GO CONCEPT: Multiple Return with Early Returns
+// ------------------------------------------------
+// Go functions commonly have multiple "return" statements for early exits.
+// Each return path must provide ALL return values. This pattern replaces
+// Swift's guard statements:
+//
+//   Swift:
+//     guard let path = findExecutable() else { return nil }
+//
+//   Go:
+//     path, err := findExecutable()
+//     if err != nil { return "", err }
+//
+// The pattern is verbose but explicit — you always know exactly what's
+// being returned on every path.
+
 // findServerExecutable searches for the AtticServer binary in standard
 // locations. Returns the full path to the executable.
 func findServerExecutable() (string, error) {
-	// 1. Check the same directory as the CLI binary
+	// 1. Check the same directory as the CLI binary.
+	// os.Executable() returns the path of the currently running binary.
+	// It may return an error if the path can't be determined (rare).
 	if selfPath, err := os.Executable(); err == nil {
 		candidate := filepath.Join(filepath.Dir(selfPath), serverExecutableName)
 		if isExecutable(candidate) {
@@ -94,17 +202,44 @@ func findServerExecutable() (string, error) {
 		}
 	}
 
-	// 2. Check PATH
+	// 2. Check PATH using exec.LookPath.
+	// This searches the directories listed in the PATH environment variable,
+	// just like running "which AtticServer" in a shell.
 	if path, err := exec.LookPath(serverExecutableName); err == nil {
 		return path, nil
 	}
 
-	// 3. Check common locations
+	// 3. Check common installation locations.
+	// GO CONCEPT: Composite Literals (Inline Data Structures)
+	// -------------------------------------------------------
+	// []string{...} is a "composite literal" — it creates a slice and
+	// initializes it with values in one expression. Go uses this pattern
+	// extensively instead of builder patterns or constructor overloads.
+	//
+	// Compare to Swift: ["a", "b", "c"] (array literal)
 	commonPaths := []string{
 		"/usr/local/bin",
 		"/opt/homebrew/bin",
 		filepath.Join(homeDir(), ".local", "bin"),
 	}
+
+	// GO CONCEPT: range Loops
+	// ------------------------
+	// "for _, dir := range commonPaths" iterates over the slice.
+	// range returns two values: (index, value). If you don't need
+	// the index, use _ (blank identifier) to discard it.
+	//
+	//   for i, v := range slice    — both index and value
+	//   for i := range slice       — index only
+	//   for _, v := range slice    — value only (discard index)
+	//
+	// The blank identifier _ is Go's way of saying "I don't need this
+	// value." The compiler requires you to use every declared variable,
+	// so _ is the escape hatch for intentionally unused values.
+	//
+	// Compare to Swift:
+	//   for dir in commonPaths { ... }           — value only (most common)
+	//   for (i, dir) in commonPaths.enumerated() — both index and value
 	for _, dir := range commonPaths {
 		candidate := filepath.Join(dir, serverExecutableName)
 		if isExecutable(candidate) {
@@ -118,18 +253,58 @@ func findServerExecutable() (string, error) {
 // waitForSocket polls for the server's Unix socket to appear after launch.
 // Returns the socket path once found, or an error if the timeout is reached.
 func waitForSocket(pid int) (string, error) {
+	// atticprotocol.SocketPath constructs the expected path: /tmp/attic-<PID>.sock
 	expectedPath := atticprotocol.SocketPath(pid)
+
+	// time.Now().Add(duration) computes a future time point.
+	// We poll in a loop until we either find the socket or hit the deadline.
 	deadline := time.Now().Add(serverSocketTimeout)
 
+	// GO CONCEPT: Time Comparisons
+	// -----------------------------
+	// Go's time.Time has comparison methods:
+	//   t.Before(other)  — is t earlier than other?
+	//   t.After(other)   — is t later than other?
+	//   t.Equal(other)   — are they the same instant?
+	//
+	// You can't use < or > with time.Time (Go doesn't have operator
+	// overloading). This is different from Swift where Date conforms to
+	// Comparable and you can write "date1 < date2".
 	for time.Now().Before(deadline) {
+		// os.Stat checks if a file exists and returns its metadata.
+		// If the error is nil, the file exists.
 		if _, err := os.Stat(expectedPath); err == nil {
 			return expectedPath, nil
 		}
+		// time.Sleep pauses the current goroutine for the given duration.
+		// Other goroutines continue to run during the sleep.
 		time.Sleep(serverSocketPollInterval)
 	}
 
 	return "", fmt.Errorf("timeout waiting for socket %s", expectedPath)
 }
+
+// GO CONCEPT: Bitwise Operations
+// --------------------------------
+// Go supports the same bitwise operators as C:
+//   &   — AND
+//   |   — OR
+//   ^   — XOR
+//   &^  — AND NOT (bit clear) — unique to Go
+//   <<  — left shift
+//   >>  — right shift
+//
+// Here we use & (AND) to check file permission bits. The octal literal
+// 0111 represents the execute bits for user, group, and other:
+//   0100 = user execute
+//   0010 = group execute
+//   0001 = other execute
+//   0111 = any of the above
+//
+// If (permissions & 0111) is non-zero, at least one execute bit is set.
+//
+// Go uses the 0-prefix for octal literals (same as C). Go 1.13+ also
+// supports 0o111 for clarity, but 0111 is still common.
 
 // isExecutable checks if a file exists and is executable.
 func isExecutable(path string) bool {
@@ -137,14 +312,20 @@ func isExecutable(path string) bool {
 	if err != nil {
 		return false
 	}
-	// Check that it's a regular file with at least one execute bit set
+	// Check that it's a regular file with at least one execute bit set.
+	// info.Mode().Perm() returns the Unix permission bits (e.g., 0755).
 	return !info.IsDir() && info.Mode().Perm()&0111 != 0
 }
 
 // homeDir returns the current user's home directory.
 func homeDir() string {
+	// os.UserHomeDir() is the cross-platform way to get the home directory.
+	// On macOS/Linux it returns $HOME; on Windows it returns %USERPROFILE%.
 	home, err := os.UserHomeDir()
 	if err != nil {
+		// Return empty string if home can't be determined.
+		// filepath.Join("", ".local", "bin") will produce ".local/bin"
+		// which won't match anything, so this is a safe fallback.
 		return ""
 	}
 	return home
