@@ -173,9 +173,12 @@ public enum CLICommand: Sendable {
     case basicLine(line: String)
     case basicNew
     case basicRun
-    /// List the BASIC program. When `atascii` is true, the listing uses
-    /// ANSI reverse video and Unicode glyphs for ATASCII graphics characters.
-    case basicList(atascii: Bool)
+    /// List the BASIC program, optionally filtered to a line number range.
+    /// When `atascii` is true, the listing uses ANSI reverse video and
+    /// Unicode glyphs for ATASCII graphics characters.  The `start` and
+    /// `end` parameters limit output to lines within the given range
+    /// (inclusive).  Either or both may be nil for an open-ended range.
+    case basicList(atascii: Bool, start: Int?, end: Int?)
 
     // BASIC editing commands
     /// Delete a BASIC line or range of lines (e.g., "10" or "10-50").
@@ -783,8 +786,34 @@ public struct CLICommandParser: Sendable {
         case "RUN":
             return .basicRun
         case "LIST":
-            let atascii = rest.uppercased() == "ATASCII"
-            return .basicList(atascii: atascii)
+            // Parse optional range and ATASCII flag from arguments.
+            // Accepted forms: LIST, LIST 10, LIST 10-50, LIST 10-, LIST -50,
+            // LIST ATASCII, LIST 10-50 ATASCII
+            var atascii = false
+            var start: Int? = nil
+            var end: Int? = nil
+            let args = rest.split(separator: " ")
+            for arg in args {
+                let upper = arg.uppercased()
+                if upper == "ATASCII" {
+                    atascii = true
+                } else if arg.contains("-") {
+                    // Range: "10-50", "10-", "-50"
+                    let rangeParts = arg.split(separator: "-",
+                                               omittingEmptySubsequences: false)
+                    if rangeParts.count >= 1, let s = Int(rangeParts[0]) {
+                        start = s
+                    }
+                    if rangeParts.count >= 2, let e = Int(rangeParts[1]) {
+                        end = e
+                    }
+                } else if let n = Int(String(arg)) {
+                    // Single line number
+                    start = n
+                    end = n
+                }
+            }
+            return .basicList(atascii: atascii, start: start, end: end)
         case "DEL":
             guard !rest.isEmpty else {
                 throw CLIProtocolError.missingArgument("basic del requires a line number or range (e.g., 10 or 10-50)")

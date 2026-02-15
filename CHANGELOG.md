@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `LIST` command now supports line number ranges: `LIST 10`, `LIST 10-50`, `LIST 10-`, `LIST -50`. Works in both CLI BASIC mode and over the socket protocol.
+
 ## [0.1.2] - 2026-02-14
 
 ### Fixed

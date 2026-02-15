@@ -527,7 +527,6 @@ struct AtticCLI {
     /// Recognizes special commands (list, run, new) and translates them to
     /// protocol commands. Everything else is sent as injected keystrokes.
     static func translateBASICCommand(_ cmd: String) -> String {
-        let upper = cmd.uppercased()
         let parts = cmd.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
         let keyword = parts.first.map { String($0).uppercased() } ?? ""
         let args = parts.count > 1 ? String(parts[1]) : ""
@@ -535,7 +534,12 @@ struct AtticCLI {
         switch keyword {
         // Read-only listing via protocol (detokenizer, not screen scrape)
         case "LIST":
-            return atasciiMode ? "basic list atascii" : "basic list"
+            // Forward optional range arguments (e.g. "10", "10-50", "10-", "-50")
+            // along with the ATASCII flag to the server protocol command.
+            var result = "basic list"
+            if !args.isEmpty { result += " \(args)" }
+            if atasciiMode { result += " atascii" }
+            return result
 
         // BASIC editing commands - routed to protocol handlers
         case "DEL", "DELETE":

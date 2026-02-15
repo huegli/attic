@@ -773,10 +773,13 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
             }
 
         // BASIC listing is read-only, so it remains enabled
-        case .basicList(let atascii):
-            // List the BASIC program using the detokenizer
+        case .basicList(let atascii, let start, let end):
+            // List the BASIC program using the detokenizer, optionally
+            // filtered to a line number range.
             let mode: ATASCIIRenderMode = atascii ? .rich : .plain
-            let listing = await basicHandler.listProgram(range: nil, renderMode: mode)
+            let range: (start: Int?, end: Int?)? =
+                (start != nil || end != nil) ? (start, end) : nil
+            let listing = await basicHandler.listProgram(range: range, renderMode: mode)
             if listing.isEmpty {
                 return .ok("(no program)")
             }

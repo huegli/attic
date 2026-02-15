@@ -490,7 +490,7 @@ final class MCPToolHandler: Sendable {
     /// Executes the list BASIC tool.
     private func executeListBasic() async -> ToolCallResult {
         do {
-            let response = try await client.send(.basicList(atascii: false))
+            let response = try await client.send(.basicList(atascii: false, start: nil, end: nil))
             return formatListingResponse(response)
         } catch {
             return .error("Failed to list BASIC: \(error.localizedDescription)")

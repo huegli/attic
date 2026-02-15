@@ -1137,13 +1137,29 @@ OK:running
 ```
 
 #### basic list
-List the BASIC program. Optional `atascii` flag enables rich ATASCII rendering.
+List the BASIC program, optionally filtered to a line number range.
+Optional `atascii` flag enables rich ATASCII rendering.
 ```
 CMD:basic list
 OK:10 PRINT "HELLO"\x1E20 GOTO 10
 
+CMD:basic list 10
+OK:10 PRINT "HELLO"
+
+CMD:basic list 10-50
+OK:10 PRINT "HELLO"\x1E20 GOTO 10\x1E50 END
+
+CMD:basic list 10-
+OK:10 PRINT "HELLO"\x1E20 GOTO 10\x1E50 END
+
+CMD:basic list -20
+OK:10 PRINT "HELLO"\x1E20 GOTO 10
+
 CMD:basic list atascii
 OK:10 PRINT "HELLO"\x1E20 GOTO 10
+
+CMD:basic list 10-50 atascii
+OK:10 PRINT "HELLO"\x1E20 GOTO 10\x1E50 END
 ```
 
 #### basic del

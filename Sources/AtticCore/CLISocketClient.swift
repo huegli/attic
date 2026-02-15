@@ -556,8 +556,20 @@ public actor CLISocketClient {
             return "basic NEW"
         case .basicRun:
             return "basic RUN"
-        case .basicList(let atascii):
-            return atascii ? "basic LIST ATASCII" : "basic LIST"
+        case .basicList(let atascii, let start, let end):
+            // Build the LIST command string with optional range and ATASCII flag.
+            var cmd = "basic LIST"
+            if let s = start, let e = end, s == e {
+                // Single line number
+                cmd += " \(s)"
+            } else if start != nil || end != nil {
+                // Range: "10-50", "10-", "-50"
+                let sStr = start.map(String.init) ?? ""
+                let eStr = end.map(String.init) ?? ""
+                cmd += " \(sStr)-\(eStr)"
+            }
+            if atascii { cmd += " ATASCII" }
+            return cmd
 
         // BASIC editing commands
         case .basicDelete(let lineOrRange):

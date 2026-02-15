@@ -1188,21 +1188,85 @@ final class CLIProtocolTests: XCTestCase {
     func testParseBasicList() throws {
         let parser = CLICommandParser()
         let command = try parser.parse("basic list")
-        guard case .basicList(let atascii) = command else {
+        guard case .basicList(let atascii, let start, let end) = command else {
             XCTFail("Expected .basicList, got \(command)")
             return
         }
         XCTAssertFalse(atascii, "plain list should have atascii=false")
+        XCTAssertNil(start, "plain list should have no start")
+        XCTAssertNil(end, "plain list should have no end")
     }
 
     func testParseBasicListAtascii() throws {
         let parser = CLICommandParser()
         let command = try parser.parse("basic list atascii")
-        guard case .basicList(let atascii) = command else {
+        guard case .basicList(let atascii, let start, let end) = command else {
             XCTFail("Expected .basicList, got \(command)")
             return
         }
         XCTAssertTrue(atascii, "list atascii should have atascii=true")
+        XCTAssertNil(start, "atascii list should have no start")
+        XCTAssertNil(end, "atascii list should have no end")
+    }
+
+    func testParseBasicListSingleLine() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("basic list 10")
+        guard case .basicList(let atascii, let start, let end) = command else {
+            XCTFail("Expected .basicList, got \(command)")
+            return
+        }
+        XCTAssertFalse(atascii)
+        XCTAssertEqual(start, 10)
+        XCTAssertEqual(end, 10)
+    }
+
+    func testParseBasicListRange() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("basic list 10-50")
+        guard case .basicList(let atascii, let start, let end) = command else {
+            XCTFail("Expected .basicList, got \(command)")
+            return
+        }
+        XCTAssertFalse(atascii)
+        XCTAssertEqual(start, 10)
+        XCTAssertEqual(end, 50)
+    }
+
+    func testParseBasicListRangeOpenEnd() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("basic list 10-")
+        guard case .basicList(let atascii, let start, let end) = command else {
+            XCTFail("Expected .basicList, got \(command)")
+            return
+        }
+        XCTAssertFalse(atascii)
+        XCTAssertEqual(start, 10)
+        XCTAssertNil(end)
+    }
+
+    func testParseBasicListRangeOpenStart() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("basic list -50")
+        guard case .basicList(let atascii, let start, let end) = command else {
+            XCTFail("Expected .basicList, got \(command)")
+            return
+        }
+        XCTAssertFalse(atascii)
+        XCTAssertNil(start)
+        XCTAssertEqual(end, 50)
+    }
+
+    func testParseBasicListRangeWithAtascii() throws {
+        let parser = CLICommandParser()
+        let command = try parser.parse("basic list 10-50 atascii")
+        guard case .basicList(let atascii, let start, let end) = command else {
+            XCTFail("Expected .basicList, got \(command)")
+            return
+        }
+        XCTAssertTrue(atascii)
+        XCTAssertEqual(start, 10)
+        XCTAssertEqual(end, 50)
     }
 
     func testParseBasicLine() throws {
