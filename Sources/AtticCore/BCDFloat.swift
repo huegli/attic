@@ -201,12 +201,18 @@ public struct BCDFloat: Sendable, Equatable {
     /// The conversion process:
     /// 1. Handle zero case
     /// 2. Extract sign and exponent (excess-64, powers of 100)
-    /// 3. Unpack BCD digit pairs to build mantissa
-    /// 4. Apply exponent and sign
+    /// 3. Unpack BCD digit pairs into a scaled integer mantissa
+    /// 4. Convert to Double with a single division/multiply
     ///
     /// Each mantissa byte holds a two-digit BCD pair (00-99):
-    /// - Byte 1: integer part of mantissa (01-99 for normalized)
-    /// - Bytes 2-5: fractional pairs, each worth 1/100 of previous
+    /// - Byte 1: most significant pair (01-99 for normalized numbers)
+    /// - Bytes 2-5: successively less significant pairs
+    ///
+    /// **Important**: We build the mantissa as an integer first, then convert
+    /// to Double in one step. The old approach of accumulating fractional
+    /// `place` values (dividing by 100 each iteration) introduced IEEE 754
+    /// rounding errors because 0.01 is not exactly representable in binary
+    /// floating point — e.g. BCD for 115 decoded as 114.99999999999999.
     ///
     /// Value = mantissa × 100^exponent
     ///
@@ -221,25 +227,22 @@ public struct BCDFloat: Sendable, Equatable {
         let exp = Int(bytes[0] & 0x7F) - 64
         let negative = isNegative
 
-        // Unpack BCD digit pairs to build mantissa.
-        // Byte 1 is the integer part, bytes 2-5 are fractional pairs.
-        // mantissa = byte1 + byte2/100 + byte3/10000 + byte4/1000000 + byte5/100000000
-        var mantissa = 0.0
-        var place = 1.0  // Byte 1 contributes at the ones place
-
+        // Build mantissa as a 10-digit integer from the 5 BCD byte pairs.
+        // Each byte holds two BCD digits (00-99), giving 10 digits total.
+        // Byte 1 is the most significant pair, byte 5 the least.
+        var intMantissa: Int64 = 0
         for byteIndex in 1...5 {
             let byte = bytes[byteIndex]
-            let highDigit = Int(byte >> 4)
-            let lowDigit = Int(byte & 0x0F)
-            let byteValue = Double(highDigit * 10 + lowDigit)
-
-            mantissa += byteValue * place
-            place /= 100.0  // Each byte pair covers 2 decimal places
+            let highDigit = Int64(byte >> 4)
+            let lowDigit = Int64(byte & 0x0F)
+            intMantissa = intMantissa * 100 + highDigit * 10 + lowDigit
         }
 
-        // Apply exponent (powers of 100)
-        // Value = mantissa × 100^exp where mantissa is in [1, 100)
-        var result = mantissa * pow(100.0, Double(exp))
+        // intMantissa is the mantissa scaled by 10^8 (byte 1 is the integer
+        // part; bytes 2-5 contribute 8 fractional digits).
+        // Value = (intMantissa / 1e8) × 100^exp
+        //       = intMantissa × 100^(exp - 4)    [since 1e8 = 100^4]
+        var result = Double(intMantissa) * pow(100.0, Double(exp - 4))
 
         // Apply sign
         if negative {
