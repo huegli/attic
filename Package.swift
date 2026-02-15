@@ -129,6 +129,21 @@ let package = Package(
         ),
 
         // =================================================================
+        // CEditLineShim - C Wrappers for libedit
+        // =================================================================
+        // libedit's core functions (el_set, history) are variadic C functions
+        // that Swift cannot call directly. This target provides non-variadic
+        // wrapper functions for each operation we need, plus re-exports
+        // <histedit.h> so Swift can access all libedit types.
+        .target(
+            name: "CEditLineShim",
+            path: "Libraries/CEditLineShim",
+            sources: ["ceditline_shim.c"],
+            publicHeadersPath: "include",
+            linkerSettings: [.linkedLibrary("edit")]
+        ),
+
+        // =================================================================
         // AtticCLI - Command-Line Executable
         // =================================================================
         // The REPL interface for the emulator. Features:
@@ -136,9 +151,10 @@ let package = Package(
         // - Three modes: Monitor (debugging), BASIC, DOS (disk management)
         // - Unix socket communication with GUI when not in headless mode
         // - Designed for Emacs comint-mode compatibility
+        // - libedit integration for Emacs-style line editing and history
         .executableTarget(
             name: "AtticCLI",
-            dependencies: ["AtticCore"],
+            dependencies: ["AtticCore", "CEditLineShim"],
             path: "Sources/AtticCLI"
         ),
 

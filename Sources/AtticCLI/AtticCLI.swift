@@ -181,12 +181,20 @@ struct AtticCLI {
     /// and displays responses. It handles the socket protocol and the
     /// interactive assembly sub-mode.
     ///
+    /// The LineEditor provides Emacs-style line editing (Ctrl-A/E/K, arrow
+    /// keys) and persistent command history when running in a terminal.
+    /// When stdin is a pipe (Emacs comint, scripted input), it falls back
+    /// to readLine() for compatibility.
+    ///
     /// - Parameter client: The connected socket client.
     @MainActor
     static func runSocketREPL(client: CLISocketClient) async {
         // Print welcome banner
         print(AtticCore.welcomeBanner)
         print("Connected to AtticServer via CLI protocol\n")
+
+        // Create line editor for interactive input with history
+        let lineEditor = LineEditor()
 
         var currentMode = SocketREPLMode.basic
         var shouldContinue = true
@@ -197,13 +205,18 @@ struct AtticCLI {
         var inAssemblyMode = false
         var assemblyAddress: UInt16 = 0
 
-        // Print initial prompt
-        print(currentMode.prompt, terminator: " ")
-        fflush(stdout)
-
-        // Read lines from stdin
+        // Read lines from stdin.
+        // The LineEditor handles prompt display — no manual print+fflush needed.
         while shouldContinue {
-            guard let line = readLine() else {
+            // Determine the appropriate prompt based on current state
+            let prompt: String
+            if inAssemblyMode {
+                prompt = "$\(String(format: "%04X", assemblyAddress)):"
+            } else {
+                prompt = currentMode.prompt
+            }
+
+            guard let line = lineEditor.getLine(prompt: prompt) else {
                 // EOF (Ctrl-D) — end assembly session if active
                 if inAssemblyMode {
                     _ = try? await client.sendRaw("asm end")
@@ -232,8 +245,7 @@ struct AtticCLI {
                         printError("Communication error: \(error.localizedDescription)")
                     }
                     inAssemblyMode = false
-                    print(currentMode.prompt, terminator: " ")
-                    fflush(stdout)
+                    // Loop continues — prompt handled by lineEditor.getLine()
                     continue
                 }
 
@@ -262,16 +274,12 @@ struct AtticCLI {
                     printError("Communication error: \(error.localizedDescription)")
                 }
 
-                // Show next assembly prompt
-                print("$\(String(format: "%04X", assemblyAddress)): ", terminator: "")
-                fflush(stdout)
+                // Loop continues — assembly prompt handled by lineEditor.getLine()
                 continue
             }
 
             // Skip empty lines (normal mode)
             guard !trimmed.isEmpty else {
-                print(currentMode.prompt, terminator: " ")
-                fflush(stdout)
                 continue
             }
 
@@ -281,22 +289,16 @@ struct AtticCLI {
                 case ".monitor":
                     currentMode = .monitor
                     print("Switched to monitor mode")
-                    print(currentMode.prompt, terminator: " ")
-                    fflush(stdout)
                     continue
 
                 case ".basic", ".basic turbo", ".basic atari":
                     currentMode = .basic
                     print("Switched to BASIC mode")
-                    print(currentMode.prompt, terminator: " ")
-                    fflush(stdout)
                     continue
 
                 case ".dos":
                     currentMode = .dos
                     print("Switched to DOS mode")
-                    print(currentMode.prompt, terminator: " ")
-                    fflush(stdout)
                     continue
 
                 case ".quit":
@@ -330,8 +332,6 @@ struct AtticCLI {
 
                 case ".help":
                     printHelp(mode: currentMode, topic: nil)
-                    print(currentMode.prompt, terminator: " ")
-                    fflush(stdout)
                     continue
 
                 case ".status":
@@ -350,8 +350,6 @@ struct AtticCLI {
                         let topic = String(trimmed.dropFirst(6))
                             .trimmingCharacters(in: .whitespaces)
                         printHelp(mode: currentMode, topic: topic)
-                        print(currentMode.prompt, terminator: " ")
-                        fflush(stdout)
                         continue
                     }
 
@@ -366,8 +364,6 @@ struct AtticCLI {
                         break
                     }
                     printError("Unknown command: \(trimmed)")
-                    print(currentMode.prompt, terminator: " ")
-                    fflush(stdout)
                     continue
                 }
             }
@@ -391,9 +387,7 @@ struct AtticCLI {
                             if let addr = parseHexAddress(String(data.dropFirst(4))) {
                                 inAssemblyMode = true
                                 assemblyAddress = addr
-                                // Show first assembly prompt instead of normal prompt
-                                print("$\(String(format: "%04X", assemblyAddress)): ", terminator: "")
-                                fflush(stdout)
+                                // Loop continues — assembly prompt handled by lineEditor.getLine()
                                 continue
                             }
                         }
@@ -412,12 +406,10 @@ struct AtticCLI {
                 printError("Communication error: \(error.localizedDescription)")
             }
 
-            // Print next prompt
-            if shouldContinue {
-                print(currentMode.prompt, terminator: " ")
-                fflush(stdout)
-            }
         }
+
+        // Save history and release libedit resources before disconnecting
+        lineEditor.shutdown()
 
         // Disconnect
         await client.disconnect()
