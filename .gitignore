@@ -15,4 +15,5 @@ Altirra/src/ATBasic/out/
 __pycache__/
 .venv/
 # Go
-go/attic/attic-go
+go/attic/attic-cli
+
