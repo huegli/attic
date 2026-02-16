@@ -17,7 +17,8 @@
 
 .PHONY: app clean-app kill-stale altirra \
         test test-smoke test-unit \
-        test-protocol test-cli test-basic test-asm test-atr test-core test-state test-server test-perf test-error test-multiclient
+        test-protocol test-cli test-basic test-asm test-atr test-core test-state test-server test-perf test-error test-multiclient \
+        go-build go-test go-clean
 
 # ---------------------------------------------------------------------------
 # Pre-test cleanup
@@ -198,3 +199,22 @@ test-error:
 ## Multi-client tests – multiple GUI clients and CLI+GUI together (~12s)
 test-multiclient: kill-stale
 	swift test --filter 'AESPMultipleGUIClient|AESPCLIAndGUITogether'
+
+# ---------------------------------------------------------------------------
+# Go CLI targets
+# ---------------------------------------------------------------------------
+
+## Build the Go CLI binary to .build/attic-go
+go-build:
+	cd go/attic && go build -o ../../.build/attic-go .
+
+## Run all Go CLI and protocol library tests (~13s, 342 tests)
+go-test:
+	cd go/atticprotocol && go test ./... -count=1 -timeout 60s
+	cd go/attic && go test ./... -count=1 -timeout 120s
+
+## Clean Go build artifacts
+go-clean:
+	rm -f .build/attic-go
+	cd go/attic && go clean
+	cd go/atticprotocol && go clean

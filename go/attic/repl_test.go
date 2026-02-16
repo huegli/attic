@@ -348,7 +348,10 @@ func TestREPLSendsCommandToServer(t *testing.T) {
 		}
 	}
 
-	input := "status\n.quit\n"
+	// Use .status (dot-command that forwards to server) to test
+	// server communication. In BASIC mode, bare "status" would be
+	// translated to keystroke injection.
+	input := ".status\n.quit\n"
 	output := captureREPL(t, input, handler)
 
 	if !strings.Contains(output, "running PC=$E477") {
@@ -371,7 +374,8 @@ func TestREPLMultiLineResponse(t *testing.T) {
 		}
 	}
 
-	input := "disassemble\n.quit\n"
+	// Switch to monitor mode first so "d" translates to "disassemble".
+	input := ".monitor\nd\n.quit\n"
 	output := captureREPL(t, input, handler)
 
 	if !strings.Contains(output, "LDA #$00") {
@@ -397,8 +401,8 @@ func TestREPLServerErrorResponse(t *testing.T) {
 		switch cmd {
 		case "ping":
 			return "OK:pong\n"
-		case "badcmd":
-			return "ERR:unknown command\n"
+		case "read $FFFF 1":
+			return "ERR:cannot read while running\n"
 		default:
 			return "OK:\n"
 		}
@@ -423,14 +427,16 @@ func TestREPLServerErrorResponse(t *testing.T) {
 		stderrOutput = string(data)
 	}()
 
-	input := "badcmd\n.quit\n"
+	// Use monitor mode command "m $FFFF 1" which translates to "read $FFFF 1"
+	// to trigger the error response.
+	input := ".monitor\nm $FFFF 1\n.quit\n"
 	_ = captureREPL(t, input, handler)
 
 	stderrWriter.Close()
 	wg.Wait()
 	stderrReader.Close()
 
-	if !strings.Contains(stderrOutput, "unknown command") {
+	if !strings.Contains(stderrOutput, "cannot read while running") {
 		t.Errorf("expected error message on stderr, got:\n%s", stderrOutput)
 	}
 }
@@ -453,7 +459,9 @@ func TestREPLMultipleCommands(t *testing.T) {
 		}
 	}
 
-	input := "cmd1\ncmd2\ncmd3\n.quit\n"
+	// Use .status (forwarded dot-command) to send multiple server commands
+	// from BASIC mode without keystroke injection translation.
+	input := ".status\n.status\n.status\n.quit\n"
 	output := captureREPL(t, input, handler)
 
 	for _, expected := range []string{"response-1", "response-2", "response-3"} {
@@ -681,7 +689,7 @@ func TestREPLCaseInsensitiveDotCommands(t *testing.T) {
 		{"mixed case monitor", ".Monitor\n.quit\n", "Switched to Monitor mode"},
 		{"uppercase basic", ".BASIC\n.quit\n", "Switched to BASIC mode"},
 		{"mixed case dos", ".Dos\n.quit\n", "Switched to DOS mode"},
-		{"uppercase help", ".HELP\n.quit\n", "Dot-commands"},
+		{"uppercase help", ".HELP\n.quit\n", "Global Commands"},
 	}
 
 	for _, tc := range tests {
@@ -752,8 +760,9 @@ func TestREPLHelpWithTopic(t *testing.T) {
 	input := ".help monitor\n.quit\n"
 	output := captureREPL(t, input, nil)
 
-	if !strings.Contains(output, "monitor") {
-		t.Errorf("expected topic 'monitor' in help output, got:\n%s", output)
+	// The global help for "monitor" should mention switching to monitor mode.
+	if !strings.Contains(output, "Switch to monitor mode") {
+		t.Errorf("expected topic-specific help text, got:\n%s", output)
 	}
 }
 
@@ -785,9 +794,10 @@ func TestREPLModeSwitchSequence(t *testing.T) {
 	}
 
 	// Switch through all modes, send a command in each, then quit.
+	// Use .status (forwarded dot-command) which works in all modes.
 	input := strings.Join([]string{
 		".monitor",       // Switch to monitor mode
-		"status",         // Send a command in monitor mode
+		".status",        // Send a command (works in any mode)
 		".basic",         // Switch to basic mode
 		".dos",           // Switch to dos mode
 		".monitor",       // Back to monitor mode
@@ -846,8 +856,8 @@ func TestREPLWhitespaceOnlyInput(t *testing.T) {
 // Compare with Swift: Swift's readLine() returns nil on EOF.
 // Compare with Python: Python's input() raises EOFError on EOF.
 func TestREPLEOFMidSession(t *testing.T) {
-	// Switch modes, then EOF without .quit.
-	input := ".monitor\nstatus\n"
+	// Switch to monitor mode then send .status (forwarded dot-command).
+	input := ".monitor\n.status\n"
 	output := captureREPL(t, input, func(cmd string) string {
 		switch cmd {
 		case "ping":
@@ -938,5 +948,511 @@ func TestREPLDotCommandsNotSentToServer(t *testing.T) {
 
 	if len(nonPingCmds) > 0 {
 		t.Errorf("dot-commands should not be sent to server, but got: %v", nonPingCmds)
+	}
+}
+
+// =============================================================================
+// Phase 4-8 Integration Tests
+// =============================================================================
+//
+// These tests verify the new behaviors added in Phases 4-8:
+//   - Command translation (user commands → protocol commands)
+//   - Assembly sub-mode (interactive assembly session)
+//   - Help system integration
+//   - Forwarded dot-commands (.status, .reset, .boot, etc.)
+//   - Unknown dot-command error reporting
+
+// TestREPLMonitorCommandTranslation verifies that monitor mode commands
+// are translated to protocol format before being sent to the server.
+//
+// GO CONCEPT: Testing Command Translation End-to-End
+// ---------------------------------------------------
+// Instead of unit-testing translation functions in isolation (done in
+// translate_test.go), this test exercises the full pipeline: user types
+// a command → REPL translates → sends to server → displays response.
+// This catches integration issues between the REPL loop and translator.
+//
+// Compare with Swift: XCTest integration tests follow the same approach.
+// Compare with Python: pytest integration tests with mock servers.
+func TestREPLMonitorCommandTranslation(t *testing.T) {
+	var mu sync.Mutex
+	receivedCmds := []string{}
+
+	handler := func(cmd string) string {
+		mu.Lock()
+		receivedCmds = append(receivedCmds, cmd)
+		mu.Unlock()
+		switch cmd {
+		case "ping":
+			return "OK:pong\n"
+		case "pause":
+			return "OK:paused\n"
+		case "resume":
+			return "OK:resumed\n"
+		case "registers":
+			return "OK:A=$00 X=$00 Y=$00 S=$FF P=$30 PC=$E477\n"
+		case "disassemble":
+			return "OK:E477: EA  NOP\n"
+		default:
+			return "OK:\n"
+		}
+	}
+
+	// Test monitor commands that translate to protocol commands.
+	input := ".monitor\np\ng\nr\nd\n.quit\n"
+	output := captureREPL(t, input, handler)
+
+	// Verify translated commands were sent.
+	mu.Lock()
+	defer mu.Unlock()
+
+	expectedCmds := []string{"pause", "resume", "registers", "disassemble"}
+	for _, expected := range expectedCmds {
+		found := false
+		for _, received := range receivedCmds {
+			if received == expected {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected command %q to be sent, received: %v", expected, receivedCmds)
+		}
+	}
+
+	// Verify output contains responses.
+	if !strings.Contains(output, "paused") {
+		t.Errorf("expected 'paused' in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "NOP") {
+		t.Errorf("expected disassembly output, got:\n%s", output)
+	}
+}
+
+// TestREPLGoCommandExpansion verifies that "g $addr" expands to two
+// protocol commands: set PC then resume.
+func TestREPLGoCommandExpansion(t *testing.T) {
+	var mu sync.Mutex
+	receivedCmds := []string{}
+
+	handler := func(cmd string) string {
+		mu.Lock()
+		receivedCmds = append(receivedCmds, cmd)
+		mu.Unlock()
+		switch cmd {
+		case "ping":
+			return "OK:pong\n"
+		default:
+			return "OK:\n"
+		}
+	}
+
+	input := ".monitor\ng $0600\n.quit\n"
+	_ = captureREPL(t, input, handler)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	// "g $0600" should expand to: registers pc=$0600, then resume.
+	foundSetPC := false
+	foundResume := false
+	for _, cmd := range receivedCmds {
+		if cmd == "registers pc=$0600" {
+			foundSetPC = true
+		}
+		if cmd == "resume" {
+			foundResume = true
+		}
+	}
+	if !foundSetPC {
+		t.Errorf("expected 'registers pc=$0600' command, got: %v", receivedCmds)
+	}
+	if !foundResume {
+		t.Errorf("expected 'resume' command, got: %v", receivedCmds)
+	}
+}
+
+// TestREPLBASICCommandTranslation verifies BASIC mode translation.
+func TestREPLBASICCommandTranslation(t *testing.T) {
+	var mu sync.Mutex
+	receivedCmds := []string{}
+
+	handler := func(cmd string) string {
+		mu.Lock()
+		receivedCmds = append(receivedCmds, cmd)
+		mu.Unlock()
+		switch cmd {
+		case "ping":
+			return "OK:pong\n"
+		default:
+			return "OK:\n"
+		}
+	}
+
+	// Test BASIC commands.
+	input := "list\nrun\nnew\n.quit\n"
+	_ = captureREPL(t, input, handler)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Verify "list" translates to "basic list".
+	found := false
+	for _, cmd := range receivedCmds {
+		if cmd == "basic list" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected 'basic list' command, got: %v", receivedCmds)
+	}
+
+	// Verify "run" translates to "basic run".
+	found = false
+	for _, cmd := range receivedCmds {
+		if cmd == "basic run" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected 'basic run' command, got: %v", receivedCmds)
+	}
+}
+
+// TestREPLDOSCommandTranslation verifies DOS mode translation.
+func TestREPLDOSCommandTranslation(t *testing.T) {
+	var mu sync.Mutex
+	receivedCmds := []string{}
+
+	handler := func(cmd string) string {
+		mu.Lock()
+		receivedCmds = append(receivedCmds, cmd)
+		mu.Unlock()
+		switch cmd {
+		case "ping":
+			return "OK:pong\n"
+		default:
+			return "OK:\n"
+		}
+	}
+
+	input := ".dos\ndir\ndrives\n.quit\n"
+	_ = captureREPL(t, input, handler)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	foundDir := false
+	foundDrives := false
+	for _, cmd := range receivedCmds {
+		if cmd == "dos dir" {
+			foundDir = true
+		}
+		if cmd == "drives" {
+			foundDrives = true
+		}
+	}
+	if !foundDir {
+		t.Errorf("expected 'dos dir' command, got: %v", receivedCmds)
+	}
+	if !foundDrives {
+		t.Errorf("expected 'drives' command, got: %v", receivedCmds)
+	}
+}
+
+// TestREPLBASICKeystrokeInjection verifies that unrecognized BASIC input
+// is sent as keystroke injection.
+func TestREPLBASICKeystrokeInjection(t *testing.T) {
+	var mu sync.Mutex
+	receivedCmds := []string{}
+
+	handler := func(cmd string) string {
+		mu.Lock()
+		receivedCmds = append(receivedCmds, cmd)
+		mu.Unlock()
+		switch cmd {
+		case "ping":
+			return "OK:pong\n"
+		default:
+			return "OK:\n"
+		}
+	}
+
+	// BASIC line input should be injected as keystrokes.
+	input := "10 PRINT \"HELLO\"\n.quit\n"
+	_ = captureREPL(t, input, handler)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Should find an "inject keys ..." command.
+	found := false
+	for _, cmd := range receivedCmds {
+		if strings.HasPrefix(cmd, "inject keys ") {
+			found = true
+			// Verify spaces are escaped.
+			if !strings.Contains(cmd, `\s`) {
+				t.Errorf("keystroke injection should escape spaces, got: %s", cmd)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected keystroke injection, got: %v", receivedCmds)
+	}
+}
+
+// TestREPLAssemblyModeEntry verifies the REPL enters assembly sub-mode
+// when the server responds with "ASM $XXXX".
+//
+// GO CONCEPT: State Machine Testing
+// -----------------------------------
+// Testing a state machine requires simulating the sequence of inputs
+// and responses that trigger state transitions. Here we simulate:
+// 1. Enter monitor mode
+// 2. Type "a $0600" (translates to "assemble $0600")
+// 3. Server responds "ASM $0600" (triggers assembly mode)
+// 4. Type instructions that go to "asm input <instruction>"
+// 5. Empty line sends "asm end" and exits assembly mode
+//
+// Compare with Swift: Same state machine testing approach with mocks.
+// Compare with Python: Same approach with mock servers and assert chains.
+func TestREPLAssemblyModeEntry(t *testing.T) {
+	var mu sync.Mutex
+	receivedCmds := []string{}
+
+	handler := func(cmd string) string {
+		mu.Lock()
+		receivedCmds = append(receivedCmds, cmd)
+		mu.Unlock()
+		switch cmd {
+		case "ping":
+			return "OK:pong\n"
+		case "assemble $0600":
+			// Server starts an assembly session.
+			return "OK:ASM $0600\n"
+		case "asm input LDA #$42":
+			// Server assembled the instruction and returns formatted line + next address.
+			return "OK:0600: A9 42  LDA #$42\x1E$0602\n"
+		case "asm input STA $D400":
+			return "OK:0602: 8D 00 D4  STA $D400\x1E$0605\n"
+		case "asm end":
+			return "OK:Assembly complete\n"
+		default:
+			return "OK:\n"
+		}
+	}
+
+	input := ".monitor\na $0600\nLDA #$42\nSTA $D400\n\n.quit\n"
+	output := captureREPL(t, input, handler)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Verify the assembly commands were sent.
+	expectedCmds := []string{"assemble $0600", "asm input LDA #$42", "asm input STA $D400", "asm end"}
+	for _, expected := range expectedCmds {
+		found := false
+		for _, cmd := range receivedCmds {
+			if cmd == expected {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected command %q, got: %v", expected, receivedCmds)
+		}
+	}
+
+	// Verify assembled output was displayed.
+	if !strings.Contains(output, "LDA #$42") {
+		t.Errorf("expected assembled LDA output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "STA $D400") {
+		t.Errorf("expected assembled STA output, got:\n%s", output)
+	}
+}
+
+// TestREPLAssemblyModeExitWithDot verifies that typing "." exits assembly mode.
+func TestREPLAssemblyModeExitWithDot(t *testing.T) {
+	var mu sync.Mutex
+	receivedCmds := []string{}
+
+	handler := func(cmd string) string {
+		mu.Lock()
+		receivedCmds = append(receivedCmds, cmd)
+		mu.Unlock()
+		switch cmd {
+		case "ping":
+			return "OK:pong\n"
+		case "assemble $0600":
+			return "OK:ASM $0600\n"
+		case "asm input NOP":
+			return "OK:0600: EA  NOP\x1E$0601\n"
+		case "asm end":
+			return "OK:\n"
+		default:
+			return "OK:\n"
+		}
+	}
+
+	input := ".monitor\na $0600\nNOP\n.\n.quit\n"
+	_ = captureREPL(t, input, handler)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Verify "asm end" was sent (triggered by ".").
+	found := false
+	for _, cmd := range receivedCmds {
+		if cmd == "asm end" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected 'asm end' after '.', got: %v", receivedCmds)
+	}
+}
+
+// TestREPLForwardedDotCommands verifies that .status, .reset, .boot etc.
+// are translated and forwarded to the server.
+func TestREPLForwardedDotCommands(t *testing.T) {
+	var mu sync.Mutex
+	receivedCmds := []string{}
+
+	handler := func(cmd string) string {
+		mu.Lock()
+		receivedCmds = append(receivedCmds, cmd)
+		mu.Unlock()
+		switch cmd {
+		case "ping":
+			return "OK:pong\n"
+		case "status":
+			return "OK:running PC=$E477\n"
+		case "reset cold":
+			return "OK:reset\n"
+		case "reset warm":
+			return "OK:reset\n"
+		case "screen":
+			return "OK:screen text\n"
+		default:
+			return "OK:\n"
+		}
+	}
+
+	input := ".status\n.reset\n.warmstart\n.screen\n.quit\n"
+	output := captureREPL(t, input, handler)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	expected := []string{"status", "reset cold", "reset warm", "screen"}
+	for _, cmd := range expected {
+		found := false
+		for _, received := range receivedCmds {
+			if received == cmd {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected %q to be sent, got: %v", cmd, receivedCmds)
+		}
+	}
+
+	if !strings.Contains(output, "running PC=$E477") {
+		t.Errorf("expected status response in output, got:\n%s", output)
+	}
+}
+
+// TestREPLUnknownDotCommand verifies that unknown dot-commands are NOT
+// forwarded to the server. We verify this by checking the server didn't
+// receive any non-ping commands.
+func TestREPLUnknownDotCommand(t *testing.T) {
+	var mu sync.Mutex
+	nonPingCmds := []string{}
+
+	handler := func(cmd string) string {
+		mu.Lock()
+		if cmd != "ping" {
+			nonPingCmds = append(nonPingCmds, cmd)
+		}
+		mu.Unlock()
+		switch cmd {
+		case "ping":
+			return "OK:pong\n"
+		default:
+			return "OK:\n"
+		}
+	}
+
+	input := ".badcommand\n.quit\n"
+	_ = captureREPL(t, input, handler)
+
+	// Verify nothing was sent to the server (besides ping).
+	mu.Lock()
+	defer mu.Unlock()
+	if len(nonPingCmds) > 0 {
+		t.Errorf("unknown dot-commands should not be sent to server, got: %v", nonPingCmds)
+	}
+}
+
+// TestREPLHelpIntegration verifies that .help and .help <topic> produce
+// correct output through the REPL (end-to-end, not just unit tests).
+func TestREPLHelpIntegration(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		contains string
+	}{
+		{"help overview", ".help\n.quit\n", "Global Commands"},
+		{"help monitor topic", ".monitor\n.help g\n.quit\n", "Resume execution"},
+		{"help with dot prefix", ".help .boot\n.quit\n", "Boot the emulator"},
+		{"help case insensitive", ".help RESET\n.quit\n", "cold reset"},
+		{"help in monitor mode", ".monitor\n.help d\n.quit\n", "Disassemble"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			output := captureREPL(t, tc.input, nil)
+			if !strings.Contains(output, tc.contains) {
+				t.Errorf("expected %q in output, got:\n%s", tc.contains, output)
+			}
+		})
+	}
+}
+
+// TestREPLAssemblyModePrompt verifies that assembly mode shows the
+// correct "$XXXX: " prompt format.
+func TestREPLAssemblyModePrompt(t *testing.T) {
+	handler := func(cmd string) string {
+		switch cmd {
+		case "ping":
+			return "OK:pong\n"
+		case "assemble $0600":
+			return "OK:ASM $0600\n"
+		case "asm input NOP":
+			return "OK:0600: EA  NOP\x1E$0601\n"
+		case "asm end":
+			return "OK:\n"
+		default:
+			return "OK:\n"
+		}
+	}
+
+	input := ".monitor\na $0600\nNOP\n\n.quit\n"
+	output := captureREPL(t, input, handler)
+
+	// In non-interactive mode, the prompt is printed to stdout.
+	// We should see the assembly mode prompt "$0600: ".
+	if !strings.Contains(output, "$0600:") {
+		t.Errorf("expected assembly prompt '$0600:' in output, got:\n%s", output)
+	}
+	// After the NOP, the next prompt should show $0601.
+	if !strings.Contains(output, "$0601:") {
+		t.Errorf("expected next assembly prompt '$0601:' in output, got:\n%s", output)
 	}
 }
