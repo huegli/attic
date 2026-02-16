@@ -31,10 +31,13 @@ package main
 //   - "os/exec"       — running external commands (subprocess management)
 //   - "path/filepath" — cross-platform file path manipulation
 //   - "time"          — time operations (durations, timers, sleep)
+<<<<<<< HEAD
 //
 // Compare with Python: Python's standard library is similarly organized:
 // `import os`, `import subprocess`, `from pathlib import Path`,
 // `import time`. Python sub-packages use dot notation for imports.
+=======
+>>>>>>> 810cc4d (docs(go-cli): Add comprehensive Go tutorial comments for learning)
 import (
 	"fmt"
 	"os"
@@ -49,14 +52,20 @@ import (
 // -----------------------------------------------
 // Go's time package uses a Duration type (which is really an int64 counting
 // nanoseconds). You create durations by multiplying a number with a time unit:
+<<<<<<< HEAD
 //
 //	4 * time.Second       → 4 seconds (4,000,000,000 nanoseconds)
 //	100 * time.Millisecond → 100 milliseconds
+=======
+//   4 * time.Second       → 4 seconds (4,000,000,000 nanoseconds)
+//   100 * time.Millisecond → 100 milliseconds
+>>>>>>> 810cc4d (docs(go-cli): Add comprehensive Go tutorial comments for learning)
 //
 // This is type-safe: you can't accidentally mix seconds and milliseconds
 // because the compiler enforces the Duration type.
 //
 // Compare to Swift:
+<<<<<<< HEAD
 //
 //	Swift: TimeInterval is a Double (seconds), so 4.0 means 4 seconds
 //	Go:    time.Duration is an int64 (nanoseconds), written as 4 * time.Second
@@ -65,6 +74,10 @@ import (
 // `timedelta(seconds=4)`, `timedelta(milliseconds=100)`. These support
 // arithmetic and comparisons. Unlike Go's nanosecond int64, Python's
 // timedelta stores days, seconds, and microseconds internally.
+=======
+//   Swift: TimeInterval is a Double (seconds), so 4.0 means 4 seconds
+//   Go:    time.Duration is an int64 (nanoseconds), written as 4 * time.Second
+>>>>>>> 810cc4d (docs(go-cli): Add comprehensive Go tutorial comments for learning)
 const (
 	// serverExecutableName is the name of the AtticServer binary.
 	serverExecutableName = "AtticServer"
@@ -91,10 +104,13 @@ const (
 // the named variables, but most Go developers prefer explicit returns for
 // clarity. We use named returns here purely for documentation.
 //
+<<<<<<< HEAD
 // Compare with Python: Python has no named return values. Functions
 // return tuples, and callers unpack them. Type hints document the return:
 //   `def launch_server(silent: bool) -> tuple[str, int, Exception | None]:`
 //
+=======
+>>>>>>> 810cc4d (docs(go-cli): Add comprehensive Go tutorial comments for learning)
 // GO CONCEPT: The error Interface
 // --------------------------------
 // Go's error handling is based on a simple interface:
@@ -113,6 +129,7 @@ const (
 // Compare to Swift:
 //   Swift: func launch() throws -> String  (uses throw/catch)
 //   Go:    func launch() (string, error)    (returns error as a value)
+<<<<<<< HEAD
 //
 // Compare with Python: Python uses an exception hierarchy:
 //   `class LaunchError(Exception): pass`
@@ -121,6 +138,8 @@ const (
 // `raise ... from err`. Python's approach is more implicit — you don't
 // check return values, but you can't see which exceptions a function
 // might raise without reading its source or documentation.
+=======
+>>>>>>> 810cc4d (docs(go-cli): Add comprehensive Go tutorial comments for learning)
 
 // launchServer launches a new AtticServer subprocess and waits for its socket
 // to become available. Returns the socket path, the server's PID, and any error.
@@ -148,11 +167,14 @@ func launchServer(silent bool) (socketPath string, pid int, err error) {
 	//
 	// append() returns a new slice header (possibly pointing to new memory
 	// if the old capacity was exceeded), so you must assign the result back.
+<<<<<<< HEAD
 	//
 	// Compare with Python: Python lists work similarly: `cmd_args = []`,
 	// `cmd_args.append("--silent")`. Python lists grow automatically.
 	// Unlike Go, `append()` is a method that modifies the list in place
 	// (no need to reassign the result).
+=======
+>>>>>>> 810cc4d (docs(go-cli): Add comprehensive Go tutorial comments for learning)
 	cmdArgs := []string{}
 	if silent {
 		cmdArgs = append(cmdArgs, "--silent")
@@ -173,11 +195,14 @@ func launchServer(silent bool) (socketPath string, pid int, err error) {
 	//   - nil means output is discarded (like redirecting to /dev/null)
 	//   - os.Stdout would forward to our own stdout
 	//   - &bytes.Buffer would capture it in memory
+<<<<<<< HEAD
 	//
 	// Compare with Python: `subprocess.Popen(["AtticServer", "--silent"])`
 	// for async launch, `subprocess.run(["AtticServer"])` for blocking.
 	// `proc.pid` gives the PID. Output control: `stdout=subprocess.DEVNULL`
 	// to discard, `stdout=subprocess.PIPE` to capture in memory.
+=======
+>>>>>>> 810cc4d (docs(go-cli): Add comprehensive Go tutorial comments for learning)
 
 	// Launch the server as a subprocess
 	cmd := exec.Command(exePath, cmdArgs...)
@@ -221,11 +246,14 @@ func launchServer(silent bool) (socketPath string, pid int, err error) {
 //
 // The pattern is verbose but explicit — you always know exactly what's
 // being returned on every path.
+<<<<<<< HEAD
 //
 // Compare with Python: Python uses the same early-return pattern, but
 // often with exceptions instead of error returns:
 //   `path = find_executable()`
 //   `if path is None: raise FileNotFoundError(...)`
+=======
+>>>>>>> 810cc4d (docs(go-cli): Add comprehensive Go tutorial comments for learning)
 
 // findServerExecutable searches for the AtticServer binary in standard
 // locations. Returns the full path to the executable.
@@ -255,11 +283,14 @@ func findServerExecutable() (string, error) {
 	// extensively instead of builder patterns or constructor overloads.
 	//
 	// Compare to Swift: ["a", "b", "c"] (array literal)
+<<<<<<< HEAD
 	//
 	// Compare with Python: Python list literals are identical in concept:
 	//   `common_paths = ["/usr/local/bin", "/opt/homebrew/bin",
 	//    os.path.join(home, ".local", "bin")]`
 	// Python also has tuple `(a, b)`, set `{a, b}`, and dict `{"key": val}`.
+=======
+>>>>>>> 810cc4d (docs(go-cli): Add comprehensive Go tutorial comments for learning)
 	commonPaths := []string{
 		"/usr/local/bin",
 		"/opt/homebrew/bin",
@@ -283,11 +314,14 @@ func findServerExecutable() (string, error) {
 	// Compare to Swift:
 	//   for dir in commonPaths { ... }           — value only (most common)
 	//   for (i, dir) in commonPaths.enumerated() — both index and value
+<<<<<<< HEAD
 	//
 	// Compare with Python: `for dir in common_paths:` gives values directly
 	// (no index). For index+value: `for i, dir in enumerate(common_paths):`.
 	// The `_` convention for unused variables is the same:
 	// `for _, dir in enumerate(common_paths):`.
+=======
+>>>>>>> 810cc4d (docs(go-cli): Add comprehensive Go tutorial comments for learning)
 	for _, dir := range commonPaths {
 		candidate := filepath.Join(dir, serverExecutableName)
 		if isExecutable(candidate) {
@@ -318,10 +352,13 @@ func waitForSocket(pid int) (string, error) {
 	// You can't use < or > with time.Time (Go doesn't have operator
 	// overloading). This is different from Swift where Date conforms to
 	// Comparable and you can write "date1 < date2".
+<<<<<<< HEAD
 	//
 	// Compare with Python: Python's `datetime` objects support comparison
 	// operators directly: `now < deadline`. This is more natural than Go's
 	// method-based approach. `time.sleep(0.1)` takes seconds as a float.
+=======
+>>>>>>> 810cc4d (docs(go-cli): Add comprehensive Go tutorial comments for learning)
 	for time.Now().Before(deadline) {
 		// os.Stat checks if a file exists and returns its metadata.
 		// If the error is nil, the file exists.
@@ -357,11 +394,14 @@ func waitForSocket(pid int) (string, error) {
 //
 // Go uses the 0-prefix for octal literals (same as C). Go 1.13+ also
 // supports 0o111 for clarity, but 0111 is still common.
+<<<<<<< HEAD
 //
 // Compare with Python: Python uses the same bitwise operators: `&`, `|`,
 // `^`, `~` (NOT), `<<`, `>>`. Go's `&^` (AND NOT) is `& ~` in Python.
 // Octal literals use `0o` prefix: `0o755`, `0o111`. Python also has
 // `os.access(path, os.X_OK)` as a higher-level executable check.
+=======
+>>>>>>> 810cc4d (docs(go-cli): Add comprehensive Go tutorial comments for learning)
 
 // isExecutable checks if a file exists and is executable.
 func isExecutable(path string) bool {
