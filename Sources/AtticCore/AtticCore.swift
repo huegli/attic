@@ -57,7 +57,7 @@ public enum AtticCore {
     }
 
     /// Copyright notice.
-    public static let copyright = "Copyright (c) 2024"
+    public static let copyright = "Copyright (c) 2026"
 
     /// Build configuration (debug or release).
     public static var buildConfiguration: String {
