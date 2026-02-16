@@ -744,8 +744,37 @@ func main() {
 	// We define cleanup as a variable holding a function value so we can
 	// pass it to setupSignalHandler AND call it at the end of main().
 
+	// GO CONCEPT: defer for Resource Cleanup
+	// ---------------------------------------
+	// "defer" schedules a function call to run when the enclosing function
+	// (main) returns. Multiple defers run in LIFO (last-in, first-out)
+	// order. This ensures cleanup happens even if the function returns
+	// early due to an error.
+	//
+	// We use defer for the LineEditor to ensure command history is saved
+	// and readline resources are released, no matter how the program exits
+	// (normal exit, .quit, Ctrl-D, etc.).
+	//
+	// Compare with Swift: Swift uses defer blocks similarly:
+	//   defer { lineEditor.shutdown() }
+	// Swift defer runs when the enclosing scope exits. Go defer runs when
+	// the enclosing FUNCTION returns (not just any scope).
+	//
+	// Compare with Python: Python uses `try...finally` or context managers:
+	//   try: ... finally: editor.close()
+	//   # or: with LineEditor() as editor: ...
+	// Context managers are more idiomatic. Python's `atexit.register(fn)`
+	// also runs cleanup on interpreter exit.
+
+	// Create the LineEditor for REPL input.
+	// The LineEditor detects TTY vs piped input and selects the appropriate
+	// mode. In interactive mode, it provides Emacs keybindings and history.
+	editor := NewLineEditor()
+	defer editor.Close()
+
 	// Cleanup function for signal handling and normal exit
 	cleanup := func() {
+		editor.Close() // Save history and release readline resources
 		client.Disconnect()
 		if launchedPid > 0 {
 			// We launched the server, so terminate it on exit.
@@ -768,8 +797,9 @@ func main() {
 	fmt.Println()
 
 	// Run the REPL — this blocks until the user types .quit or Ctrl-D.
-	// (Stub implementation for Phase 1; full version in Phase 4.)
-	runREPL(client, args.atascii)
+	// The LineEditor provides line editing in interactive mode and simple
+	// line reading in non-interactive (piped/comint) mode.
+	runREPL(client, editor, args.atascii)
 
 	// Clean up on normal exit (REPL returned because user typed .quit)
 	cleanup()
