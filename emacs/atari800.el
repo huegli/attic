@@ -1,6 +1,6 @@
 ;;; atari800.el --- Emacs integration for Atari 800 XL emulator -*- lexical-binding: t -*-
 
-;; Copyright (C) 2024
+;; Copyright (C) 2026
 ;; Author: Your Name
 ;; Keywords: games, emulation
 ;; Version: 1.0.0
