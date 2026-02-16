@@ -7,6 +7,12 @@ UserInterfaceState.xcuserstate
 *.code-workspace
 # bv (beads viewer) local config and caches
 .bv/
+# Altirra ROM build artifacts
+Altirra/src/Kernel/out/
+Altirra/src/Kernel/autobuild_default/
+Altirra/src/ATBasic/out/
 # Python
 __pycache__/
 .venv/
+# Go
+go/attic/attic-go

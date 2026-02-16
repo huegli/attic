@@ -105,7 +105,7 @@ const (
 	appName = "Attic"
 
 	// copyright is the copyright notice.
-	copyright = "Copyright (c) 2024"
+	copyright = "Copyright (c) 2026"
 )
 
 // GO CONCEPT: Functions

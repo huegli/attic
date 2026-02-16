@@ -103,10 +103,16 @@ func startMockServer(t *testing.T, handler func(cmd string) string) *mockServer 
 	t.Helper()
 
 	// Create a temporary directory for the socket file.
-	// t.TempDir() returns a directory that is automatically removed when
-	// the test completes — no manual cleanup needed.
-	tmpDir := t.TempDir()
-	socketPath := filepath.Join(tmpDir, "test.sock")
+	// We use os.MkdirTemp under /tmp instead of t.TempDir() because macOS
+	// has a 104-byte limit on Unix socket paths, and t.TempDir() routes
+	// through /var/folders/... which, combined with long test names, can
+	// exceed that limit.
+	tmpDir, err := os.MkdirTemp("/tmp", "attic-test-")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(tmpDir) })
+	socketPath := filepath.Join(tmpDir, "s.sock")
 
 	// Create a Unix domain socket listener.
 	// "unix" means Unix domain socket (local IPC, no network).
