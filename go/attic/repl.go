@@ -1,10 +1,23 @@
 // =============================================================================
-// repl.go - REPL Loop (Stub for Phase 1)
+// repl.go - REPL Loop with Line Editor Integration
 // =============================================================================
 //
-// This file will contain the full REPL implementation in Phase 4. For now it
-// provides a minimal stub that reads lines from stdin and sends them as raw
-// protocol commands, so the CLI can be tested end-to-end.
+// This file implements the REPL (Read-Eval-Print Loop) for the Attic CLI.
+// The REPL reads user input via the LineEditor (see lineeditor.go), processes
+// local dot-commands (mode switching, help, quit), and sends protocol commands
+// to the AtticServer via a Unix socket client.
+//
+// The REPL operates in three modes:
+//   - Monitor: 6502 debugging (disassembly, breakpoints, memory inspection)
+//   - BASIC:   BASIC program entry and execution
+//   - DOS:     Disk image management
+//
+// Mode switching is handled locally (no server round-trip). Protocol commands
+// are sent as raw text strings via the CLI text protocol.
+//
+// Phase 2 integration: The REPL now uses LineEditor for input, providing
+// Emacs keybindings, persistent history, and Ctrl-R search in interactive
+// mode, and clean line reading for piped/comint input.
 //
 // =============================================================================
 
@@ -23,6 +36,10 @@ package main
 // Scanner is simpler for line-by-line reading (which is what a REPL needs),
 // while Reader is better when you need more control.
 //
+// In this file, we no longer use bufio directly for REPL input — that's
+// been moved to the LineEditor (lineeditor.go). But the concept is still
+// relevant for understanding the non-interactive fallback path.
+//
 // Compare with Python: Python file objects are buffered by default.
 // `sys.stdin` can be iterated line by line: `for line in sys.stdin:`.
 // For explicit buffering, use `io.BufferedReader`. The `readline` module
@@ -32,8 +49,8 @@ package main
 // are immutable (like Swift), so operations return new strings rather than
 // modifying in place.
 import (
-	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -148,48 +165,40 @@ func (m REPLMode) prompt() string {
 	}
 }
 
-// GO CONCEPT: Unused Parameters
-// ------------------------------
-// Go requires you to use every declared variable, but function parameters
-// are exempt — you can declare a parameter and not use it. This is useful
-// for stub functions where you know the parameter will be needed later.
+// GO CONCEPT: Dependency Injection
+// ---------------------------------
+// runREPL accepts a *LineEditor as a parameter rather than creating one
+// internally. This is "dependency injection" — the caller (main.go) creates
+// the LineEditor and passes it in. Benefits:
 //
-// Here "atasciiMode" is accepted but not yet used (full implementation
-// comes in a later phase). In Swift you'd use "_ atasciiMode: Bool" to
-// suppress the external label, but Go doesn't have external parameter names.
+//   1. Testability: Tests can pass a mock or test-configured LineEditor.
+//   2. Lifetime control: The caller manages creation and cleanup (Close).
+//   3. Flexibility: The same REPL code works with different input sources.
 //
-// Compare with Python: Python uses `_` for unused parameters by
-// convention: `def run_repl(client, _atascii_mode):`. Unlike Go, Python
-// never raises errors for unused variables — it's purely a linter
-// concern (e.g., pylint W0613).
+// This is the same pattern used in the Swift CLI, where the LineEditor
+// is created in the main entry point and passed to runSocketREPL().
+//
+// Compare with Swift: Swift uses initializer injection or property injection:
+//   func runSocketREPL(lineEditor: LineEditor, client: CLISocketClient)
+//
+// Compare with Python: Python uses constructor injection:
+//   def run_repl(editor: LineEditor, client: Client) -> None: ...
+// Python also supports dependency injection frameworks like `inject` or
+// `dependency-injector`, but simple parameter passing is most common.
 
 // runREPL runs the main REPL loop.
 //
-// This is a minimal stub for Phase 1. It reads lines from stdin and sends
-// them as raw protocol commands. The full implementation with command
-// translation, mode switching, help system, and line editing will be added
-// in subsequent phases.
-func runREPL(client *atticprotocol.Client, atasciiMode bool) {
-	// GO CONCEPT: bufio.Scanner
-	// -------------------------
-	// Scanner provides a convenient interface for reading input line by line.
-	//
-	//   scanner := bufio.NewScanner(os.Stdin)  — create scanner from stdin
-	//   scanner.Scan()                          — read next line (returns bool)
-	//   scanner.Text()                          — get the line (without \n)
-	//   scanner.Err()                           — check for errors after loop
-	//
-	// Scan() returns true if a line was read, false on EOF or error.
-	// This makes it perfect for a "for scanner.Scan() { ... }" loop.
-	//
-	// Compare to Swift:
-	//   Swift: readLine() returns String? (nil on EOF)
-	//   Go:    scanner.Scan() returns bool + scanner.Text() for the string
-	//
-	// Compare with Python: `for line in sys.stdin:` iterates lines (keeping
-	// `\n`). `input()` reads one line (stripping `\n`) and raises `EOFError`
-	// on EOF. Python's `input()` is closest to Go's Scanner for REPL use.
-	scanner := bufio.NewScanner(os.Stdin)
+// It reads user input via the LineEditor, processes local dot-commands
+// (mode switching, help, quit), and sends everything else to the server
+// as raw protocol commands. Responses are displayed with multi-line
+// expansion (replacing Record Separator characters with newlines).
+//
+// The REPL exits on:
+//   - .quit command
+//   - .shutdown command (also stops the server)
+//   - EOF (Ctrl-D in interactive mode, end of piped input)
+//   - LineEditor read error
+func runREPL(client *atticprotocol.Client, editor *LineEditor, atasciiMode bool) {
 	mode := ModeBasic
 
 	// GO CONCEPT: Infinite Loops
@@ -201,15 +210,32 @@ func runREPL(client *atticprotocol.Client, atasciiMode bool) {
 	// Compare with Python: `while True:` is Python's infinite loop. `break`
 	// and `return` exit it, just like in Go.
 	for {
-		// Print prompt (without newline — user types on the same line)
-		fmt.Print(mode.prompt())
-
-		// Read a line from stdin
-		if !scanner.Scan() {
-			// scanner.Scan() returned false, meaning EOF (Ctrl-D on Unix)
-			// or an I/O error. Print a newline for clean terminal output
-			// and exit the REPL.
-			fmt.Println()
+		// Read a line of input using the LineEditor.
+		// In interactive mode, this provides Emacs keybindings, history
+		// navigation (up/down arrows, Ctrl-R), and persistent history.
+		// In non-interactive mode, it prints the prompt and reads from stdin.
+		line, err := editor.GetLine(mode.prompt())
+		if err != nil {
+			// GO CONCEPT: Comparing Errors with ==
+			// --------------------------------------
+			// io.EOF is a sentinel error value. We compare with == because
+			// it's a unique package-level variable, not a wrapped error.
+			// For wrapped errors (created with fmt.Errorf %w), use
+			// errors.Is(err, target) instead.
+			//
+			// Compare with Swift: Swift checks for EOF via nil return:
+			//   guard let line = readLine() else { break }
+			//
+			// Compare with Python: Python catches EOFError:
+			//   try: line = input(prompt)
+			//   except EOFError: break
+			if err == io.EOF {
+				// Clean EOF — user pressed Ctrl-D or piped input ended.
+				fmt.Println()
+				return
+			}
+			// Unexpected error — log and exit.
+			fmt.Fprintf(os.Stderr, "Input error: %v\n", err)
 			return
 		}
 
@@ -227,6 +253,7 @@ func runREPL(client *atticprotocol.Client, atasciiMode bool) {
 		//   strings.ReplaceAll(s, old, new) — replace all occurrences
 		//   strings.ToUpper(s)           — uppercase
 		//   strings.Contains(s, substr)  — check if s contains substr
+		//   strings.ToLower(s)           — lowercase
 		//
 		// These are standalone functions, not methods, because Go's string
 		// type is a built-in primitive. You can't add methods to built-in types.
@@ -235,7 +262,7 @@ func runREPL(client *atticprotocol.Client, atasciiMode bool) {
 		// standalone functions): `line.strip()`, `line.startswith(".")`,
 		// `line.split()`, `" ".join(parts)`, `line.upper()`, `"sub" in line`.
 		// This is the opposite of Go — Python attaches methods to the str type.
-		line := strings.TrimSpace(scanner.Text())
+		line = strings.TrimSpace(line)
 		if line == "" {
 			// GO CONCEPT: continue and break
 			// --------------------------------
@@ -252,30 +279,87 @@ func runREPL(client *atticprotocol.Client, atasciiMode bool) {
 			continue
 		}
 
-		// Handle local dot-commands (processed by the CLI, not sent to server)
-		switch line {
+		// GO CONCEPT: String Case Conversion for Commands
+		// ------------------------------------------------
+		// strings.ToLower() converts a string to lowercase. We use this
+		// to handle dot-commands case-insensitively — ".Quit", ".QUIT",
+		// and ".quit" all work the same way. This matches the user-friendly
+		// behavior of the Swift CLI.
+		//
+		// Compare with Swift: Swift's lowercased() method:
+		//   switch line.lowercased() { case ".quit": ... }
+		//
+		// Compare with Python: Python's lower() method:
+		//   match line.lower(): case ".quit": ...
+		// Python also has casefold() for more aggressive Unicode lowering.
+		lowerLine := strings.ToLower(line)
+
+		// Handle local dot-commands (processed by the CLI, not sent to server).
+		//
+		// GO CONCEPT: Switch on Computed Values
+		// --------------------------------------
+		// Go's switch can match on any comparable type — here we switch on
+		// a lowercase string. Unlike C, Go switch cases don't fall through
+		// by default (no break needed). The "continue" at the end of each
+		// case skips the server-send logic below and returns to the top of
+		// the REPL loop.
+		//
+		// Compare with Swift: Swift's switch with string patterns:
+		//   switch line.lowercased() {
+		//       case ".quit": return
+		//       case ".monitor": mode = .monitor
+		//   }
+		//
+		// Compare with Python: Python 3.10+ match statement:
+		//   match line.lower():
+		//       case ".quit": return
+		//       case ".monitor": mode = Mode.MONITOR
+		handled := true
+		switch lowerLine {
 		case ".quit":
+			return
+		case ".shutdown":
+			// .shutdown tells the server to stop, then exits the CLI.
+			_, _ = client.SendRaw("shutdown")
 			return
 		case ".monitor":
 			mode = ModeMonitor
 			fmt.Println("Switched to Monitor mode")
-			continue
 		case ".basic":
 			mode = ModeBasic
 			fmt.Println("Switched to BASIC mode")
-			continue
 		case ".dos":
 			mode = ModeDOS
 			fmt.Println("Switched to DOS mode")
-			continue
 		case ".help":
 			fmt.Println("Help system will be implemented in Phase 6.")
-			fmt.Println("Dot-commands: .monitor .basic .dos .quit .help")
+			fmt.Println("Dot-commands: .monitor .basic .dos .quit .shutdown .help")
+		default:
+			handled = false
+		}
+
+		if handled {
+			continue
+		}
+
+		// GO CONCEPT: strings.HasPrefix for Command Routing
+		// -------------------------------------------------
+		// HasPrefix checks if a string starts with a given prefix. It's
+		// the Go equivalent of Swift's hasPrefix(_:) method. We use it
+		// here to detect dot-commands that take arguments (like ".help topic"),
+		// which can't be matched with a simple equality check.
+		//
+		// Compare with Swift: `line.hasPrefix(".help ")` — method on String.
+		// Compare with Python: `line.startswith(".help ")` — method on str.
+		if strings.HasPrefix(lowerLine, ".help ") {
+			// Help with topic — extract the topic after ".help "
+			topic := strings.TrimSpace(line[6:])
+			fmt.Printf("Help for %q will be implemented in Phase 6.\n", topic)
 			continue
 		}
 
 		// Send as raw protocol command (no translation yet — the full
-		// command translator will be implemented in Phase 3).
+		// command translator will be implemented in Phase 5).
 		//
 		// SendRaw wraps the input as "CMD:<input>\n" and waits for a
 		// response from the server.
@@ -286,9 +370,20 @@ func runREPL(client *atticprotocol.Client, atasciiMode bool) {
 		}
 
 		// Display response, expanding multi-line separators.
-		// The protocol uses ASCII Record Separator (0x1E) to encode
-		// multiple lines in a single response. We replace them with
-		// actual newlines for display.
+		//
+		// GO CONCEPT: Protocol Separator Handling
+		// ----------------------------------------
+		// The CLI text protocol uses ASCII Record Separator (0x1E, \x1E)
+		// to encode multiple lines in a single response. We replace them
+		// with actual newlines for display. This avoids the complexity of
+		// a streaming protocol while still supporting multi-line output
+		// like disassembly listings and memory dumps.
+		//
+		// Compare with Swift: Swift uses the same approach:
+		//   output.replacingOccurrences(of: "\u{1E}", with: "\n")
+		//
+		// Compare with Python: Python string replacement:
+		//   output.replace("\x1e", "\n")
 		if resp.IsOK() {
 			if resp.Data != "" {
 				output := strings.ReplaceAll(resp.Data, atticprotocol.MultiLineSeparator, "\n")
