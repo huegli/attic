@@ -24,13 +24,19 @@ package main
 // while Reader is better when you need more control.
 //
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> f994c51 (docs(go-cli): Add Python comparisons to all GO CONCEPT tutorial blocks)
 // Compare with Python: Python file objects are buffered by default.
 // `sys.stdin` can be iterated line by line: `for line in sys.stdin:`.
 // For explicit buffering, use `io.BufferedReader`. The `readline` module
 // adds line editing (history, tab completion) on top of stdin.
 //
+<<<<<<< HEAD
 =======
 >>>>>>> 810cc4d (docs(go-cli): Add comprehensive Go tutorial comments for learning)
+=======
+>>>>>>> f994c51 (docs(go-cli): Add Python comparisons to all GO CONCEPT tutorial blocks)
 // The "strings" package provides string manipulation functions. Go strings
 // are immutable (like Swift), so operations return new strings rather than
 // modifying in place.
@@ -60,13 +66,19 @@ import (
 //   type REPLMode int
 //   const ( ModeMonitor REPLMode = iota; ModeBasic; ModeDOS )
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> f994c51 (docs(go-cli): Add Python comparisons to all GO CONCEPT tutorial blocks)
 //
 // Compare with Python: Python uses `enum.IntEnum` for integer enums:
 //   `class REPLMode(IntEnum): MONITOR = 0; BASIC = 1; DOS = 2`
 // Python enums are full classes with rich features: iteration, names,
 // and pattern matching support.
+<<<<<<< HEAD
 =======
 >>>>>>> 810cc4d (docs(go-cli): Add comprehensive Go tutorial comments for learning)
+=======
+>>>>>>> f994c51 (docs(go-cli): Add Python comparisons to all GO CONCEPT tutorial blocks)
 
 // REPLMode represents the current operating mode of the REPL.
 type REPLMode int
@@ -117,7 +129,15 @@ type REPLMode int
 //
 // Compare to Swift: Swift enums auto-assign raw values similarly:
 //   enum Mode: Int { case monitor = 0, basic, dos }
+<<<<<<< HEAD
 >>>>>>> 810cc4d (docs(go-cli): Add comprehensive Go tutorial comments for learning)
+=======
+//
+// Compare with Python: Python's `enum.auto()` serves the same purpose:
+//   `class REPLMode(IntEnum): MONITOR = auto(); BASIC = auto()`
+// Values start at 1 by default (not 0), but you can override with a
+// custom `_generate_next_value_` method.
+>>>>>>> f994c51 (docs(go-cli): Add Python comparisons to all GO CONCEPT tutorial blocks)
 const (
 	// ModeMonitor is the 6502 debugging mode.
 	ModeMonitor REPLMode = iota
@@ -154,14 +174,20 @@ const (
 //   Go requires you to name the receiver explicitly:
 //     func (m REPLMode) prompt() string { switch m { ... } }
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> f994c51 (docs(go-cli): Add Python comparisons to all GO CONCEPT tutorial blocks)
 //
 // Compare with Python: Python methods always take `self` as the first
 // parameter (like Go's receiver, but always named `self`):
 //   `def prompt(self) -> str: ...`
 // Python allows adding methods to any class, including subclasses of
 // built-in types.
+<<<<<<< HEAD
 =======
 >>>>>>> 810cc4d (docs(go-cli): Add comprehensive Go tutorial comments for learning)
+=======
+>>>>>>> f994c51 (docs(go-cli): Add Python comparisons to all GO CONCEPT tutorial blocks)
 
 // prompt returns the display prompt for the current REPL mode.
 func (m REPLMode) prompt() string {
@@ -187,13 +213,19 @@ func (m REPLMode) prompt() string {
 // comes in a later phase). In Swift you'd use "_ atasciiMode: Bool" to
 // suppress the external label, but Go doesn't have external parameter names.
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> f994c51 (docs(go-cli): Add Python comparisons to all GO CONCEPT tutorial blocks)
 //
 // Compare with Python: Python uses `_` for unused parameters by
 // convention: `def run_repl(client, _atascii_mode):`. Unlike Go, Python
 // never raises errors for unused variables — it's purely a linter
 // concern (e.g., pylint W0613).
+<<<<<<< HEAD
 =======
 >>>>>>> 810cc4d (docs(go-cli): Add comprehensive Go tutorial comments for learning)
+=======
+>>>>>>> f994c51 (docs(go-cli): Add Python comparisons to all GO CONCEPT tutorial blocks)
 
 // runREPL runs the main REPL loop.
 //
@@ -218,12 +250,18 @@ func runREPL(client *atticprotocol.Client, atasciiMode bool) {
 	//   Swift: readLine() returns String? (nil on EOF)
 	//   Go:    scanner.Scan() returns bool + scanner.Text() for the string
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> f994c51 (docs(go-cli): Add Python comparisons to all GO CONCEPT tutorial blocks)
 	//
 	// Compare with Python: `for line in sys.stdin:` iterates lines (keeping
 	// `\n`). `input()` reads one line (stripping `\n`) and raises `EOFError`
 	// on EOF. Python's `input()` is closest to Go's Scanner for REPL use.
+<<<<<<< HEAD
 =======
 >>>>>>> 810cc4d (docs(go-cli): Add comprehensive Go tutorial comments for learning)
+=======
+>>>>>>> f994c51 (docs(go-cli): Add Python comparisons to all GO CONCEPT tutorial blocks)
 	scanner := bufio.NewScanner(os.Stdin)
 	mode := ModeBasic
 
@@ -233,11 +271,17 @@ func runREPL(client *atticprotocol.Client, atasciiMode bool) {
 	// We use break/return to exit the loop. Most REPLs use this pattern:
 	// loop forever, reading input and processing it, until the user quits.
 <<<<<<< HEAD
+<<<<<<< HEAD
 	//
 	// Compare with Python: `while True:` is Python's infinite loop. `break`
 	// and `return` exit it, just like in Go.
 =======
 >>>>>>> 810cc4d (docs(go-cli): Add comprehensive Go tutorial comments for learning)
+=======
+	//
+	// Compare with Python: `while True:` is Python's infinite loop. `break`
+	// and `return` exit it, just like in Go.
+>>>>>>> f994c51 (docs(go-cli): Add Python comparisons to all GO CONCEPT tutorial blocks)
 	for {
 		// Print prompt (without newline — user types on the same line)
 		fmt.Print(mode.prompt())
@@ -269,13 +313,19 @@ func runREPL(client *atticprotocol.Client, atasciiMode bool) {
 		// These are standalone functions, not methods, because Go's string
 		// type is a built-in primitive. You can't add methods to built-in types.
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> f994c51 (docs(go-cli): Add Python comparisons to all GO CONCEPT tutorial blocks)
 		//
 		// Compare with Python: Python strings have methods directly (not
 		// standalone functions): `line.strip()`, `line.startswith(".")`,
 		// `line.split()`, `" ".join(parts)`, `line.upper()`, `"sub" in line`.
 		// This is the opposite of Go — Python attaches methods to the str type.
+<<<<<<< HEAD
 =======
 >>>>>>> 810cc4d (docs(go-cli): Add comprehensive Go tutorial comments for learning)
+=======
+>>>>>>> f994c51 (docs(go-cli): Add Python comparisons to all GO CONCEPT tutorial blocks)
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
 			// GO CONCEPT: continue and break
@@ -286,13 +336,19 @@ func runREPL(client *atticprotocol.Client, atasciiMode bool) {
 			//
 			// Same semantics as Swift's continue/break/return.
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> f994c51 (docs(go-cli): Add Python comparisons to all GO CONCEPT tutorial blocks)
 			//
 			// Compare with Python: Identical keywords and semantics: `continue`,
 			// `break`, `return`. Python also has `else` clauses on loops
 			// (`for...else`, `while...else`) that run when the loop completes
 			// without `break` — a feature neither Go nor Swift has.
+<<<<<<< HEAD
 =======
 >>>>>>> 810cc4d (docs(go-cli): Add comprehensive Go tutorial comments for learning)
+=======
+>>>>>>> f994c51 (docs(go-cli): Add Python comparisons to all GO CONCEPT tutorial blocks)
 			continue
 		}
 
