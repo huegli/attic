@@ -71,25 +71,29 @@ type REPLMode int
 // at 0 and increments by 1 for each constant. It resets to 0 in each
 // new const block.
 //
-//   const (
-//       ModeMonitor REPLMode = iota  // 0
-//       ModeBasic                     // 1 (type and iota+1 carried forward)
-//       ModeDOS                       // 2
-//   )
+//	const (
+//	    ModeMonitor REPLMode = iota  // 0
+//	    ModeBasic                     // 1 (type and iota+1 carried forward)
+//	    ModeDOS                       // 2
+//	)
 //
 // The type "REPLMode" and the expression "iota" carry forward to
 // subsequent lines that omit them. This is a special Go shorthand for
 // const blocks.
 //
 // You can also do arithmetic with iota:
-//   const ( KB = 1 << (10 * (iota + 1)); MB; GB; TB )
-//   // KB=1024, MB=1048576, GB=1073741824, TB=1099511627776
+//
+//	const ( KB = 1 << (10 * (iota + 1)); MB; GB; TB )
+//	// KB=1024, MB=1048576, GB=1073741824, TB=1099511627776
 //
 // Compare to Swift: Swift enums auto-assign raw values similarly:
-//   enum Mode: Int { case monitor = 0, basic, dos }
+//
+//	enum Mode: Int { case monitor = 0, basic, dos }
 //
 // Compare with Python: Python's `enum.auto()` serves the same purpose:
-//   `class REPLMode(IntEnum): MONITOR = auto(); BASIC = auto()`
+//
+//	`class REPLMode(IntEnum): MONITOR = auto(); BASIC = auto()`
+//
 // Values start at 1 by default (not 0), but you can override with a
 // custom `_generate_next_value_` method.
 const (

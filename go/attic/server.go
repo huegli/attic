@@ -49,15 +49,17 @@ import (
 // -----------------------------------------------
 // Go's time package uses a Duration type (which is really an int64 counting
 // nanoseconds). You create durations by multiplying a number with a time unit:
-//   4 * time.Second       → 4 seconds (4,000,000,000 nanoseconds)
-//   100 * time.Millisecond → 100 milliseconds
+//
+//	4 * time.Second       → 4 seconds (4,000,000,000 nanoseconds)
+//	100 * time.Millisecond → 100 milliseconds
 //
 // This is type-safe: you can't accidentally mix seconds and milliseconds
 // because the compiler enforces the Duration type.
 //
 // Compare to Swift:
-//   Swift: TimeInterval is a Double (seconds), so 4.0 means 4 seconds
-//   Go:    time.Duration is an int64 (nanoseconds), written as 4 * time.Second
+//
+//	Swift: TimeInterval is a Double (seconds), so 4.0 means 4 seconds
+//	Go:    time.Duration is an int64 (nanoseconds), written as 4 * time.Second
 //
 // Compare with Python: Python uses `datetime.timedelta` for durations:
 // `timedelta(seconds=4)`, `timedelta(milliseconds=100)`. These support
