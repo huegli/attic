@@ -163,14 +163,17 @@ struct AtticCLI {
         case basic
         case dos
 
-        var prompt: String {
+        /// Returns the prompt string for this mode.
+        ///
+        /// - Parameter drive: Current drive number (only used in DOS mode).
+        func prompt(drive: Int = 1) -> String {
             switch self {
             case .monitor:
                 return "[monitor] > "
             case .basic:
                 return "[basic] > "
             case .dos:
-                return "[dos] D1:> "
+                return "[dos] D\(drive):> "
             }
         }
     }
@@ -197,6 +200,7 @@ struct AtticCLI {
         let lineEditor = LineEditor()
 
         var currentMode = SocketREPLMode.basic
+        var currentDrive = 1
         var shouldContinue = true
 
         // Interactive assembly sub-mode state.
@@ -213,7 +217,7 @@ struct AtticCLI {
             if inAssemblyMode {
                 prompt = "$\(String(format: "%04X", assemblyAddress)): "
             } else {
-                prompt = currentMode.prompt
+                prompt = currentMode.prompt(drive: currentDrive)
             }
 
             guard let line = lineEditor.getLine(prompt: prompt) else {
@@ -390,6 +394,23 @@ struct AtticCLI {
                                 // Loop continues — assembly prompt handled by lineEditor.getLine()
                                 continue
                             }
+                        }
+
+                        // Track drive changes from successful "cd" commands.
+                        // Server responds with "D<n>:" (e.g. "D2:") on success.
+                        if cliCommand.hasPrefix("dos cd "),
+                           data.hasPrefix("D"), data.hasSuffix(":"),
+                           let driveNum = Int(data.dropFirst().dropLast()) {
+                            currentDrive = driveNum
+                        }
+
+                        // If the current drive was unmounted, reset to drive 1
+                        // to stay in sync with the server's DiskManager.
+                        if cliCommand.hasPrefix("unmount "),
+                           let driveStr = cliCommand.split(separator: " ").last,
+                           let unmountedDrive = Int(driveStr),
+                           unmountedDrive == currentDrive {
+                            currentDrive = 1
                         }
 
                         // Handle multi-line responses
