@@ -363,6 +363,7 @@ struct AtticCLI {
                        lowerTrimmed == ".warmstart" ||
                        lowerTrimmed == ".screenshot" ||
                        lowerTrimmed.hasPrefix(".screenshot ") ||
+                       lowerTrimmed == ".boot" ||
                        lowerTrimmed.hasPrefix(".boot ") {
                         // Forward to server
                         break
@@ -476,8 +477,10 @@ struct AtticCLI {
                     let path = String(trimmed.dropFirst(12))
                     return ["state load \(path)"]
                 }
-                // Handle .boot <path>
-                if lowerTrimmed.hasPrefix(".boot ") {
+                // Handle .boot [path]
+                if lowerTrimmed == ".boot" {
+                    return ["boot"]
+                } else if lowerTrimmed.hasPrefix(".boot ") {
                     let path = String(trimmed.dropFirst(6))
                     return ["boot \(path)"]
                 }
