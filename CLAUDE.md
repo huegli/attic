@@ -258,6 +258,11 @@ make test-protocol # AESP protocol (messages, server, E2E) (~15s)
 make test-cli      # CLI parsing, sockets, subprocesses (~37s)
 make test-server   # AtticServer subprocess tests (~7s)
 make test          # Full suite (~61s)
+
+# Go CLI targets
+make go-build      # Build Go CLI to .build/attic-go
+make go-test       # Run Go CLI + protocol tests (~13s, 342 tests)
+make go-clean      # Clean Go build artifacts
 ```
 
 ### Using Xcode

@@ -1,23 +1,26 @@
 // =============================================================================
-// repl.go - REPL Loop with Line Editor Integration
+// repl.go - REPL Loop with Line Editor, Command Translation, and Assembly Mode
 // =============================================================================
 //
 // This file implements the REPL (Read-Eval-Print Loop) for the Attic CLI.
 // The REPL reads user input via the LineEditor (see lineeditor.go), processes
-// local dot-commands (mode switching, help, quit), and sends protocol commands
-// to the AtticServer via a Unix socket client.
+// local dot-commands (mode switching, help, quit), translates mode-specific
+// commands into protocol format (see translate.go), and sends them to
+// AtticServer via a Unix socket client.
 //
 // The REPL operates in three modes:
 //   - Monitor: 6502 debugging (disassembly, breakpoints, memory inspection)
 //   - BASIC:   BASIC program entry and execution
 //   - DOS:     Disk image management
 //
+// Additionally, the REPL supports an interactive assembly sub-mode that is
+// entered when the server responds to an "assemble $XXXX" command with
+// "ASM $XXXX". In this mode, the prompt changes to "$XXXX: " and each
+// line is sent as "asm input <instruction>" until the user enters a blank
+// line or "." to exit.
+//
 // Mode switching is handled locally (no server round-trip). Protocol commands
 // are sent as raw text strings via the CLI text protocol.
-//
-// Phase 2 integration: The REPL now uses LineEditor for input, providing
-// Emacs keybindings, persistent history, and Ctrl-R search in interactive
-// mode, and clean line reading for piped/comint input.
 //
 // =============================================================================
 
@@ -189,9 +192,14 @@ func (m REPLMode) prompt() string {
 // runREPL runs the main REPL loop.
 //
 // It reads user input via the LineEditor, processes local dot-commands
-// (mode switching, help, quit), and sends everything else to the server
-// as raw protocol commands. Responses are displayed with multi-line
-// expansion (replacing Record Separator characters with newlines).
+// (mode switching, help, quit), translates mode-specific commands via
+// translateToProtocol (see translate.go), and sends them to the server.
+// Responses are displayed with multi-line expansion (replacing Record
+// Separator characters with newlines).
+//
+// The REPL supports an interactive assembly sub-mode: when the server
+// responds with "ASM $XXXX", the prompt changes to "$XXXX: " and each
+// line is sent as "asm input <instruction>" until a blank line or ".".
 //
 // The REPL exits on:
 //   - .quit command
@@ -200,6 +208,27 @@ func (m REPLMode) prompt() string {
 //   - LineEditor read error
 func runREPL(client *atticprotocol.Client, editor *LineEditor, atasciiMode bool) {
 	mode := ModeBasic
+
+	// GO CONCEPT: State Machine for Assembly Sub-Mode
+	// ------------------------------------------------
+	// The assembly sub-mode is a state machine embedded in the REPL loop.
+	// Two boolean/integer variables track the state:
+	//   - inAssemblyMode: whether we're currently in assembly mode
+	//   - assemblyAddress: the next address for assembly prompt display
+	//
+	// When inAssemblyMode is true, the REPL:
+	//   - Shows "$XXXX: " prompts instead of mode prompts
+	//   - Sends "asm input <instruction>" for each line
+	//   - Sends "asm end" on blank line or "." to exit
+	//   - Extracts the next address from the server response
+	//
+	// Compare with Swift: The Swift CLI uses the same approach with
+	// `var inAssemblyMode = false` and `var assemblyAddress: UInt16 = 0`.
+	//
+	// Compare with Python: Python would use instance variables on a
+	// REPL class: `self.in_assembly_mode = False`.
+	inAssemblyMode := false
+	var assemblyAddress uint16
 
 	// GO CONCEPT: Infinite Loops
 	// ---------------------------
@@ -210,11 +239,20 @@ func runREPL(client *atticprotocol.Client, editor *LineEditor, atasciiMode bool)
 	// Compare with Python: `while True:` is Python's infinite loop. `break`
 	// and `return` exit it, just like in Go.
 	for {
+		// Determine the prompt based on current state.
+		// In assembly mode, show the next address; otherwise show the mode.
+		var prompt string
+		if inAssemblyMode {
+			prompt = fmt.Sprintf("$%04X: ", assemblyAddress)
+		} else {
+			prompt = mode.prompt()
+		}
+
 		// Read a line of input using the LineEditor.
 		// In interactive mode, this provides Emacs keybindings, history
 		// navigation (up/down arrows, Ctrl-R), and persistent history.
 		// In non-interactive mode, it prints the prompt and reads from stdin.
-		line, err := editor.GetLine(mode.prompt())
+		line, err := editor.GetLine(prompt)
 		if err != nil {
 			// GO CONCEPT: Comparing Errors with ==
 			// --------------------------------------
@@ -231,6 +269,11 @@ func runREPL(client *atticprotocol.Client, editor *LineEditor, atasciiMode bool)
 			//   except EOFError: break
 			if err == io.EOF {
 				// Clean EOF — user pressed Ctrl-D or piped input ended.
+				// If in assembly mode, end the session cleanly.
+				if inAssemblyMode {
+					_, _ = client.SendRaw("asm end")
+					inAssemblyMode = false
+				}
 				fmt.Println()
 				return
 			}
@@ -239,21 +282,62 @@ func runREPL(client *atticprotocol.Client, editor *LineEditor, atasciiMode bool)
 			return
 		}
 
+		// --- Interactive Assembly Sub-Mode ---
+		// When active, user input is routed to "asm input" / "asm end"
+		// instead of being interpreted as normal REPL commands.
+		if inAssemblyMode {
+			trimmed := strings.TrimSpace(line)
+
+			// Empty line or "." exits assembly mode.
+			if trimmed == "" || trimmed == "." {
+				resp, err := client.SendRaw("asm end")
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				} else if resp.IsOK() {
+					if resp.Data != "" {
+						fmt.Println(resp.Data)
+					}
+				} else {
+					fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Data)
+				}
+				inAssemblyMode = false
+				continue
+			}
+
+			// Feed instruction to the active assembly session.
+			// Response format: "formatted line\x1E$XXXX"
+			// The first part is the assembled output to display.
+			// The second part (after separator) is the next address.
+			resp, err := client.SendRaw("asm input " + trimmed)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				continue
+			}
+
+			if resp.IsOK() {
+				// Split on Record Separator to get assembled line + next address.
+				parts := strings.SplitN(resp.Data, atticprotocol.MultiLineSeparator, 2)
+				// Print the assembled line.
+				fmt.Println(parts[0])
+				// Extract next address for the prompt.
+				if len(parts) > 1 {
+					if addr, ok := parseHexAddress(parts[1]); ok {
+						assemblyAddress = addr
+					}
+				}
+			} else {
+				// Assembly error — session stays alive, user can retry.
+				fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Data)
+			}
+			continue
+		}
+
+		// --- Normal Mode ---
 		// GO CONCEPT: String Functions
 		// ----------------------------
 		// Go's strings package provides functions (not methods) for string
 		// manipulation. Unlike Swift's "string.trimmingCharacters(in:)",
 		// Go uses "strings.TrimSpace(string)".
-		//
-		// Common string functions:
-		//   strings.TrimSpace(s)         — remove leading/trailing whitespace
-		//   strings.HasPrefix(s, prefix) — check if s starts with prefix
-		//   strings.Split(s, sep)        — split into []string
-		//   strings.Join(parts, sep)     — join []string into one string
-		//   strings.ReplaceAll(s, old, new) — replace all occurrences
-		//   strings.ToUpper(s)           — uppercase
-		//   strings.Contains(s, substr)  — check if s contains substr
-		//   strings.ToLower(s)           — lowercase
 		//
 		// These are standalone functions, not methods, because Go's string
 		// type is a built-in primitive. You can't add methods to built-in types.
@@ -291,7 +375,6 @@ func runREPL(client *atticprotocol.Client, editor *LineEditor, atasciiMode bool)
 		//
 		// Compare with Python: Python's lower() method:
 		//   match line.lower(): case ".quit": ...
-		// Python also has casefold() for more aggressive Unicode lowering.
 		lowerLine := strings.ToLower(line)
 
 		// Handle local dot-commands (processed by the CLI, not sent to server).
@@ -304,16 +387,8 @@ func runREPL(client *atticprotocol.Client, editor *LineEditor, atasciiMode bool)
 		// case skips the server-send logic below and returns to the top of
 		// the REPL loop.
 		//
-		// Compare with Swift: Swift's switch with string patterns:
-		//   switch line.lowercased() {
-		//       case ".quit": return
-		//       case ".monitor": mode = .monitor
-		//   }
-		//
-		// Compare with Python: Python 3.10+ match statement:
-		//   match line.lower():
-		//       case ".quit": return
-		//       case ".monitor": mode = Mode.MONITOR
+		// Compare with Swift: Swift's switch with string patterns.
+		// Compare with Python: Python 3.10+ match statement.
 		handled := true
 		switch lowerLine {
 		case ".quit":
@@ -332,8 +407,7 @@ func runREPL(client *atticprotocol.Client, editor *LineEditor, atasciiMode bool)
 			mode = ModeDOS
 			fmt.Println("Switched to DOS mode")
 		case ".help":
-			fmt.Println("Help system will be implemented in Phase 6.")
-			fmt.Println("Dot-commands: .monitor .basic .dos .quit .shutdown .help")
+			printHelp(mode, "")
 		default:
 			handled = false
 		}
@@ -342,55 +416,79 @@ func runREPL(client *atticprotocol.Client, editor *LineEditor, atasciiMode bool)
 			continue
 		}
 
-		// GO CONCEPT: strings.HasPrefix for Command Routing
-		// -------------------------------------------------
-		// HasPrefix checks if a string starts with a given prefix. It's
-		// the Go equivalent of Swift's hasPrefix(_:) method. We use it
-		// here to detect dot-commands that take arguments (like ".help topic"),
-		// which can't be matched with a simple equality check.
-		//
-		// Compare with Swift: `line.hasPrefix(".help ")` — method on String.
-		// Compare with Python: `line.startswith(".help ")` — method on str.
+		// Handle .help with a topic argument.
 		if strings.HasPrefix(lowerLine, ".help ") {
-			// Help with topic — extract the topic after ".help "
 			topic := strings.TrimSpace(line[6:])
-			fmt.Printf("Help for %q will be implemented in Phase 6.\n", topic)
+			printHelp(mode, topic)
 			continue
 		}
 
-		// Send as raw protocol command (no translation yet — the full
-		// command translator will be implemented in Phase 5).
-		//
-		// SendRaw wraps the input as "CMD:<input>\n" and waits for a
-		// response from the server.
-		resp, err := client.SendRaw(line)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			continue
+		// Handle other dot-commands that forward to the server.
+		// These are recognized by the REPL but translated by translateToProtocol.
+		if strings.HasPrefix(line, ".") {
+			dotLower := strings.ToLower(line)
+			isForwarded := dotLower == ".status" ||
+				dotLower == ".screen" ||
+				dotLower == ".reset" ||
+				dotLower == ".warmstart" ||
+				dotLower == ".screenshot" ||
+				strings.HasPrefix(dotLower, ".screenshot ") ||
+				strings.HasPrefix(dotLower, ".state ") ||
+				strings.HasPrefix(dotLower, ".boot ")
+
+			if !isForwarded {
+				fmt.Fprintf(os.Stderr, "Error: Unknown command: %s\n", line)
+				continue
+			}
 		}
 
-		// Display response, expanding multi-line separators.
-		//
-		// GO CONCEPT: Protocol Separator Handling
-		// ----------------------------------------
-		// The CLI text protocol uses ASCII Record Separator (0x1E, \x1E)
-		// to encode multiple lines in a single response. We replace them
-		// with actual newlines for display. This avoids the complexity of
-		// a streaming protocol while still supporting multi-line output
-		// like disassembly listings and memory dumps.
-		//
-		// Compare with Swift: Swift uses the same approach:
-		//   output.replacingOccurrences(of: "\u{1E}", with: "\n")
-		//
-		// Compare with Python: Python string replacement:
-		//   output.replace("\x1e", "\n")
-		if resp.IsOK() {
-			if resp.Data != "" {
+		// Translate REPL command to one or more CLI protocol commands.
+		// Some monitor commands (e.g. `g $addr`) expand to multiple
+		// sequential protocol commands.
+		cliCommands := translateToProtocol(line, mode, atasciiMode)
+
+		// Send each command to the server in order.
+		for _, cliCmd := range cliCommands {
+			resp, err := client.SendRaw(cliCmd)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				continue
+			}
+
+			// Display response.
+			if resp.IsOK() {
+				if resp.Data == "" {
+					continue
+				}
+
+				// Check if the server started an interactive assembly session.
+				// Response format: "ASM $XXXX"
+				if strings.HasPrefix(resp.Data, "ASM $") {
+					if addr, ok := parseHexAddress(resp.Data[4:]); ok {
+						inAssemblyMode = true
+						assemblyAddress = addr
+						continue
+					}
+				}
+
+				// Handle multi-line responses.
+				//
+				// GO CONCEPT: Protocol Separator Handling
+				// ----------------------------------------
+				// The CLI text protocol uses ASCII Record Separator (0x1E)
+				// to encode multiple lines in a single response. We replace
+				// them with actual newlines for display.
+				//
+				// Compare with Swift:
+				//   output.replacingOccurrences(of: "\u{1E}", with: "\n")
+				//
+				// Compare with Python:
+				//   output.replace("\x1e", "\n")
 				output := strings.ReplaceAll(resp.Data, atticprotocol.MultiLineSeparator, "\n")
 				fmt.Println(output)
+			} else {
+				fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Data)
 			}
-		} else {
-			fmt.Fprintf(os.Stderr, "Error: %s\n", resp.Data)
 		}
 	}
 }
