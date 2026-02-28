@@ -52,13 +52,18 @@ struct AtticApp: App {
 
     /// The main scene of the application.
     ///
-    /// A WindowGroup creates a new window for each scene. For a single-window
-    /// app like an emulator, this typically means one main window.
+    /// Uses a single WindowGroup for the emulator display.
+    /// `.handlesExternalEvents(matching: ["*"])` tells SwiftUI to reuse the
+    /// existing window when files are opened from Finder instead of creating
+    /// a new window. Combined with `LSMultipleInstancesProhibited` in
+    /// Info.plist, this ensures double-clicking an .atr file loads it into
+    /// the running instance rather than launching a second copy.
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environmentObject(viewModel)
         }
+        .handlesExternalEvents(matching: Set(["*"]))
         .windowStyle(.hiddenTitleBar)  // For a cleaner look
         .defaultSize(width: 1008, height: 720)  // 336x240 * 3
         .commands {

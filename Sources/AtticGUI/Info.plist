@@ -50,6 +50,12 @@
 	<key>LSFileQuarantineEnabled</key>
 	<false/>
 
+	<!-- Prevent Finder from launching a second instance when opening files.
+	     Instead, file-open events are routed to the running instance via
+	     NSApplicationDelegate.application(_:open:). -->
+	<key>LSMultipleInstancesProhibited</key>
+	<true/>
+
 	<!--
 	  Document types: file associations for Finder "Open With" and drag-and-drop.
 	  Each entry maps a file extension to a role so macOS knows Attic can open it.
