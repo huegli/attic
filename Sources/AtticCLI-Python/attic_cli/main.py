@@ -54,21 +54,10 @@ def cli(silent: bool, socket_path: str | None, headless: bool) -> None:
     # Show banner
     _print_banner(client)
 
-    # Hand off to REPL (Phase 2)
-    try:
-        from .repl import run_repl
+    # Hand off to REPL
+    from .repl import run_repl
 
-        run_repl(client)
-    except ImportError:
-        # Phase 1: REPL not yet implemented — just show status and exit
-        console.print("[dim]REPL not yet implemented. Showing server status.[/dim]")
-        try:
-            status = client.send_raw("status")
-            console.print(f"\n{status}")
-        except Exception as exc:
-            console.print(f"[red]Error:[/red] {exc}")
-        finally:
-            client.disconnect()
+    run_repl(client)
 
 
 def _connect_to_socket(client: CLISocketClient, path: str) -> None:
