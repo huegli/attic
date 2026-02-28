@@ -14,6 +14,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Moved `ALTIRRA.md` to `docs/ALTIRRA.md`
 - Simplified MADS install instructions to macOS-only (removed Linux and pre-built binary options)
 
+## [0.2.1] - 2026-02-28
+
+### Fixed
+- CLI: Handle shell escape characters in file path commands (e.g., paths with spaces or special characters)
+- CLI: `.boot` with no arguments no longer errors unexpectedly
+- CLI: DOS prompt now reflects the current drive after `cd`
+- GUI: Double-clicking an Atari file in Finder routes to the running instance instead of launching a second copy
+- GUI: Crop overscan margins to eliminate screen edge artifacts
+
 ## [0.2.0] - 2026-02-15
 
 ### Added
