@@ -27,7 +27,7 @@ terminal capabilities including true color, inline images, Unicode, and styled t
 | **CLI argument parsing** | `click` | Mature, composable, supports `--help` generation; lighter than `typer` |
 | **Line editing / REPL** | `prompt_toolkit` | Full readline replacement with history, keybindings, multi-line, tab completion, syntax highlighting |
 | **Terminal output** | `rich` | True color output, styled tables, syntax highlighting, hex dumps, ATASCII rendering |
-| **Inline images** | `python-imgcat` + custom Kitty protocol | Inline screenshot display: iTerm2 protocol via `imgcat`, Kitty graphics protocol (Ghostty) via custom module |
+| **Inline images** | Kitty graphics protocol (custom, ~30 LOC) | Both iTerm2 and Ghostty support Kitty graphics protocol — single implementation, no extra dependency |
 | **Socket client** | stdlib `socket` | Reuse pattern from `AtticMCP-Python/cli_client.py`; no external deps needed |
 | **Async events** | `threading` | Background thread to read async `EVENT:` messages from socket; stdlib only |
 | **Testing** | `pytest` | Standard Python test framework |
@@ -39,8 +39,11 @@ terminal capabilities including true color, inline images, Unicode, and styled t
 | Feature | iTerm2 | Ghostty | Usage |
 |---------|--------|---------|-------|
 | **True color (24-bit)** | Yes | Yes | Syntax-highlighted disassembly, colored register diffs, ATASCII rendering |
-| **Inline images** | ESC ] 1337 (native) | Kitty graphics protocol | `.screenshot` displays emulator screen inline in terminal |
+| **Kitty graphics protocol** | Yes | Yes | `.screenshot` displays emulator screen inline in terminal |
 | **OSC 8 hyperlinks** | Yes | Yes | Clickable file paths in disk directory listings and error messages |
+| **OSC 9;4 progress bars** | Yes | Yes (v1.2+) | Native title-bar progress during long operations (disk format, state load) |
+| **OSC 9/777 notifications** | Yes | Yes | Desktop notification when long-running BASIC program completes |
+| **OSC 52 clipboard** | Yes | Yes | Copy disassembly or BASIC listings to system clipboard |
 | **Unicode** | Full | Full | ATASCII graphics characters, box-drawing for tables, status indicators |
 | **Styled underlines** | Yes | Yes | Curly underlines for error highlights in assembly mode |
 | **24-bit background colors** | Yes | Yes | Memory dump with heat-map coloring for non-zero bytes |
@@ -70,7 +73,8 @@ Sources/AtticCLI-Python/
 │   ├── translator.py           # Command-to-protocol translation (maps user input → CMD: strings)
 │   ├── help.py                 # Help text for all commands (mirrors Swift help system)
 │   ├── display.py              # Output formatting: hex dumps, ATASCII, true color, multi-line
-│   ├── terminal_images.py      # Inline image display (auto-detects iTerm2 vs Kitty/Ghostty)
+│   ├── terminal_images.py      # Inline image display via Kitty graphics protocol
+│   ├── terminal_osc.py         # OSC helpers: hyperlinks, notifications, progress, clipboard
 │   ├── server_launcher.py      # Find and launch AtticServer subprocess
 │   └── history.py              # History file management (~/.attic_history)
 └── tests/
@@ -111,12 +115,18 @@ Sources/AtticCLI-Python/
 - `attic_cli/main.py` — Click entry point:
   - `@click.command()` with options: `--silent`, `--socket PATH`, `--headless`, `--version`, `--help`
   - Connect to server (discover or launch), then hand off to REPL
-- `attic_cli/terminal_images.py` — Terminal image display:
-  - Auto-detect terminal: check `$TERM_PROGRAM` for `iTerm.app` and `$TERM` for `xterm-ghostty`
-  - `display_inline_image(path)` — render PNG inline using detected protocol
-  - iTerm2: ESC ] 1337 inline image protocol (via `imgcat` library)
-  - Ghostty: Kitty graphics protocol (base64-encoded pixel data via APC sequences)
+- `attic_cli/terminal_images.py` — Inline image display via Kitty graphics protocol:
+  - `display_inline_image(path)` — render PNG inline in terminal
+  - Both iTerm2 and Ghostty support the Kitty graphics protocol — single implementation
+  - Implementation: base64-encode PNG file, send via APC escape sequences (`\033_Gf=100,a=T;{data}\033\\`)
+  - Chunk large images into 4096-byte segments per Kitty protocol spec
+  - `supports_kitty_graphics()` — detect support via `$TERM` / `$TERM_PROGRAM` env vars
   - Fallback: print file path if terminal doesn't support inline images
+- `attic_cli/terminal_osc.py` — OSC escape sequence helpers:
+  - `osc8_link(url, text)` — clickable hyperlink (OSC 8)
+  - `osc9_notify(message)` — desktop notification (OSC 9)
+  - `osc9_4_progress(value, max)` — title-bar progress bar (OSC 9;4)
+  - `osc52_copy(text)` — copy to system clipboard (OSC 52)
 
 **Tests**: `test_protocol.py` — protocol constants, response parsing
 **Milestone**: `uv run attic-py --version` prints version; `uv run attic-py` connects and shows banner
@@ -252,11 +262,13 @@ Sources/AtticCLI-Python/
   - Error messages with styled suggestions using `rich.console.Console`
   - File paths as OSC 8 clickable hyperlinks (both iTerm2 and Ghostty support this)
 - `attic_cli/terminal_images.py` — Inline screenshot display:
-  - `.screenshot` now renders the Atari screen inline in the terminal
-  - Auto-detect protocol based on `$TERM_PROGRAM` / `$TERM`
-  - iTerm2: `imgcat` library for ESC ] 1337 protocol
-  - Ghostty: Custom Kitty graphics protocol implementation (base64 PNG via APC escape)
-  - Fallback: save file and print path
+  - `.screenshot` renders the Atari screen inline in the terminal
+  - Single protocol: Kitty graphics protocol (supported by both iTerm2 and Ghostty)
+  - Fallback: save file and print path as OSC 8 clickable link
+- `attic_cli/terminal_osc.py` — Enhanced terminal integration:
+  - OSC 9;4 progress bar during `format` and `state load` operations
+  - OSC 9 desktop notification when long-running BASIC program completes
+  - OSC 52 clipboard copy for `.copy` command (copy disassembly/listing to clipboard)
 
 **Tests**: `test_help.py` — help text for all commands exists, `test_display.py` — ATASCII rendering, `test_terminal_images.py` — protocol detection
 **Milestone**: `attic-py` is visually *superior* to the Swift CLI with modern terminal features
@@ -307,15 +319,25 @@ terminals (iTerm2, Ghostty). This unlocks true color, inline images, styled text
 and clickable hyperlinks. Users who need Emacs integration can continue using the
 Swift CLI.
 
-### 2. Inline screenshots via terminal graphics protocols
+### 2. Kitty graphics protocol for inline images
 The `.screenshot` command displays the Atari screen inline in the terminal instead
-of just saving a file. Two protocols are implemented:
-- **iTerm2**: ESC ] 1337 inline image protocol (via `python-imgcat` library)
-- **Ghostty**: Kitty graphics protocol (custom implementation — base64-encoded
-  PNG data sent via APC escape sequences)
+of just saving a file. Both iTerm2 and Ghostty support the **Kitty graphics protocol**,
+so a single ~30-line implementation covers both terminals. No external library needed —
+just base64-encode the PNG and send via APC escape sequences.
 
-Terminal detection uses `$TERM_PROGRAM` (iTerm2 sets `iTerm.app`) and `$TERM`
-(Ghostty sets `xterm-ghostty`). Fallback: save file and print path.
+The implementation follows the Kitty graphics protocol spec: images are transmitted
+as base64-encoded data in chunked 4096-byte segments. The protocol uses
+`\033_G<control-data>;<payload>\033\\` escape sequences.
+
+Terminal detection uses `$TERM_PROGRAM` and `$TERM` environment variables.
+Fallback: save file and print path as an OSC 8 clickable hyperlink.
+
+### 2a. OSC escape sequences for terminal integration
+Beyond images, several OSC sequences enhance the experience:
+- **OSC 8**: Clickable hyperlinks for file paths (e.g., disk directory, error locations)
+- **OSC 9;4**: Native progress bar in title bar during disk format / state load
+- **OSC 9**: Desktop notification when a long-running BASIC program completes
+- **OSC 52**: Copy disassembly or BASIC listing to system clipboard
 
 ### 3. Reuse existing socket client pattern
 The `AtticMCP-Python/cli_client.py` already implements the socket protocol correctly.
@@ -373,7 +395,6 @@ dependencies = [
     "click>=8.1",
     "prompt-toolkit>=3.0",
     "rich>=13.0",
-    "imgcat>=0.5",
 ]
 
 [project.scripts]
@@ -390,12 +411,13 @@ build-backend = "hatchling.build"
 ```
 
 **Dependency notes**:
-- `imgcat` — Python wrapper for iTerm2's inline image protocol. Used for inline
-  screenshot display. Lightweight, no heavy dependencies.
-- Kitty graphics protocol for Ghostty is implemented directly (just base64 + escape
-  sequences) — no additional dependency needed.
+- Only 3 runtime dependencies — all well-maintained, widely-used packages.
+- Inline images use the Kitty graphics protocol implemented directly (~30 LOC,
+  just base64 + escape sequences) — no image library dependency needed.
 - `Pillow` is _not_ required — screenshots are PNG files produced by AtticServer;
-  we just need to read and transmit the bytes.
+  we just read and transmit the raw bytes.
+- OSC escape sequences (hyperlinks, notifications, progress, clipboard) are
+  implemented directly using stdlib — no additional dependencies.
 
 ---
 
@@ -403,13 +425,14 @@ build-backend = "hatchling.build"
 
 | Risk | Mitigation |
 |------|------------|
-| Kitty protocol differences between Ghostty and Kitty | Test on Ghostty specifically; avoid animation features (known divergence) |
-| iTerm2 image protocol version skew | Use `imgcat` library which handles protocol negotiation |
+| Kitty protocol differences between Ghostty and Kitty terminal | Test on Ghostty specifically; avoid animation features (known divergence between Ghostty and Kitty) |
+| Kitty protocol support in iTerm2 | iTerm2 added Kitty graphics support; test with current version; fallback to file path if image display fails |
 | Event thread race conditions | Use `queue.Queue` (thread-safe) for event buffering |
 | Socket client diverges from Swift | Reuse proven pattern from AtticMCP-Python |
 | ATASCII rendering differences | Port exact character mapping from Swift `atasciiGraphicsTable`; use true color for inverse video |
 | Interactive assembly state | Track in `MonitorMode`, clean up on mode switch |
 | Terminal detection in nested sessions (tmux, ssh) | Check `$TERM_PROGRAM`, `$TERM`, and `$LC_TERMINAL` for robust detection |
+| OSC sequence support varies | All target OSC sequences (8, 9, 9;4, 52) are well-supported by both iTerm2 and Ghostty; graceful degradation for unknown terminals |
 | History file format mismatch | Test interop with Swift CLI's history file |
 
 ---
