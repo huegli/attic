@@ -62,8 +62,8 @@ def find_server_executable() -> str | None:
 
     # 2. Swift build directories (relative to project root)
     # Walk up from the package directory to find the project root
-    pkg_dir = Path(__file__).resolve().parent.parent  # attic_cli -> AtticCLI-Python
-    project_root = pkg_dir.parent.parent  # AtticCLI-Python -> Sources -> attic
+    pkg_dir = Path(__file__).resolve().parent.parent  # attic_cli -> AtticCLI
+    project_root = pkg_dir.parent.parent  # AtticCLI -> Python -> attic
     for build_dir in ["release", "debug"]:
         candidate = project_root / ".build" / build_dir / name
         if candidate.is_file() and os.access(candidate, os.X_OK):

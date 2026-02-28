@@ -1,6 +1,6 @@
 """Unix domain socket client for communicating with AtticServer.
 
-Adapted from AtticMCP-Python/attic_mcp/cli_client.py with additions for
+Adapted from AtticMCP/attic_mcp/cli_client.py with additions for
 background event handling and interactive REPL use.
 """
 

@@ -139,7 +139,7 @@ def _try_launch_server() -> None:
     if exe is None:
         # Check common locations. The first entry is bundle-relative so the MCP
         # server can find AtticServer when running from within Attic.app:
-        #   Contents/Resources/AtticMCP-Python/attic_mcp/server.py
+        #   Contents/Resources/AtticMCP/attic_mcp/server.py
         #     -> ../../MacOS/AtticServer  (i.e. Contents/MacOS/AtticServer)
         _bundle_path = os.path.normpath(
             os.path.join(os.path.dirname(__file__), "..", "..", "MacOS", "AtticServer")

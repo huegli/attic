@@ -7,7 +7,7 @@
 swift run AtticServer
 
 # Terminal 2: Run the Python CLI
-cd Sources/AtticCLI-Python
+cd Python/AtticCLI
 uv run attic-py
 ```
 

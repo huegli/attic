@@ -3,7 +3,7 @@
 ## Overview
 
 Port the Attic CLI (`Sources/AtticCLI/`) from Swift to Python 3.13, producing a
-new `Sources/AtticCLI-Python/` package managed with `uv`. The Python CLI will be
+new `Python/AtticCLI/` package managed with `uv`. The Python CLI will be
 a **modern replacement** for the Swift CLI — same commands, same socket protocol,
 but with enhanced terminal output leveraging modern emulators like **iTerm2** and
 **Ghostty**. The Swift CLI remains unchanged; users choose which to run.
@@ -23,12 +23,12 @@ terminal capabilities including true color, inline images, Unicode, and styled t
 
 | Concern | Package | Rationale |
 |---------|---------|-----------|
-| **Environment/packaging** | `uv` + `pyproject.toml` | Fast, modern Python tooling; already used by AtticMCP-Python |
+| **Environment/packaging** | `uv` + `pyproject.toml` | Fast, modern Python tooling; already used by AtticMCP |
 | **CLI argument parsing** | `click` | Mature, composable, supports `--help` generation; lighter than `typer` |
 | **Line editing / REPL** | `prompt_toolkit` | Full readline replacement with history, keybindings, multi-line, tab completion, syntax highlighting |
 | **Terminal output** | `rich` | True color output, styled tables, syntax highlighting, hex dumps, ATASCII rendering |
 | **Inline images** | Kitty graphics protocol (custom, ~30 LOC) | Both iTerm2 and Ghostty support Kitty graphics protocol — single implementation, no extra dependency |
-| **Socket client** | stdlib `socket` | Reuse pattern from `AtticMCP-Python/cli_client.py`; no external deps needed |
+| **Socket client** | stdlib `socket` | Reuse pattern from `AtticMCP/cli_client.py`; no external deps needed |
 | **Async events** | `threading` | Background thread to read async `EVENT:` messages from socket; stdlib only |
 | **Testing** | `pytest` | Standard Python test framework |
 
@@ -53,14 +53,14 @@ terminal capabilities including true color, inline images, Unicode, and styled t
 ## Project Structure
 
 ```
-Sources/AtticCLI-Python/
+Python/AtticCLI/
 ├── pyproject.toml              # uv project: deps, entry point, build system
 ├── README.md                   # Usage and differences from Swift CLI
 ├── attic_cli/
 │   ├── __init__.py             # Package marker, version constant
 │   ├── __main__.py             # `python -m attic_cli` entry point
 │   ├── main.py                 # Click CLI entry point, argument parsing
-│   ├── cli_client.py           # Socket client (adapted from AtticMCP-Python)
+│   ├── cli_client.py           # Socket client (adapted from AtticMCP)
 │   ├── protocol.py             # Protocol constants, command enum, response parser
 │   ├── repl.py                 # REPL loop: prompt_toolkit integration, mode dispatch
 │   ├── modes/
@@ -105,7 +105,7 @@ Sources/AtticCLI-Python/
   - Socket path pattern, timeouts
   - `CLIResponse` dataclass (success/error, payload, is_multiline)
   - Response parser function
-- `attic_cli/cli_client.py` — Adapt from `AtticMCP-Python/cli_client.py`:
+- `attic_cli/cli_client.py` — Adapt from `AtticMCP/cli_client.py`:
   - `CLISocketClient` class with `discover_socket()`, `connect()`, `disconnect()`, `send()`
   - Add background event reader thread (reads `EVENT:` lines, queues them)
   - Add `drain_events()` to check for pending events
@@ -340,7 +340,7 @@ Beyond images, several OSC sequences enhance the experience:
 - **OSC 52**: Copy disassembly or BASIC listing to system clipboard
 
 ### 3. Reuse existing socket client pattern
-The `AtticMCP-Python/cli_client.py` already implements the socket protocol correctly.
+The `AtticMCP/cli_client.py` already implements the socket protocol correctly.
 The new CLI adapts this with additions for event handling and interactive use.
 
 ### 4. prompt_toolkit for rich interactive input
@@ -428,7 +428,7 @@ build-backend = "hatchling.build"
 | Kitty protocol differences between Ghostty and Kitty terminal | Test on Ghostty specifically; avoid animation features (known divergence between Ghostty and Kitty) |
 | Kitty protocol support in iTerm2 | iTerm2 added Kitty graphics support; test with current version; fallback to file path if image display fails |
 | Event thread race conditions | Use `queue.Queue` (thread-safe) for event buffering |
-| Socket client diverges from Swift | Reuse proven pattern from AtticMCP-Python |
+| Socket client diverges from Swift | Reuse proven pattern from AtticMCP |
 | ATASCII rendering differences | Port exact character mapping from Swift `atasciiGraphicsTable`; use true color for inverse video |
 | Interactive assembly state | Track in `MonitorMode`, clean up on mode switch |
 | Terminal detection in nested sessions (tmux, ssh) | Check `$TERM_PROGRAM`, `$TERM`, and `$LC_TERMINAL` for robust detection |

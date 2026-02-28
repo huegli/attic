@@ -6,7 +6,7 @@ This document describes how to use the AtticMCP server to interact with the Atar
 
 AtticMCP is a Model Context Protocol (MCP) server that exposes the Atari 800 XL emulator's functionality as tools. It is implemented in Python using [FastMCP](https://github.com/modelcontextprotocol/python-sdk) (the official MCP Python SDK), which provides automatic JSON schema generation from type hints and Pydantic input validation. The server communicates via JSON-RPC 2.0 over stdin/stdout and connects to a running AtticServer instance via Unix domain sockets.
 
-The source code lives in `Sources/AtticMCP-Python/`.
+The source code lives in `Python/AtticMCP/`.
 
 ## Prerequisites
 
@@ -37,7 +37,7 @@ The project already includes a `.mcp.json` in the repository root:
   "mcpServers": {
     "attic": {
       "command": "uv",
-      "args": ["run", "--directory", "Sources/AtticMCP-Python", "attic-mcp"]
+      "args": ["run", "--directory", "Python/AtticMCP", "attic-mcp"]
     }
   }
 }
@@ -52,7 +52,7 @@ Add to `~/.claude/claude_desktop_config.json`:
   "mcpServers": {
     "attic": {
       "command": "uv",
-      "args": ["run", "--directory", "/path/to/attic/Sources/AtticMCP-Python", "attic-mcp"]
+      "args": ["run", "--directory", "/path/to/attic/Python/AtticMCP", "attic-mcp"]
     }
   }
 }
