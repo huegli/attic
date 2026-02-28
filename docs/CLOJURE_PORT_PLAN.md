@@ -253,16 +253,19 @@ attic-server-clj/
         net.java.dev.jna/jna      {:mvn/version "5.15.0"}
         org.clojure/tools.cli     {:mvn/version "1.1.230"}
         org.clojure/tools.logging {:mvn/version "1.3.0"}
-        ch.qos.logback/logback-classic {:mvn/version "1.5.6"}}
+        ch.qos.logback/logback-classic {:mvn/version "1.5.6"}
+        nrepl/nrepl               {:mvn/version "1.3.0"}}
 
  :aliases
  {:run  {:main-opts ["-m" "attic.main"]}
+  :nrepl {:main-opts ["-m" "attic.main" "--nrepl" "7888"]}
   :test {:extra-paths ["test"]
          :extra-deps {lambdaisland/kaocha {:mvn/version "1.91.1392"}}
          :main-opts ["-m" "kaocha.runner"]}
   :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.5"}}
           :ns-default build}
-  :uberjar {:main-opts ["-m" "build/uber"]}}}
+  :uberjar {:main-opts ["-m" "build/uber"]}
+  :native {:main-opts ["-m" "build/native"]}}}
 ```
 
 ---
@@ -382,7 +385,7 @@ attic-server-clj/
 
 **Files to create**:
 - `attic.cli.server` — Unix socket listener using `java.net.UnixDomainSocketAddress`
-  (Java 16+) or JNA for older JVMs
+  (Java 21+)
 - `attic.cli.commands` — command parsing and dispatch
 - `attic.cli.format` — response formatting
 
@@ -539,7 +542,8 @@ basicdelete, basicrenumber, basicsave, basicload, basicstop, basiccont
 **Key implementation details**:
 - State format: metadata header + raw libatari800 state blob
 - Metadata: timestamp, REPL mode, mounted disks, frame count
-- Binary format must match Swift version for cross-compatibility (or document divergence)
+- Independent format from Swift version — metadata header is server-specific,
+  raw libatari800 blob is portable
 
 **Milestone**: Full feature parity with Swift AtticServer.
 
@@ -749,13 +753,13 @@ instead of the Swift one). This is the ultimate validation of wire compatibility
 | **libatari800 JNA incompatibility** | Blocks all progress | Prototype JNA bindings first (Phase 1). Test `init` + `next_frame` before committing. |
 | **Input template struct alignment** | Emulator ignores input | Verify C struct layout with `offsetof()`. Print struct bytes from Swift and Clojure, compare. |
 | **Frame buffer format mismatch** | GUI shows garbage | Compare byte-for-byte: Swift BGRA output vs Clojure BGRA output for the same frame. |
-| **State save/load binary format** | Can't share state files | May need to accept format divergence between Swift and Clojure versions. |
+| **State save/load binary format** | Can't share state files | **Resolved**: Independent formats. Raw libatari800 blob is portable; metadata headers are server-specific. |
 
 ### Medium Risk
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
-| **Unix domain sockets on JVM** | CLI protocol broken | Java 16+ has `UnixDomainSocketAddress`. Fall back to TCP localhost if needed. |
+| **Unix domain sockets on JVM** | CLI protocol broken | **Resolved**: Java 21+ required. `UnixDomainSocketAddress` available natively. |
 | **Thread starvation in frame loop** | GUI freezes, CLI unresponsive | Ensure `Task.yield()` equivalent — `Thread/yield` or short sleeps. |
 | **JNA performance for 60fps** | Dropped frames | JNA overhead is ~100ns/call, negligible at 60fps. Profile to confirm. |
 | **BASIC tokenizer accuracy** | Wrong tokenization | Port token tables exactly. Run same test cases as Swift suite. |
@@ -770,30 +774,34 @@ instead of the Swift one). This is the ultimate validation of wire compatibility
 
 ---
 
-## 10. Open Questions
+## 10. Resolved Questions
 
-1. **State file cross-compatibility**: Should Clojure-saved state files be loadable by the
-   Swift server and vice versa? The raw libatari800 state blob is identical, but the metadata
-   header format would need to be matched exactly.
+All open questions have been resolved. Decisions are recorded below.
 
-2. **Build artifact**: Should the Clojure server be distributed as an uberjar
-   (`java -jar attic-server.jar`) or as a native image via GraalVM for faster startup?
-   Uberjar is simpler; GraalVM native image has fast startup but JNA compatibility
-   requires testing.
+1. **State file cross-compatibility**: **Independent formats.** Each server uses its own
+   metadata header format. The raw libatari800 state blob is portable between servers,
+   but the wrapper metadata (timestamp, REPL mode, mounted disks, frame count) is
+   server-specific. This simplifies implementation and avoids fragile binary format coupling.
 
-3. **Java version minimum**: Java 16+ is needed for `UnixDomainSocketAddress` (CLI protocol
-   Unix sockets). Is this acceptable, or should we support older JVMs with a TCP fallback?
+2. **Build artifact**: **Both.** Uberjar (`java -jar attic-server.jar`) is the primary
+   distribution method. GraalVM native image is available as an optional optimized build
+   for fast startup. The build system supports both via `make uberjar` and `make native`.
 
-4. **Shared library distribution**: Should the native `.dylib`/`.so` be bundled in the
-   uberjar (extracted at runtime) or installed separately? Bundling is more convenient but
-   platform-specific.
+3. **Java version minimum**: **Java 21+.** This gives us virtual threads, modern APIs,
+   `UnixDomainSocketAddress`, and best performance. No need for older JVM fallbacks.
 
-5. **Namespace for the project**: Current Clojure convention suggests reverse-domain
-   (e.g., `com.attic.server`). The plan uses `attic.*` for simplicity. Preference?
+4. **Shared library distribution**: **Bundle in uberjar.** The native `.dylib`/`.so` is
+   bundled inside the jar and extracted to a temp directory at startup. This means
+   platform-specific jars (one per OS/arch), but a single artifact to distribute.
 
-6. **REPL-driven development**: One of Clojure's biggest strengths is the REPL. Should we
-   design the emulator engine to be fully controllable from a Clojure REPL (e.g., nREPL
-   server embedded in the process)? This would be a unique advantage over the Swift version.
+5. **Namespace convention**: **`attic.*`** (e.g., `attic.emulator.engine`,
+   `attic.protocol.aesp`). Simple, matches the project name, pragmatic for a personal project.
+
+6. **REPL-driven development**: **Yes, optional via `--nrepl [port]` flag.** The server
+   embeds an nREPL server that can be activated with `--nrepl 7888` (disabled by default).
+   This allows connecting Emacs/CIDER or VS Code/Calva directly into the running emulator
+   process for live inspection, hot-reload, and experimentation — a unique advantage over
+   the Swift version.
 
 ---
 
@@ -803,7 +811,8 @@ instead of the Swift one). This is the ultimate validation of wire compatibility
 |--------|----------|
 | **Total phases** | 12 |
 | **Total estimated LOC** | ~3,800-6,000 Clojure |
-| **External dependencies** | 5 (Clojure, core.async, JNA, tools.cli, logback) |
-| **Native dependency** | libatari800 (.dylib/.so) |
-| **Minimum Java version** | 16+ (for Unix domain sockets) |
+| **External dependencies** | 6 (Clojure, core.async, JNA, tools.cli, logback, nREPL) |
+| **Native dependency** | libatari800 (.dylib/.so), bundled in uberjar |
+| **Minimum Java version** | 21+ (virtual threads, modern APIs) |
+| **Distribution** | Uberjar (primary) + GraalVM native image (optional) |
 | **Wire compatibility** | 100% — same AESP protocol, same CLI protocol |
