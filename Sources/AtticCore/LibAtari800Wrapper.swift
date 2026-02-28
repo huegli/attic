@@ -34,20 +34,37 @@ import Foundation
 
 /// Constants for the Atari display.
 ///
-/// The Atari 800 XL generates a 384x240 pixel display using the ANTIC
-/// and GTIA chips. The screen buffer contains palette indices (0-255)
-/// that must be converted to RGB for display.
+/// The libatari800 screen buffer is 384x240 bytes, but the actual visible
+/// Atari display is only 336 pixels wide (columns 24–359). The extra 24
+/// pixels on each side are overscan margins where the ANTIC chip may write
+/// garbage data. We crop to the visible 336x240 area for display.
+///
+/// Reference: atari800 source `screen.h` — Screen_visible_x1=24, Screen_visible_x2=360.
 public enum AtariScreen {
-    /// Width of the screen in pixels.
-    public static let width = 384
+    /// Width of the libatari800 internal screen buffer in pixels.
+    /// This includes overscan margins on both sides.
+    public static let bufferWidth = 384
 
-    /// Height of the screen in pixels.
+    /// Height of the screen in pixels (same for buffer and visible).
     public static let height = 240
 
-    /// Total number of pixels.
+    /// First visible pixel column in the libatari800 buffer.
+    /// Pixels 0..<visibleX1 are left overscan margin.
+    public static let visibleX1 = 24
+
+    /// One past the last visible pixel column in the libatari800 buffer.
+    /// Pixels visibleX2..<bufferWidth are right overscan margin.
+    public static let visibleX2 = 360
+
+    /// Visible width of the Atari display (336 pixels).
+    /// This is the width used for textures, screenshots, and protocol frames.
+    public static let width = visibleX2 - visibleX1
+
+    /// Total number of visible pixels.
     public static let pixelCount = width * height
 
     /// Size of BGRA frame buffer in bytes (4 bytes per pixel).
+    /// Sized for the visible area only (336 x 240 x 4 = 322,560 bytes).
     public static let bgraBufferSize = pixelCount * 4
 }
 
@@ -510,25 +527,32 @@ public final class LibAtari800Wrapper: @unchecked Sendable {
 
     /// Returns the frame buffer in BGRA format for display.
     ///
-    /// This converts the indexed color screen buffer to BGRA using the
-    /// NTSC palette. The result is suitable for uploading to a Metal texture.
+    /// This converts the visible portion of the indexed color screen buffer
+    /// to BGRA using the NTSC palette. The libatari800 buffer is 384 pixels
+    /// wide, but only columns 24–359 contain the actual Atari display. The
+    /// overscan margins are cropped out to produce a clean 336x240 image.
     ///
-    /// - Returns: BGRA pixel data (384 x 240 x 4 bytes).
+    /// - Returns: BGRA pixel data (336 x 240 x 4 bytes).
     public func getFrameBufferBGRA() -> [UInt8] {
         guard let screen = getScreenPointer() else {
             return [UInt8](repeating: 0, count: AtariScreen.bgraBufferSize)
         }
 
-        // Convert indexed colors to BGRA
-        for i in 0..<AtariScreen.pixelCount {
-            let colorIndex = Int(screen[i])
-            let bgra = palette[colorIndex]
+        // Convert visible pixels from indexed colors to BGRA, cropping
+        // the overscan margins on the left and right edges.
+        var dst = 0
+        for y in 0..<AtariScreen.height {
+            let rowStart = y * AtariScreen.bufferWidth + AtariScreen.visibleX1
+            for x in 0..<AtariScreen.width {
+                let colorIndex = Int(screen[rowStart + x])
+                let bgra = palette[colorIndex]
 
-            let offset = i * 4
-            bgraFrameBuffer[offset] = UInt8(bgra & 0xFF)          // Blue
-            bgraFrameBuffer[offset + 1] = UInt8((bgra >> 8) & 0xFF)  // Green
-            bgraFrameBuffer[offset + 2] = UInt8((bgra >> 16) & 0xFF) // Red
-            bgraFrameBuffer[offset + 3] = 255                        // Alpha
+                bgraFrameBuffer[dst] = UInt8(bgra & 0xFF)              // Blue
+                bgraFrameBuffer[dst + 1] = UInt8((bgra >> 8) & 0xFF)   // Green
+                bgraFrameBuffer[dst + 2] = UInt8((bgra >> 16) & 0xFF)  // Red
+                bgraFrameBuffer[dst + 3] = 255                          // Alpha
+                dst += 4
+            }
         }
 
         return bgraFrameBuffer

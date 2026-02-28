@@ -515,9 +515,10 @@ final class AESPVideoChannelE2ETests: XCTestCase {
         await server.stop()
     }
 
-    /// Test that a full-size frame (384x240x4 = 368,640 bytes) arrives intact.
+    /// Test that a full-size frame (336x240x4 = 322,560 bytes) arrives intact.
     ///
-    /// This is the actual frame size used by the Atari 800 XL emulator.
+    /// This is the actual frame size used by the Atari 800 XL emulator
+    /// (visible area with overscan margins cropped).
     func test_fullFrameSize() async throws {
         #if !canImport(Network)
         throw XCTSkip("Network framework not available")
@@ -531,14 +532,14 @@ final class AESPVideoChannelE2ETests: XCTestCase {
         let frameStream = await client.frameStream
 
         // Create a full-size frame with a recognizable pattern
-        let fullSize = AESPConstants.frameSize // 368,640 bytes
+        let fullSize = AESPConstants.frameSize // 322,560 bytes
         let testPixels: [UInt8] = (0..<fullSize).map { UInt8($0 & 0xFF) }
         await server.broadcastFrame(testPixels)
 
         let frame = await firstElement(from: frameStream, timeout: 3.0)
         XCTAssertNotNil(frame, "Should have received a full-size frame")
         XCTAssertEqual(frame?.count, fullSize,
-                       "Frame should be \(fullSize) bytes (384x240x4)")
+                       "Frame should be \(fullSize) bytes (336x240x4)")
 
         // Verify first and last bytes match
         if let frame = frame {
@@ -1504,7 +1505,7 @@ final class AESPMessageTypeE2ETests: XCTestCase {
 
         // Server sends FRAME_CONFIG with Atari 800 XL video params
         let configMsg = AESPMessage.frameConfig(
-            width: 384,
+            width: 336,
             height: 240,
             bytesPerPixel: 4,
             fps: 60
@@ -1521,7 +1522,7 @@ final class AESPMessageTypeE2ETests: XCTestCase {
         if let received = configMessages.first {
             let config = received.parseFrameConfigPayload()
             XCTAssertNotNil(config, "FRAME_CONFIG should be parseable")
-            XCTAssertEqual(config!.width, 384, "Width should be 384")
+            XCTAssertEqual(config!.width, 336, "Width should be 336")
             XCTAssertEqual(config!.height, 240, "Height should be 240")
             XCTAssertEqual(config!.bytesPerPixel, 4, "Bytes per pixel should be 4 (BGRA)")
             XCTAssertEqual(config!.fps, 60, "FPS should be 60")

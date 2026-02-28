@@ -13,7 +13,7 @@
 // │                                                     │
 // │              Emulator Display                       │
 // │              (Metal View)                           │
-// │              384x240 @ 3x                           │
+// │              336x240 @ 3x                           │
 // │                                                     │
 // ├─────────────────────────────────────────────────────┤
 // │  [START] [SELECT] [OPTION]  │  Status | 60 FPS     │
@@ -46,8 +46,8 @@ struct ContentView: View {
         VStack(spacing: 0) {
             // Emulator display area - Metal view
             EmulatorDisplayView()
-                .frame(minWidth: 384, minHeight: 240)
-                .aspectRatio(384.0/240.0, contentMode: .fit)
+                .frame(minWidth: CGFloat(AtariScreen.width), minHeight: CGFloat(AtariScreen.height))
+                .aspectRatio(CGFloat(AtariScreen.width) / CGFloat(AtariScreen.height), contentMode: .fit)
 
             // Control panel and status bar
             ControlPanelView()

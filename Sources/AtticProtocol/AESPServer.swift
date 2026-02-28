@@ -562,7 +562,7 @@ public actor AESPServer {
     /// Broadcasts a video frame to all subscribed video clients.
     ///
     /// This method should be called from the emulation loop after each frame.
-    /// The frame data is sent as a raw BGRA buffer (384×240×4 bytes).
+    /// The frame data is sent as a raw BGRA buffer (336×240×4 bytes).
     ///
     /// - Parameter pixels: The frame buffer as a byte array.
     public func broadcastFrame(_ pixels: [UInt8]) async {

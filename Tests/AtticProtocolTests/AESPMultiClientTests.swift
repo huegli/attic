@@ -382,9 +382,9 @@ final class AESPMultipleGUIClientTests: XCTestCase {
         await server.stop()
     }
 
-    /// Test that both clients receive a full-size video frame (384x240x4).
+    /// Test that both clients receive a full-size video frame (336x240x4).
     ///
-    /// Full-size frames are 368,640 bytes. This verifies the server can handle
+    /// Full-size frames are 322,560 bytes. This verifies the server can handle
     /// broadcasting large payloads to multiple subscribers without corruption.
     func test_bothClientsReceiveFullSizeFrame() async throws {
         #if !canImport(Network)

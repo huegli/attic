@@ -60,7 +60,7 @@ struct AtticApp: App {
                 .environmentObject(viewModel)
         }
         .windowStyle(.hiddenTitleBar)  // For a cleaner look
-        .defaultSize(width: 1152, height: 720)  // 384x240 * 3
+        .defaultSize(width: 1008, height: 720)  // 336x240 * 3
         .commands {
             // Add custom menu commands
             AtticCommands(viewModel: viewModel)

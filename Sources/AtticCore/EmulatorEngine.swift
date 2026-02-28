@@ -763,7 +763,7 @@ public actor EmulatorEngine {
 
     /// Returns the current frame buffer in BGRA format.
     ///
-    /// The buffer is 384 x 240 pixels, 4 bytes per pixel (BGRA).
+    /// The buffer is 336 x 240 pixels, 4 bytes per pixel (BGRA).
     public func getFrameBuffer() -> [UInt8] {
         wrapper.getFrameBufferBGRA()
     }

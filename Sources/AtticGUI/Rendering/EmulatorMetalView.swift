@@ -21,7 +21,7 @@
 // Usage:
 //
 //     EmulatorMetalView(viewModel: viewModel)
-//         .aspectRatio(384.0/240.0, contentMode: .fit)
+//         .aspectRatio(336.0/240.0, contentMode: .fit)
 //
 // =============================================================================
 

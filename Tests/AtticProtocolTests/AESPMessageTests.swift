@@ -55,10 +55,10 @@ final class AESPConstantsTests: XCTestCase {
 
     /// Test frame dimensions.
     func test_frameDimensions() {
-        XCTAssertEqual(AESPConstants.frameWidth, 384)
+        XCTAssertEqual(AESPConstants.frameWidth, 336)
         XCTAssertEqual(AESPConstants.frameHeight, 240)
         XCTAssertEqual(AESPConstants.frameBytesPerPixel, 4)
-        XCTAssertEqual(AESPConstants.frameSize, 384 * 240 * 4)
+        XCTAssertEqual(AESPConstants.frameSize, 336 * 240 * 4)
     }
 
     /// Test audio parameters.

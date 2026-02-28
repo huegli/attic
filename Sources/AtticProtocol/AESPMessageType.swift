@@ -124,7 +124,7 @@ public enum AESPMessageType: UInt8, Sendable, CaseIterable {
     // =========================================================================
 
     /// Raw video frame data (uncompressed BGRA).
-    /// Payload: 384 * 240 * 4 = 368,640 bytes of BGRA pixel data
+    /// Payload: 336 * 240 * 4 = 322,560 bytes of BGRA pixel data
     /// Sent at 60fps from server to subscribed clients.
     case frameRaw = 0x60
 

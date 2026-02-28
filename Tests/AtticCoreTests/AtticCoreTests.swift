@@ -380,23 +380,26 @@ final class AtticErrorTests: XCTestCase {
 
 /// Tests for AtariScreen constants.
 final class AtariScreenTests: XCTestCase {
-    /// Test screen dimensions are correct for Atari display.
+    /// Test screen dimensions are correct for visible Atari display.
     func test_dimensions_correct() {
-        XCTAssertEqual(AtariScreen.width, 384)
+        XCTAssertEqual(AtariScreen.width, 336)
         XCTAssertEqual(AtariScreen.height, 240)
+        XCTAssertEqual(AtariScreen.bufferWidth, 384)
+        XCTAssertEqual(AtariScreen.visibleX1, 24)
+        XCTAssertEqual(AtariScreen.visibleX2, 360)
     }
 
-    /// Test pixel count matches dimensions.
+    /// Test pixel count matches visible dimensions.
     func test_pixelCount_matchesDimensions() {
         XCTAssertEqual(AtariScreen.pixelCount, AtariScreen.width * AtariScreen.height)
-        XCTAssertEqual(AtariScreen.pixelCount, 92160)
+        XCTAssertEqual(AtariScreen.pixelCount, 80640)  // 336 * 240
     }
 
     /// Test BGRA buffer size is correct.
     func test_bgraBufferSize_correctForPixels() {
         // 4 bytes per pixel (BGRA)
         XCTAssertEqual(AtariScreen.bgraBufferSize, AtariScreen.pixelCount * 4)
-        XCTAssertEqual(AtariScreen.bgraBufferSize, 368640)
+        XCTAssertEqual(AtariScreen.bgraBufferSize, 322560)  // 336 * 240 * 4
     }
 }
 

@@ -1018,7 +1018,7 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
 
     /// Handles the screenshot command by capturing the current frame buffer and saving as PNG.
     ///
-    /// The frame buffer is 384x240 pixels in BGRA format. This method converts it to
+    /// The frame buffer is 336x240 pixels in BGRA format. This method converts it to
     /// a PNG image and saves it to the specified path.
     ///
     /// - Parameter path: The file path to save the screenshot, or nil for auto-generated path.
@@ -1044,9 +1044,9 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
         // Get the frame buffer from the emulator
         let frameBuffer = await emulator.getFrameBuffer()
 
-        // Frame buffer dimensions (Atari 800 XL standard)
-        let width = 384
-        let height = 240
+        // Frame buffer dimensions (visible area, overscan margins cropped)
+        let width = AtariScreen.width    // 336
+        let height = AtariScreen.height  // 240
         let bytesPerPixel = 4  // BGRA
         let bytesPerRow = width * bytesPerPixel
 

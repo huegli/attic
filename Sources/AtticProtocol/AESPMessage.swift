@@ -54,8 +54,8 @@ public enum AESPConstants {
     /// Default WebSocket port.
     public static let defaultWebSocketPort: Int = 47803
 
-    /// Video frame dimensions.
-    public static let frameWidth: Int = 384
+    /// Video frame dimensions (visible area, overscan margins cropped).
+    public static let frameWidth: Int = 336
     public static let frameHeight: Int = 240
     public static let frameBytesPerPixel: Int = 4  // BGRA
     public static let frameSize: Int = frameWidth * frameHeight * frameBytesPerPixel
@@ -521,14 +521,14 @@ extension AESPMessage {
 
     /// Creates a FRAME_RAW message with video frame data.
     ///
-    /// - Parameter pixels: BGRA pixel data (384 * 240 * 4 = 368,640 bytes).
+    /// - Parameter pixels: BGRA pixel data (336 * 240 * 4 = 322,560 bytes).
     public static func frameRaw(pixels: Data) -> AESPMessage {
         return AESPMessage(type: .frameRaw, payload: pixels)
     }
 
     /// Creates a FRAME_RAW message with video frame data from a byte array.
     ///
-    /// - Parameter pixels: BGRA pixel data (384 * 240 * 4 = 368,640 bytes).
+    /// - Parameter pixels: BGRA pixel data (336 * 240 * 4 = 322,560 bytes).
     public static func frameRaw(pixels: [UInt8]) -> AESPMessage {
         return AESPMessage(type: .frameRaw, payload: pixels)
     }

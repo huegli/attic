@@ -18,8 +18,9 @@
 // 3. A full-screen quad is rendered with the texture
 // 4. The result is displayed in the MTKView
 //
-// The Atari 800 XL has a resolution of 384x240 pixels. This is scaled up
-// to fit the window while maintaining the correct aspect ratio.
+// The visible Atari display is 336x240 pixels (cropped from the 384-wide
+// libatari800 buffer to remove overscan margins). This is scaled up to fit
+// the window while maintaining the correct aspect ratio.
 //
 // =============================================================================
 
@@ -166,8 +167,8 @@ public class MetalRenderer: NSObject {
 
     /// Creates the screen texture.
     ///
-    /// The texture is 384x240 pixels in BGRA format, matching the Atari's
-    /// resolution and our frame buffer format.
+    /// The texture is 336x240 pixels in BGRA format, matching the visible
+    /// Atari display area after cropping overscan margins.
     private func setupTexture() throws {
         let textureDescriptor = MTLTextureDescriptor()
         textureDescriptor.pixelFormat = .bgra8Unorm
@@ -230,7 +231,7 @@ public class MetalRenderer: NSObject {
     /// This method is called from the emulation thread to provide new
     /// pixel data. The actual texture upload happens during the next draw.
     ///
-    /// - Parameter pixels: BGRA pixel data (384 x 240 x 4 bytes).
+    /// - Parameter pixels: BGRA pixel data (336 x 240 x 4 bytes).
     public func updateTexture(with pixels: [UInt8]) {
         guard pixels.count == AtariScreen.bgraBufferSize else {
             print("MetalRenderer: Invalid pixel buffer size: \(pixels.count)")
@@ -250,7 +251,7 @@ public class MetalRenderer: NSObject {
     /// This is an optimized overload that accepts Data directly, avoiding
     /// an extra copy when frames come from network protocol buffers.
     ///
-    /// - Parameter data: BGRA pixel data (384 x 240 x 4 bytes) as Data.
+    /// - Parameter data: BGRA pixel data (336 x 240 x 4 bytes) as Data.
     public func updateTexture(with data: Data) {
         guard data.count == AtariScreen.bgraBufferSize else {
             print("MetalRenderer: Invalid pixel buffer size: \(data.count)")

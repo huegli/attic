@@ -438,16 +438,16 @@ final class AESPVideoMessageExtendedTests: XCTestCase {
 
     /// Test encoding FRAME_CONFIG message.
     func test_encode_frameConfig() {
-        let message = AESPMessage.frameConfig(width: 384, height: 240, bytesPerPixel: 4, fps: 60)
+        let message = AESPMessage.frameConfig(width: 336, height: 240, bytesPerPixel: 4, fps: 60)
         let encoded = message.encode()
 
         XCTAssertEqual(encoded.count, 14) // 8 header + 6 payload
         XCTAssertEqual(encoded[3], AESPMessageType.frameConfig.rawValue)
         XCTAssertEqual(encoded[3], 0x62)
 
-        // Width (big-endian): 384 = 0x0180
+        // Width (big-endian): 336 = 0x0150
         XCTAssertEqual(encoded[8], 0x01)
-        XCTAssertEqual(encoded[9], 0x80)
+        XCTAssertEqual(encoded[9], 0x50)
 
         // Height (big-endian): 240 = 0x00F0
         XCTAssertEqual(encoded[10], 0x00)
@@ -462,8 +462,9 @@ final class AESPVideoMessageExtendedTests: XCTestCase {
 
     /// Test decoding FRAME_CONFIG message.
     func test_decode_frameConfig() throws {
+        // Width=336 (0x0150), Height=240 (0x00F0), BPP=4, FPS=60
         let data = Data([0xAE, 0x50, 0x01, 0x62, 0x00, 0x00, 0x00, 0x06,
-                        0x01, 0x80, 0x00, 0xF0, 0x04, 0x3C])
+                        0x01, 0x50, 0x00, 0xF0, 0x04, 0x3C])
         let (message, _) = try AESPMessage.decode(from: data)
 
         guard let config = message.parseFrameConfigPayload() else {
@@ -471,7 +472,7 @@ final class AESPVideoMessageExtendedTests: XCTestCase {
             return
         }
 
-        XCTAssertEqual(config.width, 384)
+        XCTAssertEqual(config.width, 336)
         XCTAssertEqual(config.height, 240)
         XCTAssertEqual(config.bytesPerPixel, 4)
         XCTAssertEqual(config.fps, 60)
