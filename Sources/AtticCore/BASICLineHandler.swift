@@ -1293,7 +1293,7 @@ public actor BASICLineHandler {
             return "No program to export"
         }
 
-        let expandedPath = (path as NSString).expandingTildeInPath
+        let expandedPath = path.expandingPath
         try listing.write(toFile: expandedPath, atomically: true, encoding: .utf8)
 
         let lineCount = listing.components(separatedBy: "\n").filter { !$0.isEmpty }.count
@@ -1307,11 +1307,11 @@ public actor BASICLineHandler {
     /// Does NOT clear the existing program first — call NEW explicitly
     /// before importing if a clean slate is desired.
     ///
-    /// - Parameter path: The file path to read from (tilde is expanded).
+    /// - Parameter path: The file path to read from (shell escapes and tilde expanded).
     /// - Returns: A result with success/error counts.
     /// - Throws: File I/O errors if the file cannot be read.
     public func importProgram(from path: String) async throws -> BASICLineResult {
-        let expandedPath = (path as NSString).expandingTildeInPath
+        let expandedPath = path.expandingPath
 
         guard FileManager.default.fileExists(atPath: expandedPath) else {
             return .error("File not found: \(expandedPath)")

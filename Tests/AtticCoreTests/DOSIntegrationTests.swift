@@ -594,7 +594,7 @@ final class DOSCommandParserTests: XCTestCase {
             return
         }
         XCTAssertEqual(filename, "GAME.COM")
-        XCTAssertEqual(path, "~/Desktop/game.com")
+        XCTAssertEqual(path, NSString(string: "~/Desktop/game.com").expandingTildeInPath)
     }
 
     /// Export with path containing spaces should join remaining parts.
@@ -605,7 +605,7 @@ final class DOSCommandParserTests: XCTestCase {
             return
         }
         XCTAssertEqual(filename, "GAME.COM")
-        XCTAssertEqual(path, "~/My Files/game.com")
+        XCTAssertEqual(path, NSString(string: "~/My Files/game.com").expandingTildeInPath)
     }
 
     /// `export GAME.COM` (missing path) should throw.
@@ -637,7 +637,7 @@ final class DOSCommandParserTests: XCTestCase {
             XCTFail("Expected dosImport, got \(cmd)")
             return
         }
-        XCTAssertEqual(path, "~/game.com")
+        XCTAssertEqual(path, NSString(string: "~/game.com").expandingTildeInPath)
         XCTAssertEqual(filename, "GAME.COM")
     }
 
@@ -648,7 +648,7 @@ final class DOSCommandParserTests: XCTestCase {
             XCTFail("Expected dosImport, got \(cmd)")
             return
         }
-        XCTAssertEqual(path, "~/My Files/game.com")
+        XCTAssertEqual(path, NSString(string: "~/My Files/game.com").expandingTildeInPath)
         XCTAssertEqual(filename, "GAME.COM")
     }
 
@@ -1199,7 +1199,7 @@ final class DOSWorkflowTests: XCTestCase {
             XCTFail("Expected dosImport, got \(importCmd)")
             return
         }
-        XCTAssertEqual(path, "~/Desktop/program.com")
+        XCTAssertEqual(path, NSString(string: "~/Desktop/program.com").expandingTildeInPath)
         XCTAssertEqual(filename, "PROG.COM")
 
         let exportCmd = try parser.parse("export PROG.COM ~/Desktop/backup.com", mode: .dos)
@@ -1208,7 +1208,7 @@ final class DOSWorkflowTests: XCTestCase {
             return
         }
         XCTAssertEqual(expFile, "PROG.COM")
-        XCTAssertEqual(expPath, "~/Desktop/backup.com")
+        XCTAssertEqual(expPath, NSString(string: "~/Desktop/backup.com").expandingTildeInPath)
     }
 
     /// Simulated workflow: newdisk → format.
@@ -1218,7 +1218,7 @@ final class DOSWorkflowTests: XCTestCase {
             XCTFail("Expected dosNewDisk, got \(newdisk)")
             return
         }
-        XCTAssertEqual(path, "~/disks/blank.atr")
+        XCTAssertEqual(path, NSString(string: "~/disks/blank.atr").expandingTildeInPath)
         XCTAssertEqual(type, "ss/sd")
 
         let format = try parser.parse("format", mode: .dos)

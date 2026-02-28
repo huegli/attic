@@ -176,3 +176,50 @@ public enum AtticError: Error, LocalizedError {
         }
     }
 }
+
+// =============================================================================
+// MARK: - Path Utilities
+// =============================================================================
+
+extension String {
+    /// Expands a user-supplied file path by removing shell escape sequences
+    /// and expanding tilde (`~`) to the home directory.
+    ///
+    /// Shells like Bash and Zsh escape special characters with backslashes
+    /// (e.g. `Dragon\'s\ TaIL\ \(The\).atr`). When these paths are pasted
+    /// into the REPL or sent over the CLI protocol, the backslashes arrive
+    /// as literal characters. This method strips them so the path matches
+    /// the actual filename on disk.
+    ///
+    /// Processing order:
+    /// 1. Remove shell escape backslashes (`\<char>` → `<char>`)
+    /// 2. Expand `~` to the user's home directory
+    ///
+    /// Examples:
+    /// ```
+    /// "~/ROMs/game.atr".expandingPath           // "/Users/me/ROMs/game.atr"
+    /// "/path/Dragon\\'s\\ TaIL.atr".expandingPath // "/path/Dragon's TaIL.atr"
+    /// "/normal/path.atr".expandingPath           // "/normal/path.atr" (unchanged)
+    /// ```
+    public var expandingPath: String {
+        // Step 1: Unescape shell backslash sequences.
+        // A backslash followed by any character is replaced by that character.
+        // A trailing backslash with nothing after it is kept as-is.
+        var unescaped = ""
+        var iter = self.makeIterator()
+        while let ch = iter.next() {
+            if ch == "\\" {
+                if let next = iter.next() {
+                    unescaped.append(next)
+                } else {
+                    unescaped.append(ch)  // trailing backslash
+                }
+            } else {
+                unescaped.append(ch)
+            }
+        }
+
+        // Step 2: Expand ~ to home directory.
+        return NSString(string: unescaped).expandingTildeInPath
+    }
+}

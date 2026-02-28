@@ -404,6 +404,54 @@ final class AtariScreenTests: XCTestCase {
 }
 
 // =============================================================================
+// MARK: - Path Expansion Tests
+// =============================================================================
+
+/// Tests for the String.expandingPath extension.
+final class PathExpansionTests: XCTestCase {
+    /// Plain path without escapes or tilde passes through unchanged.
+    func test_plainPath_unchanged() {
+        XCTAssertEqual("/usr/local/bin/file.txt".expandingPath, "/usr/local/bin/file.txt")
+    }
+
+    /// Backslash-escaped spaces are unescaped.
+    func test_escapedSpaces_removed() {
+        XCTAssertEqual("/path/to/my\\ file.atr".expandingPath, "/path/to/my file.atr")
+    }
+
+    /// Backslash-escaped special characters (quotes, parens) are unescaped.
+    func test_escapedSpecialChars_removed() {
+        let input = "/path/Dragon\\'s\\ TaIL\\ \\(The\\).atr"
+        let expected = "/path/Dragon's TaIL (The).atr"
+        XCTAssertEqual(input.expandingPath, expected)
+    }
+
+    /// Tilde is expanded to home directory.
+    func test_tildeExpanded() {
+        let result = "~/Desktop/file.atr".expandingPath
+        XCTAssertTrue(result.hasSuffix("/Desktop/file.atr"))
+        XCTAssertFalse(result.hasPrefix("~"))
+    }
+
+    /// Both escapes and tilde work together.
+    func test_escapesAndTilde_combined() {
+        let result = "~/My\\ Files/game.atr".expandingPath
+        XCTAssertTrue(result.hasSuffix("/My Files/game.atr"))
+        XCTAssertFalse(result.hasPrefix("~"))
+    }
+
+    /// A trailing backslash is preserved (edge case).
+    func test_trailingBackslash_preserved() {
+        XCTAssertEqual("/path/to/dir\\".expandingPath, "/path/to/dir\\")
+    }
+
+    /// Double backslash produces a single literal backslash.
+    func test_doubleBackslash_producesLiteral() {
+        XCTAssertEqual("/path/with\\\\backslash".expandingPath, "/path/with\\backslash")
+    }
+}
+
+// =============================================================================
 // MARK: - InputState Tests
 // =============================================================================
 

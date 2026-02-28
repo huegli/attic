@@ -289,7 +289,7 @@ public struct CommandParser {
         case ".warmstart":
             return .warmStart
         case ".screenshot":
-            return .screenshot(path: args)
+            return .screenshot(path: args?.expandingPath)
         case ".state":
             return try parseStateCommand(args)
         case ".quit":
@@ -321,9 +321,7 @@ public struct CommandParser {
         }
 
         let subcommand = String(parts[0]).lowercased()
-        // Expand ~ to the user's home directory, consistent with CLIProtocol.parseState()
-        // and other path commands (.boot, dos export/import, basic import/export).
-        let path = NSString(string: String(parts[1])).expandingTildeInPath
+        let path = String(parts[1]).expandingPath
 
         switch subcommand {
         case "save":
@@ -668,7 +666,7 @@ public struct CommandParser {
                     suggestion: "Usage: import <path>  (e.g., import ~/program.bas)"
                 )
             }
-            return .basicImport(path: argsString)
+            return .basicImport(path: argsString.expandingPath)
 
         case "export":
             guard !argsString.isEmpty else {
@@ -677,7 +675,7 @@ public struct CommandParser {
                     suggestion: "Usage: export <path>  (e.g., export ~/program.bas)"
                 )
             }
-            return .basicExport(path: argsString)
+            return .basicExport(path: argsString.expandingPath)
 
         case "save":
             guard !argsString.isEmpty else {
@@ -909,7 +907,7 @@ public struct CommandParser {
                 )
             }
             // Join remaining parts as path (handles spaces in path)
-            let path = parts.dropFirst(2).joined(separator: " ")
+            let path = parts.dropFirst(2).joined(separator: " ").expandingPath
             return .dosMountDisk(drive: drive, path: path)
 
         case "unmount":
@@ -1058,7 +1056,7 @@ public struct CommandParser {
             }
             let filename = String(parts[1])
             // Join remaining parts as path (handles spaces)
-            let path = parts.dropFirst(2).joined(separator: " ")
+            let path = parts.dropFirst(2).joined(separator: " ").expandingPath
             return .dosExport(filename: filename, path: path)
 
         case "import":
@@ -1072,7 +1070,7 @@ public struct CommandParser {
             // For import, the path is first, so we need to be careful about spaces
             // If filename is last part, path is everything before it
             let filename = String(parts.last!)
-            let path = parts.dropFirst().dropLast().joined(separator: " ")
+            let path = parts.dropFirst().dropLast().joined(separator: " ").expandingPath
             return .dosImport(path: path, filename: filename)
 
         // =================================================================
@@ -1091,10 +1089,10 @@ public struct CommandParser {
             let lastPart = String(parts.last!).lowercased()
             let validTypes = ["ss/sd", "ss/ed", "ss/dd"]
             if validTypes.contains(lastPart) && parts.count >= 3 {
-                let path = parts.dropFirst().dropLast().joined(separator: " ")
+                let path = parts.dropFirst().dropLast().joined(separator: " ").expandingPath
                 return .dosNewDisk(path: path, type: lastPart)
             } else {
-                let path = parts.dropFirst().joined(separator: " ")
+                let path = parts.dropFirst().joined(separator: " ").expandingPath
                 return .dosNewDisk(path: path, type: nil)
             }
 
