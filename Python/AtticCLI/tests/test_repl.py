@@ -1,8 +1,16 @@
 """Tests for REPL mode switching, prompt generation, and completions."""
 
+from unittest.mock import MagicMock
+
 from prompt_toolkit.formatted_text import HTML
 
-from attic_cli.repl import _mode_completer, _mode_prompt, _translate_for_mode
+from attic_cli.commands import QUIT, SHUTDOWN
+from attic_cli.repl import (
+    _handle_dot_with_mode,
+    _mode_completer,
+    _mode_prompt,
+    _translate_for_mode,
+)
 
 
 class TestModePrompt:
@@ -87,3 +95,51 @@ class TestTranslateForMode:
     def test_unknown_mode_passthrough(self):
         cmds = _translate_for_mode("test", "unknown")
         assert cmds == ["test"]
+
+
+class TestHandleDotWithMode:
+    """Tests for _handle_dot_with_mode — the fix for attic-id7."""
+
+    def _make_client(self):
+        return MagicMock()
+
+    def test_switch_to_monitor(self):
+        result = _handle_dot_with_mode(
+            ".monitor", client=self._make_client(), mode="basic", current_drive=1
+        )
+        assert isinstance(result, dict)
+        assert result["mode"] == "monitor"
+
+    def test_switch_to_basic(self):
+        result = _handle_dot_with_mode(
+            ".basic", client=self._make_client(), mode="monitor", current_drive=1
+        )
+        assert isinstance(result, dict)
+        assert result["mode"] == "basic"
+
+    def test_switch_to_basic_turbo(self):
+        result = _handle_dot_with_mode(
+            ".basic turbo", client=self._make_client(), mode="basic", current_drive=1
+        )
+        assert isinstance(result, dict)
+        assert result["mode"] == "basic_turbo"
+
+    def test_switch_to_dos(self):
+        result = _handle_dot_with_mode(
+            ".dos", client=self._make_client(), mode="basic", current_drive=1
+        )
+        assert isinstance(result, dict)
+        assert result["mode"] == "dos"
+
+    def test_quit_returns_sentinel(self):
+        result = _handle_dot_with_mode(
+            ".quit", client=self._make_client(), mode="basic", current_drive=1
+        )
+        assert result is QUIT
+
+    def test_unknown_command_returns_error(self):
+        result = _handle_dot_with_mode(
+            ".bogus", client=self._make_client(), mode="basic", current_drive=1
+        )
+        assert isinstance(result, str)
+        assert "Unknown" in result

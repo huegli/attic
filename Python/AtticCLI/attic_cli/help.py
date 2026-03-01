@@ -297,16 +297,16 @@ def print_help_topic(mode: str, topic: str) -> None:
         ))
         return
 
-    # Check mode-specific commands
-    mode_commands = _mode_help_dict(mode)
-    if clean in mode_commands:
-        console.print(Panel(
-            mode_commands[clean],
-            title=clean,
-            title_align="left",
-            border_style="cyan",
-        ))
-        return
+    # Check current mode commands first, then all other modes
+    for help_dict in [_mode_help_dict(mode), MONITOR_HELP, BASIC_HELP, DOS_HELP]:
+        if clean in help_dict:
+            console.print(Panel(
+                help_dict[clean],
+                title=clean,
+                title_align="left",
+                border_style="cyan",
+            ))
+            return
 
     console.print(f"[red]No help available for '{topic}'[/red]")
     console.print("[dim]Type .help for a list of available commands[/dim]")

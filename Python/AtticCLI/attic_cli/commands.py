@@ -134,7 +134,14 @@ def _handle_screenshot(client: CLISocketClient, args: str) -> str | None:
         if not response.success:
             return f"[red]Error:[/red] {response.payload}"
 
-        path = response.payload.strip()
+        payload = response.payload.strip()
+        # Server returns "screenshot saved to /path/to/file.png"
+        # Extract just the file path
+        prefix = "screenshot saved to "
+        if payload.lower().startswith(prefix):
+            path = payload[len(prefix):]
+        else:
+            path = payload
         # Try to display inline; falls back to printing the path
         display_inline_image(path)
         return None

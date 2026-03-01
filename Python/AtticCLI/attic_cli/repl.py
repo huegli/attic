@@ -103,16 +103,6 @@ def run_repl(client: CLISocketClient) -> None:
 
             # --- Dot-commands (global) ---
             if trimmed.startswith("."):
-                result = handle_dot_command(
-                    trimmed,
-                    client=client,
-                    mode=mode.replace("basic_turbo", "basic"),
-                    set_mode=lambda m: _set_mode_closure(m),
-                )
-
-                # Mode change closure captures mutable state via list trick
-                # Actually, we need a different approach...
-                # Let's handle mode setting inline
                 result = _handle_dot_with_mode(
                     trimmed, client=client, mode=mode, current_drive=current_drive
                 )

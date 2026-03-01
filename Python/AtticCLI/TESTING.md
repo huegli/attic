@@ -13,42 +13,42 @@ uv run attic-py
 
 ---
 
-## 1. Startup & Connection
+## 1. Startup & Connection ✅
 
-| # | Test | Expected |
-|---|------|----------|
-| 1.1 | `uv run attic-py --version` | Prints `attic-py, version 0.1.0` |
-| 1.2 | `uv run attic-py --help` | Shows all options (--silent, --socket, --headless, --version) |
-| 1.3 | `uv run attic-py` (server running) | Banner, `Connected to AtticServer (pid ...)`, REPL prompt `[basic] >` |
-| 1.4 | `uv run attic-py` (no server running) | Attempts to auto-launch AtticServer, then connects |
-| 1.5 | `uv run attic-py --socket /tmp/bogus.sock` | Error: "Connection failed: ..." and exit |
+| # | Test | Expected | Result |
+|---|------|----------|--------|
+| 1.1 | `uv run attic-py --version` | Prints `attic-py, version 0.1.0` | PASS |
+| 1.2 | `uv run attic-py --help` | Shows all options (--silent, --socket, --headless, --version) | PASS |
+| 1.3 | `uv run attic-py` (server running) | Banner, `Connected to AtticServer (pid ...)`, REPL prompt `[basic] >` | PASS |
+| 1.4 | `uv run attic-py` (no server running) | Attempts to auto-launch AtticServer, then connects | PASS |
+| 1.5 | `uv run attic-py --socket /tmp/bogus.sock` | Error: "Connection failed: ..." and exit | PASS |
 
-## 2. REPL Basics
+## 2. REPL Basics ✅
 
-| # | Test | Expected |
-|---|------|----------|
-| 2.1 | Press Enter on empty line | No output, prompt re-displayed |
-| 2.2 | Ctrl-C | Cancels current line, shows new prompt |
-| 2.3 | Ctrl-D | Prints "Goodbye", exits cleanly |
-| 2.4 | Up/Down arrows | History navigation works |
-| 2.5 | Tab key | Shows completion suggestions for current mode |
-| 2.6 | Quit and restart | Previous commands available in history (persisted to ~/.attic_history) |
+| # | Test | Expected | Result |
+|---|------|----------|--------|
+| 2.1 | Press Enter on empty line | No output, prompt re-displayed | PASS |
+| 2.2 | Ctrl-C | Cancels current line, shows new prompt | PASS |
+| 2.3 | Ctrl-D | Prints "Goodbye", exits cleanly | PASS |
+| 2.4 | Up/Down arrows | History navigation works | PASS |
+| 2.5 | Tab key | Shows completion suggestions for current mode | PASS |
+| 2.6 | Quit and restart | Previous commands available in history (persisted to ~/.attic_history) | PASS |
 
-## 3. Global Dot-Commands
+## 3. Global Dot-Commands ✅
 
-| # | Test | Expected |
-|---|------|----------|
-| 3.1 | `.help` | Two Rich tables: Global Commands + BASIC Mode Commands |
-| 3.2 | `.help boot` | Rich panel with `.boot` usage details |
-| 3.3 | `.help g` | Shows help for monitor's `g` (go/resume) command |
-| 3.4 | `.help nonexistent` | "No help available for 'nonexistent'" |
-| 3.5 | `.status` | Emulator status (running state, PC, disks, breakpoints) |
-| 3.6 | `.screen` | Text screen content (24 lines of GRAPHICS 0 text) |
-| 3.7 | `.reset` | Cold reset the emulator |
-| 3.8 | `.warmstart` | Warm reset (like pressing RESET key) |
-| 3.9 | `.screenshot` | Inline image in iTerm2/Ghostty, or file path fallback in other terminals |
-| 3.10 | `.screenshot /tmp/test.png` | Saves screenshot to specified path |
-| 3.11 | `.boguscmd` | "Unknown command: .boguscmd" |
+| # | Test | Expected | Result |
+|---|------|----------|--------|
+| 3.1 | `.help` | Two Rich tables: Global Commands + BASIC Mode Commands | PASS |
+| 3.2 | `.help boot` | Rich panel with `.boot` usage details | PASS |
+| 3.3 | `.help g` | Shows help for monitor's `g` (go/resume) command | PASS |
+| 3.4 | `.help nonexistent` | "No help available for 'nonexistent'" | PASS |
+| 3.5 | `.status` | Emulator status (running state, PC, disks, breakpoints) | PASS |
+| 3.6 | `.screen` | Text screen content (24 lines of GRAPHICS 0 text) | PASS |
+| 3.7 | `.reset` | Cold reset the emulator | PASS |
+| 3.8 | `.warmstart` | Warm reset (like pressing RESET key) | PASS |
+| 3.9 | `.screenshot` | Inline image in iTerm2/Ghostty, or file path fallback in other terminals | PASS |
+| 3.10 | `.screenshot /tmp/test.png` | Saves screenshot to specified path | PASS |
+| 3.11 | `.boguscmd` | "Unknown command: .boguscmd" | PASS |
 
 ## 4. Mode Switching
 
