@@ -2,6 +2,8 @@
 
 from unittest.mock import MagicMock
 
+from prompt_toolkit.completion import CompleteEvent
+from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import HTML
 
 from attic_cli.commands import QUIT, SHUTDOWN
@@ -73,6 +75,38 @@ class TestModeCompleter:
     def test_assembly_mode_no_completer(self):
         completer = _mode_completer("monitor", True)
         assert completer is None
+
+    def _complete(self, mode, text):
+        """Helper: get completion texts for given input text."""
+        completer = _mode_completer(mode, False)
+        doc = Document(text, cursor_position=len(text))
+        return [c.text for c in completer.get_completions(doc, CompleteEvent())]
+
+    def test_dot_help_completes(self):
+        results = self._complete("basic", ".h")
+        assert ".help" in results
+
+    def test_dot_status_completes(self):
+        results = self._complete("basic", ".s")
+        assert ".status" in results
+        assert ".screenshot" in results
+        assert ".shutdown" in results
+        assert ".state" in results
+
+    def test_dot_prefix_lists_all_dot_commands(self):
+        results = self._complete("basic", ".")
+        assert all(r.startswith(".") for r in results)
+        assert ".help" in results
+        assert ".quit" in results
+
+    def test_mode_commands_still_complete(self):
+        results = self._complete("basic", "li")
+        assert "list" in results
+
+    def test_no_dot_commands_for_plain_prefix(self):
+        results = self._complete("basic", "h")
+        # 'h' should not match '.help' — only bare commands
+        assert ".help" not in results
 
 
 class TestTranslateForMode:

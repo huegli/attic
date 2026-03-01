@@ -6,7 +6,8 @@ protocol commands to AtticServer, and displays responses.
 """
 
 from prompt_toolkit import PromptSession
-from prompt_toolkit.completion import WordCompleter
+from prompt_toolkit.completion import Completer, Completion, WordCompleter
+from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import HTML
 from rich.console import Console
 
@@ -242,7 +243,34 @@ def _mode_prompt(mode: str, drive: int) -> HTML:
             return HTML("<b>&gt;</b> ")
 
 
-def _mode_completer(mode: str, in_assembly: bool) -> WordCompleter | None:
+class _DotAwareCompleter(Completer):
+    """Completer that treats '.' as part of the word being completed.
+
+    WordCompleter splits on '.' so typing '.h<TAB>' fails to match '.help'.
+    This completer matches the full text from the last whitespace boundary,
+    preserving the leading dot for dot-commands.
+    """
+
+    def __init__(self, words: list[str]) -> None:
+        self.words = [w.lower() for w in words]
+
+    def get_completions(self, document: Document, complete_event):
+        # Get text from the last whitespace to the cursor
+        text = document.text_before_cursor
+        # Find the last space to get the current "word" including dots
+        space_idx = text.rfind(" ")
+        if space_idx >= 0:
+            current_word = text[space_idx + 1 :]
+        else:
+            current_word = text
+        prefix = current_word.lower()
+
+        for word in self.words:
+            if word.startswith(prefix):
+                yield Completion(word, start_position=-len(current_word))
+
+
+def _mode_completer(mode: str, in_assembly: bool) -> _DotAwareCompleter | None:
     """Build a tab completer for the current mode."""
     if in_assembly:
         return None  # No completion in assembly mode
@@ -260,7 +288,7 @@ def _mode_completer(mode: str, in_assembly: bool) -> WordCompleter | None:
         case _:
             mode_cmds = []
 
-    return WordCompleter(global_cmds + mode_cmds, ignore_case=True)
+    return _DotAwareCompleter(global_cmds + mode_cmds)
 
 
 def _translate_for_mode(line: str, mode: str) -> list[str]:
