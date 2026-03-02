@@ -83,7 +83,17 @@ public enum BASICPointers {
 
     /// MEMTOP ($90-$91): Top of BASIC memory.
     /// The highest address BASIC can use.
+    /// NOTE: Some BASIC variants (e.g., Altirra BASIC) may not maintain this
+    /// correctly at the READY prompt. Use `osMemtop` as the authoritative
+    /// upper bound for available memory.
     public static let memtop: UInt16 = 0x0090
+
+    /// OS MEMTOP ($02E5-$02E6): Operating system's top-of-memory pointer.
+    /// This is the authoritative upper bound for BASIC memory, set by the OS
+    /// during boot based on actual RAM size and screen memory layout.
+    /// Unlike the BASIC MEMTOP at $90 or RUNSTK at $8E, this value is
+    /// reliably maintained across all BASIC variants (Atari BASIC, Altirra BASIC, etc.).
+    public static let osMemtop: UInt16 = 0x02E5
 }
 
 // =============================================================================
@@ -191,8 +201,32 @@ public struct BASICMemoryState: Sendable {
     /// Runtime stack pointer.
     public let runstk: UInt16
 
-    /// Top of memory.
+    /// Top of memory (BASIC's internal pointer at $90).
+    /// WARNING: This value may be unreliable in some BASIC variants
+    /// (e.g., Altirra BASIC). Use `effectiveMemtop` for memory checks.
     public let memtop: UInt16
+
+    /// OS MEMTOP ($02E5): Authoritative top-of-memory from the operating system.
+    /// This is always reliable regardless of which BASIC variant is running.
+    public let osMemtop: UInt16
+
+    /// The effective top-of-memory for BASIC memory management.
+    ///
+    /// Some BASIC variants (e.g., Altirra BASIC) do not correctly maintain
+    /// the BASIC MEMTOP pointer at $90 or RUNSTK at $8E. This property
+    /// returns a reliable upper bound for STARP growth by checking whether
+    /// RUNSTK appears valid (between STARP and OS MEMTOP). If RUNSTK is
+    /// valid, it is used (to respect any runtime stack data). Otherwise,
+    /// OS MEMTOP is used as a safe fallback.
+    public var effectiveMemtop: UInt16 {
+        if runstk > starp && runstk <= osMemtop {
+            // RUNSTK is valid (between STARP and OS MEMTOP), respect it
+            return runstk
+        } else {
+            // RUNSTK is unreliable, fall back to OS MEMTOP
+            return osMemtop
+        }
+    }
 
     /// Creates a memory state with the given pointer values.
     public init(
@@ -204,7 +238,8 @@ public struct BASICMemoryState: Sendable {
         stmcur: UInt16,
         starp: UInt16,
         runstk: UInt16,
-        memtop: UInt16
+        memtop: UInt16,
+        osMemtop: UInt16 = BASICMemoryDefaults.defaultMEMTOP
     ) {
         self.lomem = lomem
         self.vntp = vntp
@@ -215,6 +250,7 @@ public struct BASICMemoryState: Sendable {
         self.starp = starp
         self.runstk = runstk
         self.memtop = memtop
+        self.osMemtop = osMemtop
     }
 
     /// The number of variables currently defined.
@@ -239,9 +275,11 @@ public struct BASICMemoryState: Sendable {
         Int(starp - stmtab)
     }
 
-    /// Available free memory between STARP and RUNSTK.
+    /// Available free memory between STARP and the effective memory top.
+    /// Uses `effectiveMemtop` to handle BASIC variants where RUNSTK
+    /// may not reflect the actual top of available memory.
     public var freeMemory: Int {
-        Int(runstk - starp)
+        Int(effectiveMemtop) - Int(starp)
     }
 
     /// Creates a fresh memory state for an empty BASIC program.
@@ -267,7 +305,8 @@ public struct BASICMemoryState: Sendable {
             stmcur: stmtab,
             starp: starp,
             runstk: memtop,
-            memtop: memtop
+            memtop: memtop,
+            osMemtop: memtop    // In synthetic state, OS MEMTOP matches BASIC MEMTOP
         )
     }
 }
@@ -317,6 +356,7 @@ extension BASICMemoryState {
         async let starp = reader.readWord(at: BASICPointers.starp)
         async let runstk = reader.readWord(at: BASICPointers.runstk)
         async let memtop = reader.readWord(at: BASICPointers.memtop)
+        async let osMemtop = reader.readWord(at: BASICPointers.osMemtop)
 
         return await BASICMemoryState(
             lomem: lomem,
@@ -327,7 +367,8 @@ extension BASICMemoryState {
             stmcur: stmcur,
             starp: starp,
             runstk: runstk,
-            memtop: memtop
+            memtop: memtop,
+            osMemtop: osMemtop
         )
     }
 }

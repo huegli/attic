@@ -200,7 +200,10 @@ public actor BASICLineHandler {
 
     /// Reads the current BASIC memory state from the emulator.
     private func readMemoryState() async -> BASICMemoryState {
-        // Read all pointers concurrently
+        // Read all pointers concurrently, including the OS MEMTOP which is
+        // the authoritative source for available memory. Some BASIC variants
+        // (e.g., Altirra BASIC) do not correctly maintain the BASIC MEMTOP ($90)
+        // or RUNSTK ($8E) at the READY prompt.
         async let lomem = emulator.readWord(at: BASICPointers.lomem)
         async let vntp = emulator.readWord(at: BASICPointers.vntp)
         async let vntd = emulator.readWord(at: BASICPointers.vntd)
@@ -210,6 +213,7 @@ public actor BASICLineHandler {
         async let starp = emulator.readWord(at: BASICPointers.starp)
         async let runstk = emulator.readWord(at: BASICPointers.runstk)
         async let memtop = emulator.readWord(at: BASICPointers.memtop)
+        async let osMemtop = emulator.readWord(at: BASICPointers.osMemtop)
 
         return await BASICMemoryState(
             lomem: lomem,
@@ -220,7 +224,8 @@ public actor BASICLineHandler {
             stmcur: stmcur,
             starp: starp,
             runstk: runstk,
-            memtop: memtop
+            memtop: memtop,
+            osMemtop: osMemtop
         )
     }
 
@@ -276,9 +281,12 @@ public actor BASICLineHandler {
             existingLineLength: position.existingLength
         )
 
-        // Check if we have enough memory
+        // Check if we have enough memory.
+        // Use effectiveMemtop which handles BASIC variants (e.g., Altirra BASIC)
+        // that don't maintain RUNSTK at the READY prompt. This reads OS MEMTOP
+        // ($02E5) as a reliable fallback when RUNSTK appears invalid.
         let newStarp = Int(currentState.starp) + shift
-        if newStarp > Int(currentState.runstk) - 256 {
+        if newStarp > Int(currentState.effectiveMemtop) - 256 {
             await emulator.resume()
             return .error("Out of memory")
         }
@@ -568,9 +576,11 @@ public actor BASICLineHandler {
     public func newProgram() async -> BASICLineResult {
         await emulator.pause()
 
-        // Read LOMEM and MEMTOP
+        // Read LOMEM and OS MEMTOP (the authoritative memory top).
+        // We use OS MEMTOP ($02E5) instead of BASIC MEMTOP ($90) because
+        // some BASIC variants (e.g., Altirra BASIC) don't maintain $90 correctly.
         let lomem = await emulator.readWord(at: BASICPointers.lomem)
-        let memtop = await emulator.readWord(at: BASICPointers.memtop)
+        let memtop = await emulator.readWord(at: BASICPointers.osMemtop)
 
         // Set up empty program state
         // VNT is empty (just terminator)
@@ -588,7 +598,9 @@ public actor BASICLineHandler {
         // STARP is after end marker
         let starp = stmtab + 3
 
-        // Update all pointers
+        // Update all pointers.
+        // Also write OS MEMTOP to BASIC's MEMTOP ($90) and RUNSTK ($8E) so that
+        // both the OS and BASIC views of available memory are consistent.
         await emulator.writeWord(at: BASICPointers.vntp, value: lomem)
         await emulator.writeWord(at: BASICPointers.vntd, value: lomem)
         await emulator.writeWord(at: BASICPointers.vvtp, value: vvtp)
@@ -596,6 +608,7 @@ public actor BASICLineHandler {
         await emulator.writeWord(at: BASICPointers.stmcur, value: stmtab)
         await emulator.writeWord(at: BASICPointers.starp, value: starp)
         await emulator.writeWord(at: BASICPointers.runstk, value: memtop)
+        await emulator.writeWord(at: BASICPointers.memtop, value: memtop)
 
         await emulator.resume()
 
@@ -1249,9 +1262,10 @@ public actor BASICLineHandler {
         let state = await readMemoryState()
         let lomem = state.lomem
 
-        // Check if the program fits in available memory
+        // Check if the program fits in available memory.
+        // Use effectiveMemtop for a reliable upper bound across all BASIC variants.
         let newStarp = lomem &+ starpOff
-        guard Int(newStarp) < Int(state.memtop) - 256 else {
+        guard Int(newStarp) < Int(state.effectiveMemtop) - 256 else {
             return .error("Program too large to fit in memory")
         }
 
