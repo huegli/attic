@@ -1,3 +1,4 @@
+backup/
 # Dolt database (managed by Dolt, not git)
 dolt/
 dolt-access.lock
@@ -50,5 +51,3 @@ daemon.pid
 # They would override fork protection in .git/info/exclude.
 # Config files (metadata.json, config.yaml) are tracked by git by default
 # since no pattern above ignores them.
-backup/
-
