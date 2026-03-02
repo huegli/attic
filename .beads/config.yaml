@@ -1,4 +1,0 @@
-no-daemon: true
-sync:
-    mode: dolt-native
-sync-branch: ""
