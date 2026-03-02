@@ -53,5 +53,3 @@
 # - linear.api-key
 # - github.org
 # - github.repo
-sync:
-  mode: belt-and-suspenders
