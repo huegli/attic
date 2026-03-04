@@ -7,6 +7,7 @@ from attic_cli.display import (
     format_registers,
     split_multiline,
 )
+from attic_cli.modes.monitor import _format_raw_data
 
 
 class TestSplitMultiline:
@@ -114,3 +115,30 @@ class TestFormatMemoryDump:
     def test_empty(self):
         result = format_memory_dump("")
         assert result == ""
+
+
+class TestFormatRawData:
+    """Tests for converting raw server 'data' responses into addressed hex dump lines."""
+
+    def test_basic_conversion(self):
+        result = _format_raw_data("read $0600 4", "data A9,00,8D,00")
+        assert result == "$0600: A9 00 8D 00"
+
+    def test_multirow(self):
+        # 20 bytes should produce 2 rows (16 + 4)
+        bytes_hex = ",".join(["FF"] * 16 + ["AA"] * 4)
+        result = _format_raw_data("read $0600 20", f"data {bytes_hex}")
+        lines = result.split("\x1e")
+        assert len(lines) == 2
+        assert lines[0].startswith("$0600:")
+        assert lines[1].startswith("$0610:")
+        assert "AA" in lines[1]
+
+    def test_io_address(self):
+        result = _format_raw_data("read $D000 2", "data FF,42")
+        assert result == "$D000: FF 42"
+
+    def test_decimal_address_fallback(self):
+        # Non-hex address should default to 0
+        result = _format_raw_data("read notanaddr 2", "data A9,00")
+        assert result.startswith("$0000:")

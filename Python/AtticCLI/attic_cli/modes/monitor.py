@@ -17,6 +17,37 @@ _MEMORY_COMMANDS = {"read"}
 # Commands that produce register output
 _REGISTER_COMMANDS = {"registers"}
 
+# Number of hex bytes shown per row in memory dumps
+_DUMP_BYTES_PER_ROW = 16
+
+
+def _format_raw_data(cmd: str, payload: str) -> str:
+    """Convert raw 'data XX,XX,...' server response into formatted hex dump lines.
+
+    The server returns comma-separated hex bytes (e.g. 'data A9,00,8D,...').
+    format_memory_dump() expects lines like '$0600: A9 00 8D ...'.
+    This function bridges the two by extracting the start address from the
+    original 'read' command and grouping bytes into rows.
+    """
+    # Extract start address from command: "read $0600 16" → "$0600"
+    cmd_parts = cmd.split()
+    try:
+        addr = int(cmd_parts[1].lstrip("$"), 16) if len(cmd_parts) > 1 else 0
+    except ValueError:
+        addr = 0
+
+    # Strip "data " prefix and split comma-separated hex bytes
+    data_str = payload[5:] if payload.startswith("data ") else payload
+    byte_strs = [b.strip() for b in data_str.split(",") if b.strip()]
+
+    # Group into rows of _DUMP_BYTES_PER_ROW and format as "$ADDR: HH HH ..."
+    lines = []
+    for i in range(0, len(byte_strs), _DUMP_BYTES_PER_ROW):
+        row = byte_strs[i : i + _DUMP_BYTES_PER_ROW]
+        lines.append(f"${addr + i:04X}: {' '.join(row)}")
+
+    return MULTI_LINE_SEP.join(lines)
+
 
 class MonitorMode(BaseMode):
     """Monitor (debugger) mode for 6502 CPU inspection and control.
@@ -52,7 +83,10 @@ class MonitorMode(BaseMode):
                 if cmd_word in _DISASM_COMMANDS:
                     results.append(format_disassembly(payload))
                 elif cmd_word in _MEMORY_COMMANDS:
-                    results.append(format_memory_dump(payload))
+                    # Server returns raw "data XX,XX,..."; convert to
+                    # addressed lines before applying color formatting.
+                    formatted = _format_raw_data(cmd, payload)
+                    results.append(format_memory_dump(formatted))
                 elif cmd_word in _REGISTER_COMMANDS and "=" in payload:
                     results.append(format_registers(payload))
                 elif MULTI_LINE_SEP in payload:
