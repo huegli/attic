@@ -28,9 +28,9 @@
 
 	<!-- Version info — must match AtticCore.version (single source of truth) -->
 	<key>CFBundleShortVersionString</key>
-	<string>0.2.0</string>
+	<string>0.2.1</string>
 	<key>CFBundleVersion</key>
-	<string>4</string>
+	<string>5</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 
@@ -49,6 +49,12 @@
 	<!-- Suppress macOS App Translocation (Gatekeeper quarantine relocation) -->
 	<key>LSFileQuarantineEnabled</key>
 	<false/>
+
+	<!-- Prevent Finder from launching a second instance when opening files.
+	     Instead, file-open events are routed to the running instance via
+	     NSApplicationDelegate.application(_:open:). -->
+	<key>LSMultipleInstancesProhibited</key>
+	<true/>
 
 	<!--
 	  Document types: file associations for Finder "Open With" and drag-and-drop.

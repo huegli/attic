@@ -415,7 +415,7 @@ public struct CLICommandParser: Sendable {
 
         // Display
         case "screenshot":
-            return .screenshot(path: argsString.isEmpty ? nil : argsString)
+            return .screenshot(path: argsString.isEmpty ? nil : argsString.expandingPath)
         case "screen":
             let atascii = argsString.uppercased() == "ATASCII"
             return .screenText(atascii: atascii)
@@ -650,7 +650,7 @@ public struct CLICommandParser: Sendable {
             throw CLIProtocolError.invalidDriveNumber(String(parts[0]))
         }
 
-        return .mount(drive: drive, path: String(parts[1]))
+        return .mount(drive: drive, path: String(parts[1]).expandingPath)
     }
 
     private func parseUnmount(_ args: String) throws -> CLICommand {
@@ -662,22 +662,20 @@ public struct CLICommandParser: Sendable {
 
     /// Parses a `boot <path>` command.
     ///
-    /// The path argument is required and may contain spaces. Tilde (~) is
-    /// expanded to the user's home directory.
+    /// The path argument is required and may contain spaces. Shell escape
+    /// sequences are unescaped and tilde (~) is expanded to the home directory.
     private func parseBoot(_ args: String) throws -> CLICommand {
         let path = args.trimmingCharacters(in: .whitespaces)
         guard !path.isEmpty else {
             throw CLIProtocolError.missingArgument("boot requires a file path")
         }
-        // Expand ~ to home directory for convenience
-        let expandedPath = NSString(string: path).expandingTildeInPath
-        return .boot(path: expandedPath)
+        return .boot(path: path.expandingPath)
     }
 
     /// Parses a `state save|load <path>` command.
     ///
-    /// The path argument is required and may contain spaces. Tilde (~) is
-    /// expanded to the user's home directory.
+    /// The path argument is required and may contain spaces. Shell escape
+    /// sequences are unescaped and tilde (~) is expanded to the home directory.
     private func parseState(_ args: String) throws -> CLICommand {
         let parts = args.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
         guard let subcommand = parts.first else {
@@ -688,8 +686,7 @@ public struct CLICommandParser: Sendable {
             throw CLIProtocolError.missingArgument("state \(subcommand) requires path")
         }
 
-        // Expand ~ to home directory, consistent with .boot and other path commands
-        let path = NSString(string: String(parts[1])).expandingTildeInPath
+        let path = String(parts[1]).expandingPath
 
         switch String(subcommand).lowercased() {
         case "save":
@@ -836,14 +833,12 @@ public struct CLICommandParser: Sendable {
             guard !rest.isEmpty else {
                 throw CLIProtocolError.missingArgument("basic export requires a file path")
             }
-            let expandedPath = NSString(string: rest).expandingTildeInPath
-            return .basicExport(path: expandedPath)
+            return .basicExport(path: rest.expandingPath)
         case "IMPORT":
             guard !rest.isEmpty else {
                 throw CLIProtocolError.missingArgument("basic import requires a file path")
             }
-            let expandedPath = NSString(string: rest).expandingTildeInPath
-            return .basicImport(path: expandedPath)
+            return .basicImport(path: rest.expandingPath)
         case "DIR":
             if rest.isEmpty {
                 return .basicDir(drive: nil)
@@ -1016,27 +1011,25 @@ public struct CLICommandParser: Sendable {
     /// Parses `dos export <filename> <hostpath>`.
     ///
     /// Exports a file from the ATR disk image to the host filesystem.
-    /// The host path is tilde-expanded.
+    /// Shell escapes are unescaped and tilde is expanded in the host path.
     private func parseDOSExport(_ args: String) throws -> CLICommand {
         let parts = args.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
         guard parts.count == 2 else {
             throw CLIProtocolError.missingArgument("dos export requires filename and host path")
         }
-        let hostPath = NSString(string: String(parts[1])).expandingTildeInPath
-        return .dosExport(filename: String(parts[0]), hostPath: hostPath)
+        return .dosExport(filename: String(parts[0]), hostPath: String(parts[1]).expandingPath)
     }
 
     /// Parses `dos import <hostpath> <filename>`.
     ///
     /// Imports a file from the host filesystem to the ATR disk image.
-    /// The host path is tilde-expanded.
+    /// Shell escapes are unescaped and tilde is expanded in the host path.
     private func parseDOSImport(_ args: String) throws -> CLICommand {
         let parts = args.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
         guard parts.count == 2 else {
             throw CLIProtocolError.missingArgument("dos import requires host path and filename")
         }
-        let hostPath = NSString(string: String(parts[0])).expandingTildeInPath
-        return .dosImport(hostPath: hostPath, filename: String(parts[1]))
+        return .dosImport(hostPath: String(parts[0]).expandingPath, filename: String(parts[1]))
     }
 
     /// Parses `dos newdisk <path> [type]`.
@@ -1046,7 +1039,7 @@ public struct CLICommandParser: Sendable {
     /// - "ed" — enhanced density 130KB
     /// - "dd" — double density 180KB
     ///
-    /// The path is tilde-expanded.
+    /// Shell escapes are unescaped and tilde is expanded in the path.
     private func parseDOSNewDisk(_ args: String) throws -> CLICommand {
         guard !args.isEmpty else {
             throw CLIProtocolError.missingArgument("dos newdisk requires a file path")
@@ -1066,7 +1059,7 @@ public struct CLICommandParser: Sendable {
             }
         }
 
-        let path = NSString(string: pathParts.map(String.init).joined(separator: " ")).expandingTildeInPath
+        let path = pathParts.map(String.init).joined(separator: " ").expandingPath
         return .dosNewDisk(path: path, type: type)
     }
 

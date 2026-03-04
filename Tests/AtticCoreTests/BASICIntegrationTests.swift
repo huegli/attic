@@ -568,7 +568,7 @@ final class BASICProgramManagementTests: XCTestCase {
             XCTFail("Expected basicImport, got \(cmd)")
             return
         }
-        XCTAssertEqual(path, "~/program.bas")
+        XCTAssertEqual(path, NSString(string: "~/program.bas").expandingTildeInPath)
     }
 
     /// IMPORT with no path produces an error.
@@ -583,7 +583,7 @@ final class BASICProgramManagementTests: XCTestCase {
             XCTFail("Expected basicExport, got \(cmd)")
             return
         }
-        XCTAssertEqual(path, "~/output.bas")
+        XCTAssertEqual(path, NSString(string: "~/output.bas").expandingTildeInPath)
     }
 
     /// EXPORT with no path produces an error.

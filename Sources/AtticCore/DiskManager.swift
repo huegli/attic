@@ -265,7 +265,7 @@ public actor DiskManager {
         }
 
         // Expand path and check if file exists
-        let expandedPath = NSString(string: path).expandingTildeInPath
+        let expandedPath = path.expandingPath
         let url = URL(fileURLWithPath: expandedPath)
 
         guard FileManager.default.fileExists(atPath: expandedPath) else {
@@ -336,7 +336,7 @@ public actor DiskManager {
     public func trackBootedDisk(drive: Int, path: String) {
         guard drive >= 1 && drive <= DiskManager.maxDrives else { return }
 
-        let expandedPath = NSString(string: path).expandingTildeInPath
+        let expandedPath = path.expandingPath
         let url = URL(fileURLWithPath: expandedPath)
 
         // Clear any previous tracking for this drive
@@ -673,7 +673,7 @@ public actor DiskManager {
         let data = try mounted.fileSystem.readFile(name)
 
         // Expand path and write to host
-        let expandedPath = NSString(string: hostPath).expandingTildeInPath
+        let expandedPath = hostPath.expandingPath
         let url = URL(fileURLWithPath: expandedPath)
 
         try data.write(to: url)
@@ -702,7 +702,7 @@ public actor DiskManager {
         }
 
         // Read file from host
-        let expandedPath = NSString(string: hostPath).expandingTildeInPath
+        let expandedPath = hostPath.expandingPath
         let url = URL(fileURLWithPath: expandedPath)
 
         guard FileManager.default.fileExists(atPath: expandedPath) else {
@@ -761,7 +761,7 @@ public actor DiskManager {
     /// - Throws: ATRError if creation fails.
     @discardableResult
     public func createDisk(at path: String, type: DiskType = .singleDensity) throws -> URL {
-        let expandedPath = NSString(string: path).expandingTildeInPath
+        let expandedPath = path.expandingPath
         let url = URL(fileURLWithPath: expandedPath)
 
         // Create formatted disk
