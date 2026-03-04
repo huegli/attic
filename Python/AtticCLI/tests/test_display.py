@@ -4,10 +4,14 @@ from attic_cli.display import (
     _mnemonic_color,
     format_disassembly,
     format_memory_dump,
+    format_monitor_response,
+    format_raw_memory_data,
     format_registers,
     split_multiline,
 )
-from attic_cli.modes.monitor import _format_raw_data
+
+# Backward-compatible alias used by existing tests
+_format_raw_data = format_raw_memory_data
 
 
 class TestSplitMultiline:
@@ -142,3 +146,48 @@ class TestFormatRawData:
         # Non-hex address should default to 0
         result = _format_raw_data("read notanaddr 2", "data A9,00")
         assert result.startswith("$0000:")
+
+
+class TestFormatMonitorResponse:
+    """Tests for the unified monitor response formatter."""
+
+    def test_read_applies_memory_dump_formatting(self):
+        result = format_monitor_response("read $0600 4", "data A9,00,8D,00")
+        assert result is not None
+        # Should have colored address
+        assert "[cyan]$0600[/cyan]" in result
+        # Zero bytes dimmed
+        assert "[dim]00[/dim]" in result
+        # Non-zero bytes bold
+        assert "[bold]A9[/bold]" in result
+
+    def test_read_io_range_highlighted(self):
+        result = format_monitor_response("read $D000 2", "data FF,42")
+        assert result is not None
+        assert "[bold magenta]FF[/bold magenta]" in result
+
+    def test_disassemble_applies_syntax_highlighting(self):
+        result = format_monitor_response(
+            "disassemble $E000 1",
+            "$E000  A9 00     LDA #$00",
+        )
+        assert result is not None
+        assert "LDA" in result
+        assert "[dim]$E000[/dim]" in result
+
+    def test_registers_colored(self):
+        result = format_monitor_response(
+            "registers",
+            "A=$FF X=$00 Y=$00 S=$FD P=$34 PC=$E000",
+        )
+        assert result is not None
+        assert "[bold]A[/bold]" in result
+        assert "[cyan]$FF[/cyan]" in result
+
+    def test_unknown_command_returns_none(self):
+        result = format_monitor_response("pause", "ok")
+        assert result is None
+
+    def test_registers_without_equals_returns_none(self):
+        result = format_monitor_response("registers", "no data")
+        assert result is None

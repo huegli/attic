@@ -191,6 +191,66 @@ def format_memory_dump(raw: str) -> str:
     return "\n".join(result_lines)
 
 
+# Commands that produce specific output formats in monitor mode
+_DISASM_COMMANDS = {"disassemble"}
+_MEMORY_COMMANDS = {"read"}
+_REGISTER_COMMANDS = {"registers"}
+
+# Number of hex bytes shown per row in memory dumps
+_DUMP_BYTES_PER_ROW = 16
+
+
+def format_raw_memory_data(cmd: str, payload: str) -> str:
+    """Convert raw 'data XX,XX,...' server response into formatted hex dump lines.
+
+    The server returns comma-separated hex bytes (e.g. 'data A9,00,8D,...').
+    format_memory_dump() expects lines like '$0600: A9 00 8D ...'.
+    This function bridges the two by extracting the start address from the
+    original 'read' command and grouping bytes into rows.
+    """
+    # Extract start address from command: "read $0600 16" → "$0600"
+    cmd_parts = cmd.split()
+    try:
+        addr = int(cmd_parts[1].lstrip("$"), 16) if len(cmd_parts) > 1 else 0
+    except ValueError:
+        addr = 0
+
+    # Strip "data " prefix and split comma-separated hex bytes
+    data_str = payload[5:] if payload.startswith("data ") else payload
+    byte_strs = [b.strip() for b in data_str.split(",") if b.strip()]
+
+    # Group into rows of _DUMP_BYTES_PER_ROW and format as "$ADDR: HH HH ..."
+    lines = []
+    for i in range(0, len(byte_strs), _DUMP_BYTES_PER_ROW):
+        row = byte_strs[i : i + _DUMP_BYTES_PER_ROW]
+        lines.append(f"${addr + i:04X}: {' '.join(row)}")
+
+    return MULTI_LINE_SEP.join(lines)
+
+
+def format_monitor_response(cmd: str, payload: str) -> str | None:
+    """Apply monitor mode formatting to a command response.
+
+    Selects the appropriate formatter based on command type:
+    - disassemble → syntax-highlighted disassembly
+    - read → heat-mapped memory dump with I/O register highlighting
+    - registers → colored register display
+
+    Returns formatted Rich markup string, or None if no special
+    formatting applies (caller should use default display).
+    """
+    cmd_word = cmd.split()[0] if cmd else ""
+
+    if cmd_word in _DISASM_COMMANDS:
+        return format_disassembly(payload)
+    if cmd_word in _MEMORY_COMMANDS:
+        formatted = format_raw_memory_data(cmd, payload)
+        return format_memory_dump(formatted)
+    if cmd_word in _REGISTER_COMMANDS and "=" in payload:
+        return format_registers(payload)
+    return None
+
+
 def split_multiline(raw: str) -> list[str]:
     """Split a protocol response containing 0x1E separators into lines."""
     if MULTI_LINE_SEP in raw:

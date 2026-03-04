@@ -13,6 +13,7 @@ from rich.console import Console
 
 from .cli_client import CLIError, CLISocketClient
 from .commands import QUIT, SHUTDOWN, handle_dot_command
+from .display import format_monitor_response
 from .help import (
     BASIC_HELP,
     DOS_HELP,
@@ -162,9 +163,20 @@ def run_repl(client: CLISocketClient) -> None:
                             except (ValueError, IndexError):
                                 pass
 
-                        # Display response
+                        # Display response with mode-specific formatting.
+                        # Monitor mode applies syntax highlighting for
+                        # disassembly, heat-map coloring for memory dumps,
+                        # and colored register display.
                         if payload:
-                            if MULTI_LINE_SEP in payload:
+                            formatted = None
+                            if mode == "monitor":
+                                formatted = format_monitor_response(
+                                    cmd, payload
+                                )
+
+                            if formatted:
+                                console.print(formatted)
+                            elif MULTI_LINE_SEP in payload:
                                 for part in payload.split(MULTI_LINE_SEP):
                                     console.print(part, highlight=False)
                             else:
