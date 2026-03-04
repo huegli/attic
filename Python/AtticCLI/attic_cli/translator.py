@@ -46,6 +46,10 @@ def translate_monitor(line: str) -> list[str]:
 
         case "m":
             if args:
+                # Default to 16 bytes when only an address is given
+                arg_parts = args.split()
+                if len(arg_parts) == 1:
+                    return [f"read {args} 16"]
                 return [f"read {args}"]
             return ["read"]
 

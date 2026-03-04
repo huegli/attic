@@ -30,7 +30,7 @@ class TestTranslateMonitor:
         assert translate_monitor("r a=$42 pc=$E000") == ["registers a=$42 pc=$E000"]
 
     def test_memory_read(self):
-        assert translate_monitor("m $0600") == ["read $0600"]
+        assert translate_monitor("m $0600") == ["read $0600 16"]
 
     def test_memory_read_with_count(self):
         assert translate_monitor("m $0600 32") == ["read $0600 32"]
