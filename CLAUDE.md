@@ -27,10 +27,12 @@ attic/
 │   ├── AtticServer/            # Standalone emulator server executable
 │   ├── AtticCLI/               # Command-line executable (attic)
 │   ├── AtticGUI/               # SwiftUI + Metal application (AtticGUI)
-│   ├── AtticMCP/               # MCP server (Swift, archived — see README.md)
-│   └── AtticMCP-Python/        # MCP server (Python/FastMCP, active)
+│   └── AtticMCP/               # MCP server (Swift, archived — see README.md)
 ├── Libraries/
 │   └── libatari800/            # Pre-compiled emulator core
+├── Python/
+│   ├── AtticCLI/               # Python CLI (click + prompt_toolkit + rich)
+│   └── AtticMCP/               # MCP server (Python/FastMCP, active)
 └── Resources/
     └── ROM/                    # User-provided Atari ROMs
 ```
@@ -169,7 +171,7 @@ See `BEADS-QUICKSTART.md` for complete setup and usage instructions.
 
 ## MCP Integration (Claude Code)
 
-This project includes an MCP server (AtticMCP) implemented in Python using FastMCP that allows Claude Code to directly interact with the Atari 800 XL emulator. The source is in `Sources/AtticMCP-Python/` and the `.mcp.json` file in the project root configures this integration.
+This project includes an MCP server (AtticMCP) implemented in Python using FastMCP that allows Claude Code to directly interact with the Atari 800 XL emulator. The source is in `Python/AtticMCP/` and the `.mcp.json` file in the project root configures this integration.
 
 ### Prerequisites
 

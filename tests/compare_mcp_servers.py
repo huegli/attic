@@ -741,7 +741,7 @@ def main() -> None:
         default=None,
         help=(
             "Command to start the Python MCP server. Default: "
-            "'uv run --directory Sources/AtticMCP-Python attic-mcp'"
+            "'uv run --directory Python/AtticMCP attic-mcp'"
         ),
     )
     args = parser.parse_args()
@@ -757,7 +757,7 @@ def main() -> None:
     if args.python_cmd:
         python_cmd = args.python_cmd.split()
     else:
-        python_dir = os.path.join(REPO_ROOT, "Sources", "AtticMCP-Python")
+        python_dir = os.path.join(REPO_ROOT, "Python", "AtticMCP")
         python_cmd = ["uv", "run", "--directory", python_dir, "attic-mcp"]
 
     print(bold("=" * 70))

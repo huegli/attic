@@ -8,7 +8,7 @@
 #   - AtticGUI executable (the main app)
 #   - AtticServer executable (launched as subprocess by AtticGUI)
 #   - attic CLI executable (command-line REPL tool)
-#   - AtticMCP-Python source (MCP server for Claude Code integration)
+#   - AtticMCP source (MCP server for Claude Code integration)
 #   - App icon (generated from Attic-Logo.png)
 #   - Info.plist (bundle metadata and file associations)
 #   - Credits.rtf (shown in About dialog)
@@ -95,7 +95,7 @@ rm -rf "$APP_DIR"
 #     Contents/
 #       MacOS/                    <- executables (AtticGUI, AtticServer, attic)
 #       Resources/                <- icons, credits, ROMs, MCP server
-#         AtticMCP-Python/        <- Python MCP server source
+#         AtticMCP/        <- Python MCP server source
 #       Info.plist                <- bundle metadata
 #       PkgInfo                   <- legacy package type marker
 mkdir -p "$MACOS_DIR"
@@ -142,23 +142,23 @@ fi
 printf 'APPL????' > "$CONTENTS/PkgInfo"
 
 # -------------------------------------------------------------------------
-# Step 6: Copy AtticMCP-Python source (MCP server for Claude Code)
+# Step 6: Copy AtticMCP source (MCP server for Claude Code)
 # -------------------------------------------------------------------------
 # Only the source files are copied — the .venv/ and uv.lock are excluded.
 # Users run the MCP server with: uv run --directory <path> attic-mcp
 # which resolves dependencies from pyproject.toml at runtime.
 
-MCP_SRC="$PROJECT_ROOT/Sources/AtticMCP-Python"
-MCP_DST="$RESOURCES_DIR/AtticMCP-Python"
+MCP_SRC="$PROJECT_ROOT/Python/AtticMCP"
+MCP_DST="$RESOURCES_DIR/AtticMCP"
 if [ -d "$MCP_SRC/attic_mcp" ]; then
-    echo "Copying AtticMCP-Python source..."
+    echo "Copying AtticMCP source..."
     mkdir -p "$MCP_DST/attic_mcp"
     cp "$MCP_SRC/pyproject.toml" "$MCP_DST/"
     cp "$MCP_SRC/attic_mcp/__init__.py" "$MCP_DST/attic_mcp/"
     cp "$MCP_SRC/attic_mcp/server.py" "$MCP_DST/attic_mcp/"
     cp "$MCP_SRC/attic_mcp/cli_client.py" "$MCP_DST/attic_mcp/"
 else
-    echo "Warning: AtticMCP-Python source not found at $MCP_SRC, skipping"
+    echo "Warning: AtticMCP source not found at $MCP_SRC, skipping"
 fi
 
 # -------------------------------------------------------------------------
