@@ -1,0 +1,12 @@
+{
+  "calva.replConnectSequences": [
+    {
+      "name": "Approach 2 — Protocol",
+      "projectType": "deps.edn",
+      "cljsType": "none",
+      "menuSelections": {
+        "cljAliases": ["dev"]
+      }
+    }
+  ]
+}

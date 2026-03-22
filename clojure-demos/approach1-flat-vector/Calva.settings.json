@@ -1,0 +1,12 @@
+{
+  "calva.replConnectSequences": [
+    {
+      "name": "Approach 1 — Flat Vector",
+      "projectType": "deps.edn",
+      "cljsType": "none",
+      "menuSelections": {
+        "cljAliases": ["dev"]
+      }
+    }
+  ]
+}
