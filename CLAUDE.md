@@ -101,7 +101,8 @@ See `docs/IMPLEMENTATION_PLAN.md` for detailed phase-by-phase progress. Summary:
 - `docs/MCP_USAGE.md` - MCP server tools for Claude Code integration
 - `docs/BASIC_TOKENIZER.md` - BASIC tokenization implementation
 - `docs/ATR_FILESYSTEM.md` - ATR disk image format
-- `docs/6502_REFERENCE.md` - 6502 instruction set reference
+- `docs/6502_SPECIFICATION.md` - Complete 6502 CPU specification (SALLY/6502C)
+- `docs/ASSEM_DISSASSEM.md` - Assembler, disassembler, and breakpoint implementation
 - `docs/REPL_COMMANDS.md` - All REPL commands
 - `docs/IMPLEMENTATION_PLAN.md` - Step-by-step implementation guide
 
