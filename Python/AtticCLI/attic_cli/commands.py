@@ -106,6 +106,9 @@ def handle_dot_command(
     if cmd == ".state":
         return _handle_state(client, args)
 
+    if cmd == ".capture":
+        return _handle_capture(client, args)
+
     return f"[red]Unknown command: {stripped}[/red]"
 
 
@@ -147,6 +150,18 @@ def _handle_screenshot(client: CLISocketClient, args: str) -> str | None:
         return None
     except Exception as exc:
         return f"[red]Error:[/red] {exc}"
+
+
+def _handle_capture(client: CLISocketClient, args: str) -> str:
+    """Handle .capture start|stop|read|status commands."""
+    if not args:
+        return "[red]Usage: .capture start|stop|read|status[/red]"
+
+    subcmd = args.strip().lower()
+    if subcmd not in ("start", "stop", "read", "status"):
+        return f"[red]Unknown capture subcommand: {subcmd}[/red]"
+
+    return _send_and_format(client, f"capture {subcmd}")
 
 
 def _handle_state(client: CLISocketClient, args: str) -> str:

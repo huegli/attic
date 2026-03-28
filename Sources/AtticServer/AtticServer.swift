@@ -387,6 +387,10 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
         var totalBytes: Int = 0
     }
 
+    /// CIO output interceptor for capturing E: device text output.
+    /// Lazily created on first `capture start` command.
+    private var cioInterceptor: CIOInterceptor?
+
     init(emulator: EmulatorEngine) {
         self.emulator = emulator
         self.diskManager = DiskManager(emulator: emulator)
@@ -965,6 +969,51 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
                 return .ok("formatted D\(drive):")
             } catch {
                 return .error(error.localizedDescription)
+            }
+
+        // CIO output capture commands
+        case .captureStart:
+            do {
+                if cioInterceptor == nil {
+                    cioInterceptor = CIOInterceptor(emulator: emulator)
+                }
+                try await cioInterceptor!.install()
+                return .ok("capture started")
+            } catch {
+                return .error(error.localizedDescription)
+            }
+
+        case .captureStop:
+            guard let interceptor = cioInterceptor else {
+                return .error("capture not started")
+            }
+            do {
+                try await interceptor.uninstall()
+                return .ok("capture stopped")
+            } catch {
+                return .error(error.localizedDescription)
+            }
+
+        case .captureRead:
+            guard let interceptor = cioInterceptor else {
+                return .error("capture not started")
+            }
+            let text = await interceptor.drain()
+            if text.isEmpty {
+                return .ok("")
+            }
+            // Split on newlines and send as multi-line response using the
+            // record separator (\x1E). Raw newlines in OK: responses break
+            // the line-based CLI protocol.
+            let lines = text.components(separatedBy: "\n")
+            return .okMultiLine(lines)
+
+        case .captureStatus:
+            if let interceptor = cioInterceptor {
+                let installed = await interceptor.isInstalled
+                return .ok(installed ? "active" : "inactive")
+            } else {
+                return .ok("inactive")
             }
         }
     }
