@@ -2,5 +2,6 @@
   "database": "dolt",
   "backend": "dolt",
   "dolt_mode": "server",
-  "dolt_database": "attic"
+  "dolt_database": "attic",
+  "project_id": "15253147-7df5-45f5-a085-ed7ac55dbbd2"
 }
