@@ -582,6 +582,38 @@ public actor EmulatorEngine {
         return result
     }
 
+    /// Executes a single frame even when the emulator is paused.
+    ///
+    /// Unlike `executeFrame()`, this method bypasses the `shouldRun` guard.
+    /// It is used by stepping commands (step, stepOver, runUntil) that need
+    /// to execute frames while the emulator is paused. The emulator remains
+    /// paused after the frame completes — callers are responsible for managing
+    /// the run state.
+    ///
+    /// - Returns: The frame execution result.
+    @discardableResult
+    public func stepFrame() async -> FrameResult {
+        guard wrapper.isInitialized else { return .notInitialized }
+
+        var input = inputState
+        let result = wrapper.executeFrame(input: &input)
+        frameCount += 1
+
+        // Handle pending key release AFTER the frame has processed the input.
+        if keyReleasePending {
+            inputState.keyChar = 0
+            inputState.keyCode = 0
+            keyReleasePending = false
+        }
+
+        if result == .breakpoint {
+            let pc = wrapper.getRegisters().pc
+            state = .breakpoint(address: pc)
+        }
+
+        return result
+    }
+
     /// Returns the current frame count since initialization.
     public var currentFrameCount: UInt64 {
         frameCount

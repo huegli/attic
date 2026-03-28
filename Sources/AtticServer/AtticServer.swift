@@ -363,6 +363,18 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
     /// Lock for thread-safe access.
     private let lock = NSLock()
 
+    /// Breakpoint manager using BRK injection for reliable breakpoints.
+    /// Shared across all breakpoint, step, and runUntil commands so that
+    /// injected BRK bytes are properly tracked and cleaned up.
+    /// Exposed as internal so the main emulation loop can access it for
+    /// breakpoint hit handling and cleanup of temporary breakpoints.
+    let breakpointManager = BreakpointManager()
+
+    /// Memory access adapter for BreakpointManager operations.
+    private var memoryAdapter: EmulatorMemoryAdapter {
+        EmulatorMemoryAdapter(emulator: emulator)
+    }
+
     /// Tracks active interactive assembly sessions per connected CLI client.
     /// Each session holds an `InteractiveAssembler` that auto-advances the
     /// address and a record of the starting address and total bytes written.
@@ -413,13 +425,25 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
             return .ok("paused")
 
         case .resume:
+            // If we're stopped at a breakpoint, we need to step past the BRK
+            // instruction before resuming: suspend the BRK (restore original
+            // byte), execute one frame to advance past it, then re-inject BRK.
+            let currentState = await emulator.state
+            if case .breakpoint(let addr) = currentState {
+                if await breakpointManager.hasBreakpoint(at: addr) {
+                    await breakpointManager.suspendBreakpoint(at: addr, memory: memoryAdapter)
+                    await emulator.stepFrame()
+                    await breakpointManager.resumeBreakpoint(at: addr, memory: memoryAdapter)
+                }
+            }
             await emulator.resume()
             return .ok("resumed")
 
         case .step(let count):
-            // Execute frames (libatari800 steps by frames, not instructions)
+            // Execute frames using stepFrame() which bypasses the shouldRun guard,
+            // allowing stepping to work while the emulator is paused.
             for _ in 0..<count {
-                let result = await emulator.executeFrame()
+                let result = await emulator.stepFrame()
                 if result == .breakpoint {
                     let regs = await emulator.getRegisters()
                     return .ok("stepped \(formatRegisters(regs))\n* Breakpoint hit at $\(String(format: "%04X", regs.pc))")
@@ -429,6 +453,9 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
             return .ok("stepped \(formatRegisters(regs))")
 
         case .reset(let cold):
+            // Clear all injected BRKs before reset — RAM contents change on
+            // cold reset, so stale BRK bytes would corrupt the new state.
+            await breakpointManager.clearAllBreakpoints(memory: memoryAdapter)
             await emulator.reset(cold: cold)
             return .ok("reset \(cold ? "cold" : "warm")")
 
@@ -479,31 +506,39 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
             let regs = await emulator.getRegisters()
             return .ok(formatRegisters(regs))
 
-        // Breakpoints
+        // Breakpoints — routed through BreakpointManager for BRK injection.
+        // This ensures breakpoints trigger reliably via the CPU hitting BRK ($00)
+        // rather than unreliable per-frame PC polling.
         case .breakpointSet(let address):
-            if await emulator.setBreakpoint(at: address) {
-                return .ok("breakpoint set $\(String(format: "%04X", address))")
-            } else {
-                return .error("Breakpoint already set at $\(String(format: "%04X", address))")
+            do {
+                let (_, isROM) = try await breakpointManager.setBreakpoint(at: address, memory: memoryAdapter)
+                var msg = "breakpoint set $\(String(format: "%04X", address))"
+                if isROM {
+                    msg += " (ROM — uses slower PC watching)"
+                }
+                return .ok(msg)
+            } catch {
+                return .error(error.localizedDescription)
             }
 
         case .breakpointClear(let address):
-            if await emulator.clearBreakpoint(at: address) {
+            do {
+                try await breakpointManager.clearBreakpoint(at: address, memory: memoryAdapter)
                 return .ok("breakpoint cleared $\(String(format: "%04X", address))")
-            } else {
-                return .error("No breakpoint at $\(String(format: "%04X", address))")
+            } catch {
+                return .error(error.localizedDescription)
             }
 
         case .breakpointClearAll:
-            await emulator.clearAllBreakpoints()
+            await breakpointManager.clearAllBreakpoints(memory: memoryAdapter)
             return .ok("breakpoints cleared")
 
         case .breakpointList:
-            let bps = await emulator.getBreakpoints()
+            let bps = await breakpointManager.getAllBreakpoints()
             if bps.isEmpty {
                 return .ok("breakpoints (none)")
             }
-            let bpStrs = bps.map { "$\(String(format: "%04X", $0))" }.joined(separator: ",")
+            let bpStrs = bps.map { $0.formatted }.joined(separator: ", ")
             return .ok("breakpoints \(bpStrs)")
 
         // Disk operations — all go through DiskManager which coordinates
@@ -553,8 +588,8 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
                 return .error("File not found '\(path)'")
             }
             do {
-                // Clear breakpoints before loading (RAM contents will change)
-                await emulator.clearAllBreakpoints()
+                // Clear injected BRKs before loading (RAM contents will change)
+                await breakpointManager.clearAllBreakpoints(memory: memoryAdapter)
 
                 // Load state (metadata is returned but server doesn't use it)
                 let metadata = try await emulator.loadState(from: URL(fileURLWithPath: path))
@@ -638,10 +673,12 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
             return .ok("Assembly complete: \(session.totalBytes) bytes at $\(String(format: "%04X", session.startAddress))-$\(String(format: "%04X", endAddr))")
 
         case .stepOver:
-            // Step over (treat JSR as single step)
+            // Step over (treat JSR as single step).
+            // Uses the shared breakpointManager so that existing breakpoints
+            // are visible to the stepper and temp BRKs don't collide.
             let monitor = MonitorStepper(
                 emulator: emulator,
-                breakpoints: BreakpointManager()
+                breakpoints: breakpointManager
             )
             let result = await monitor.stepOver()
             if !result.success, let msg = result.errorMessage {
@@ -653,12 +690,11 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
             }
 
         case .runUntil(let address):
-            // Run until address (set temp breakpoint and resume)
-            let breakpointMgr = BreakpointManager()
-            let memoryAdapter = EmulatorMemoryAdapter(emulator: emulator)
-            await breakpointMgr.setTemporaryBreakpoint(at: address, memory: memoryAdapter)
+            // Run until address using the shared breakpointManager.
+            // Sets a temp BRK at the target and resumes; the main loop
+            // handles .breakpoint when the CPU hits it.
+            await breakpointManager.setTemporaryBreakpoint(at: address, memory: memoryAdapter)
             await emulator.resume()
-            // Note: Actual stopping happens through normal execution
             return .ok("running until $\(String(format: "%04X", address))")
 
         case .memoryFill(let start, let end, let value):
@@ -1595,6 +1631,35 @@ struct AtticServer {
             if result == .notInitialized || result == .error {
                 print("Emulator error: \(result)")
                 break
+            }
+
+            // Handle breakpoint hit — pause emulation and notify CLI clients.
+            // This catches BRK instructions injected by BreakpointManager as well
+            // as BRK from runUntil temporary breakpoints.
+            if result == .breakpoint {
+                await emulator.pause()
+                let regs = await emulator.getRegisters()
+                let pc = regs.pc
+                print("Breakpoint hit at $\(String(format: "%04X", pc))")
+
+                // Clean up temporary breakpoint (from runUntil) if present
+                if let del = cliDelegate {
+                    if await del.breakpointManager.isTemporaryBreakpoint(at: pc) {
+                        await del.breakpointManager.clearTemporaryBreakpoint(memory: EmulatorMemoryAdapter(emulator: emulator))
+                    }
+                    // Record hit for permanent breakpoints
+                    await del.breakpointManager.recordHit(at: pc)
+                }
+
+                // Broadcast breakpoint event to connected CLI clients
+                if let server = cliServer {
+                    let event = CLIEvent.breakpoint(
+                        address: pc,
+                        a: regs.a, x: regs.x, y: regs.y, s: regs.s, p: regs.p
+                    )
+                    await server.broadcastEvent(event)
+                }
+                continue
             }
 
             // Get frame buffer and broadcast to video clients

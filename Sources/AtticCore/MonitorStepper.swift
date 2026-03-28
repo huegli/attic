@@ -298,8 +298,8 @@ public actor MonitorStepper {
             await breakpoints.suspendBreakpoint(at: pc, memory: memory)
         }
 
-        // Execute one frame
-        let result = await emulator.executeFrame()
+        // Execute one frame (bypasses shouldRun guard so stepping works when paused)
+        let result = await emulator.stepFrame()
 
         // Clear temporary breakpoints
         await breakpoints.clearTemporaryBreakpoint(memory: memory)
@@ -337,7 +337,7 @@ public actor MonitorStepper {
         }
 
         // Execute one frame (should hit our temp BRK almost immediately)
-        _ = await emulator.executeFrame()
+        _ = await emulator.stepFrame()
 
         // Clear temporary breakpoint
         await breakpoints.clearTemporaryBreakpoint(memory: memory)
@@ -372,7 +372,7 @@ public actor MonitorStepper {
         }
 
         // Execute one frame
-        _ = await emulator.executeFrame()
+        _ = await emulator.stepFrame()
 
         // Re-enable breakpoint
         if wasAtBreakpoint {
@@ -528,7 +528,7 @@ public actor MonitorStepper {
                 await breakpoints.suspendBreakpoint(at: pc, memory: memory)
             }
 
-            _ = await emulator.executeFrame()
+            _ = await emulator.stepFrame()
             executed += 1000  // Approximate instructions per frame
 
             let newPC = await emulator.getRegisters().pc
