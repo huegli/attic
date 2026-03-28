@@ -7,10 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-03-28
+
 ### Added
+- Python CLI port with full REPL, monitor, BASIC, and DOS modes (click + prompt_toolkit + rich)
+- 6502-spec skill for Claude Code
 - `make altirra` Makefile target to build AltirraOS Kernel and Altirra BASIC ROMs from source using MADS, copying results to `Resources/ROM/`
 
+### Fixed
+- Breakpoints and stepping: use BRK injection, handle `.breakpoint` in main loop
+- BASIC load out-of-memory issue
+- Monitor mode missing color coding in REPL hex dumps
+- Monitor `m` command defaults to 16 bytes when count omitted
+- Python CLI tab completion for dot-commands (.help, .status, etc.)
+- Python CLI mode switching crash and screenshot/help
+
 ### Changed
+- Moved Python packages from `Sources/` to `Python/` directory
+- Consolidated 6502 docs: merged specs, extracted assembler/disassembler
 - Moved `ALTIRRA.md` to `docs/ALTIRRA.md`
 - Simplified MADS install instructions to macOS-only (removed Linux and pre-built binary options)
 
