@@ -15,6 +15,7 @@ attic-py = "attic_cli.main:cli"
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    "pyinstaller>=6.0",
 ]
 
 [build-system]

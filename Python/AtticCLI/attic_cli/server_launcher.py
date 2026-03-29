@@ -54,7 +54,15 @@ def find_server_executable() -> str | None:
     """
     name = "AtticServer"
 
-    # 1. Same directory as the current executable
+    # 1a. PyInstaller frozen bundle — sys.executable is the real binary path,
+    #     which lives in Contents/MacOS/ alongside AtticServer in the .app bundle.
+    if getattr(sys, 'frozen', False):
+        exe_dir = Path(sys.executable).resolve().parent
+        candidate = exe_dir / name
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+
+    # 1b. Same directory as the script entry point (development / non-frozen)
     exe_dir = Path(sys.argv[0]).resolve().parent
     candidate = exe_dir / name
     if candidate.is_file() and os.access(candidate, os.X_OK):

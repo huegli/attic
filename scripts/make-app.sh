@@ -7,7 +7,7 @@
 # The bundle includes:
 #   - AtticGUI executable (the main app)
 #   - AtticServer executable (launched as subprocess by AtticGUI)
-#   - attic CLI executable (command-line REPL tool)
+#   - attic CLI executable (Python CLI built with PyInstaller)
 #   - AtticMCP source (MCP server for Claude Code integration)
 #   - App icon (generated from Attic-Logo.png)
 #   - Info.plist (bundle metadata and file associations)
@@ -56,13 +56,21 @@ echo "=== Building Attic.app ==="
 # -------------------------------------------------------------------------
 
 if [ "$SKIP_BUILD" = false ]; then
-    echo "Building release binaries..."
+    echo "Building Swift release binaries..."
     cd "$PROJECT_ROOT"
     swift build -c release 2>&1 | tail -5
-    echo "Build complete."
+    echo "Swift build complete."
+
+    echo "Building Python CLI with PyInstaller..."
+    PYTHON_CLI_DIR="$PROJECT_ROOT/Python/AtticCLI"
+    (cd "$PYTHON_CLI_DIR" && uv run pyinstaller --clean --noconfirm attic.spec 2>&1 | tail -5)
+    echo "Python CLI build complete."
 else
     echo "Skipping build (--skip-build)"
 fi
+
+# Python CLI build output
+PYTHON_CLI_BIN="$PROJECT_ROOT/Python/AtticCLI/dist/attic"
 
 # Verify executables exist
 if [ ! -f "$BUILD_DIR/AtticGUI" ]; then
@@ -75,9 +83,9 @@ if [ ! -f "$BUILD_DIR/AtticServer" ]; then
     echo "Run 'swift build -c release' first."
     exit 1
 fi
-if [ ! -f "$BUILD_DIR/attic" ]; then
-    echo "Error: attic CLI not found at $BUILD_DIR/attic"
-    echo "Run 'swift build -c release' first."
+if [ ! -f "$PYTHON_CLI_BIN" ]; then
+    echo "Error: Python CLI not found at $PYTHON_CLI_BIN"
+    echo "Run 'cd Python/AtticCLI && uv run pyinstaller --clean --noconfirm attic.spec' first."
     exit 1
 fi
 
@@ -95,7 +103,7 @@ rm -rf "$APP_DIR"
 #     Contents/
 #       MacOS/                    <- executables (AtticGUI, AtticServer, attic)
 #       Resources/                <- icons, credits, ROMs, MCP server
-#         AtticMCP/        <- Python MCP server source
+#         AtticMCP/               <- Python MCP server source
 #       Info.plist                <- bundle metadata
 #       PkgInfo                   <- legacy package type marker
 mkdir -p "$MACOS_DIR"
@@ -108,7 +116,8 @@ mkdir -p "$RESOURCES_DIR"
 echo "Copying executables..."
 cp "$BUILD_DIR/AtticGUI" "$MACOS_DIR/AtticGUI"
 cp "$BUILD_DIR/AtticServer" "$MACOS_DIR/AtticServer"
-cp "$BUILD_DIR/attic" "$MACOS_DIR/attic"
+cp "$PYTHON_CLI_BIN" "$MACOS_DIR/attic"
+chmod +x "$MACOS_DIR/attic"
 
 # -------------------------------------------------------------------------
 # Step 4: Generate and copy app icon

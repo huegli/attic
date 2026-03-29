@@ -15,7 +15,7 @@
 #
 # See docs/TESTING.md for detailed test categorization.
 
-.PHONY: app clean-app kill-stale altirra \
+.PHONY: app clean-app python-cli clean-python-cli kill-stale altirra \
         test test-smoke test-unit \
         test-protocol test-cli test-basic test-asm test-atr test-core test-state test-server test-perf test-error test-multiclient
 
@@ -55,6 +55,14 @@ app:
 ## Remove the build/ directory (app bundle and generated icon)
 clean-app:
 	rm -rf build
+
+## Build the Python CLI as a standalone binary with PyInstaller
+python-cli:
+	cd Python/AtticCLI && uv run pyinstaller --clean --noconfirm attic.spec
+
+## Remove PyInstaller build artifacts
+clean-python-cli:
+	rm -rf Python/AtticCLI/build Python/AtticCLI/dist
 
 # ---------------------------------------------------------------------------
 # Altirra ROMs
