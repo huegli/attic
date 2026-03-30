@@ -80,6 +80,121 @@ public protocol AESPWebSocketBridgeDelegate: AnyObject, Sendable {
 
 // MARK: - WebSocket Client Connection
 
+// MARK: - Video Delta Encoder
+
+/// Encodes video frame deltas by comparing the current frame to the previous one.
+///
+/// Delta encoding dramatically reduces bandwidth for static or mostly-static
+/// scenes (e.g., a text editor, menu screen, paused game). Instead of sending
+/// the full 322,560-byte BGRA frame, only changed pixels are sent as
+/// (index, B, G, R, A) tuples — 8 bytes per changed pixel.
+///
+/// ## Encoding Format
+///
+/// Each changed pixel is encoded as:
+/// - 4 bytes: pixel index (big-endian UInt32) — position in the linear pixel array
+/// - 4 bytes: B, G, R, A color values
+///
+/// The total payload is `changedPixelCount * 8` bytes.
+///
+/// ## Fallback to Full Frame
+///
+/// If more than 50% of pixels have changed, a full FRAME_RAW is cheaper than
+/// the delta encoding (since each delta entry is 8 bytes vs 4 bytes per pixel
+/// in the raw frame). The encoder automatically falls back in this case.
+///
+/// ## Per-Client State
+///
+/// Each WebSocket client gets its own DeltaEncoder because clients may connect
+/// at different times. The first frame for each client is always sent as
+/// FRAME_RAW to establish a baseline.
+struct VideoDeltaEncoder {
+    /// The previous frame for comparison. Nil means no previous frame exists
+    /// and the next frame must be sent as FRAME_RAW.
+    private var previousFrame: Data?
+
+    /// Number of pixels in a frame (width * height).
+    private let pixelCount = AESPConstants.frameWidth * AESPConstants.frameHeight
+
+    /// Bytes per pixel (BGRA = 4).
+    private let bytesPerPixel = AESPConstants.frameBytesPerPixel
+
+    /// Threshold: if more than this fraction of pixels changed, send a full frame.
+    /// At 50%, the delta payload would be `pixelCount/2 * 8` = 322,560 bytes,
+    /// which equals the full frame size — so anything above 50% is more expensive.
+    private let fullFrameThreshold = 0.5
+
+    /// Encodes a frame, returning either a FRAME_DELTA or FRAME_RAW message.
+    ///
+    /// - Parameter pixels: The current frame's BGRA pixel data.
+    /// - Returns: An AESP message — either `frameDelta` (if few pixels changed)
+    ///   or `frameRaw` (for the first frame or when many pixels changed).
+    mutating func encode(_ pixels: [UInt8]) -> AESPMessage {
+        guard let previous = previousFrame else {
+            // First frame — no baseline to compare against
+            previousFrame = Data(pixels)
+            return .frameRaw(pixels: pixels)
+        }
+
+        // Compare pixel by pixel and collect changes.
+        // Each pixel is 4 bytes (BGRA). We compare 4-byte chunks.
+        var deltaPayload = Data()
+        var changedCount = 0
+
+        for pixelIndex in 0..<pixelCount {
+            let byteOffset = pixelIndex * bytesPerPixel
+            let endOffset = byteOffset + bytesPerPixel
+
+            // Compare the 4 BGRA bytes for this pixel
+            guard endOffset <= pixels.count && endOffset <= previous.count else { break }
+
+            let currentB = pixels[byteOffset]
+            let currentG = pixels[byteOffset + 1]
+            let currentR = pixels[byteOffset + 2]
+            let currentA = pixels[byteOffset + 3]
+
+            let prevB = previous[previous.startIndex + byteOffset]
+            let prevG = previous[previous.startIndex + byteOffset + 1]
+            let prevR = previous[previous.startIndex + byteOffset + 2]
+            let prevA = previous[previous.startIndex + byteOffset + 3]
+
+            if currentB != prevB || currentG != prevG || currentR != prevR || currentA != prevA {
+                changedCount += 1
+
+                // Check if we've crossed the threshold — early exit
+                if Double(changedCount) / Double(pixelCount) > fullFrameThreshold {
+                    previousFrame = Data(pixels)
+                    return .frameRaw(pixels: pixels)
+                }
+
+                // Encode: 4-byte pixel index (big-endian) + 4 bytes BGRA
+                let idx = UInt32(pixelIndex)
+                deltaPayload.append(UInt8((idx >> 24) & 0xFF))
+                deltaPayload.append(UInt8((idx >> 16) & 0xFF))
+                deltaPayload.append(UInt8((idx >> 8) & 0xFF))
+                deltaPayload.append(UInt8(idx & 0xFF))
+                deltaPayload.append(currentB)
+                deltaPayload.append(currentG)
+                deltaPayload.append(currentR)
+                deltaPayload.append(currentA)
+            }
+        }
+
+        // Update the baseline
+        previousFrame = Data(pixels)
+
+        // If no pixels changed, send an empty delta (valid — means identical frame)
+        return .frameDelta(payload: deltaPayload)
+    }
+
+    /// Resets the encoder, forcing the next frame to be sent as FRAME_RAW.
+    mutating func reset() {
+        previousFrame = nil
+    }
+}
+
+// MARK: - WebSocket Client Connection
+
 /// Represents a connected WebSocket client.
 ///
 /// Each client gets its own connection object. Unlike the TCP-based AESPServer
@@ -93,6 +208,11 @@ final class WebSocketClientConnection: @unchecked Sendable {
     #if canImport(Network)
     let connection: NWConnection
     #endif
+
+    /// Per-client delta encoder for video frames.
+    /// Each client needs its own encoder because clients connect at different
+    /// times and need independent baseline frames for delta comparison.
+    var deltaEncoder: VideoDeltaEncoder = VideoDeltaEncoder()
 
     /// Creates a new WebSocket client connection.
     #if canImport(Network)
@@ -531,19 +651,22 @@ public actor AESPWebSocketBridge {
 
     /// Broadcasts a video frame to all connected WebSocket clients.
     ///
-    /// Called from the emulation loop after each frame. The frame is encoded
-    /// as a FRAME_RAW AESP message and sent as a WebSocket binary frame to
-    /// every connected client.
+    /// Uses per-client delta encoding to minimize bandwidth. Each client's
+    /// `VideoDeltaEncoder` compares the current frame against its previous
+    /// frame and sends only changed pixels as a FRAME_DELTA message. The
+    /// first frame for each client is always sent as FRAME_RAW.
+    ///
+    /// If more than 50% of pixels changed, the encoder falls back to FRAME_RAW
+    /// automatically (since the delta would be larger than the full frame).
     ///
     /// - Parameter pixels: BGRA pixel data (336×240×4 = 322,560 bytes).
     public func broadcastFrame(_ pixels: [UInt8]) async {
         frameCounter += 1
         guard !clients.isEmpty else { return }
 
-        let message = AESPMessage.frameRaw(pixels: pixels)
-        let data = message.encode()
-
         for client in clients.values {
+            let message = client.deltaEncoder.encode(pixels)
+            let data = message.encode()
             sendBinaryData(data, to: client)
         }
     }

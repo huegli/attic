@@ -523,10 +523,10 @@ final class AESPWebSocketBridgeBroadcastTests: XCTestCase {
     }
 
     /// Verifies a broadcast frame is received by the WebSocket client.
+    /// The first frame is always FRAME_RAW (no delta baseline yet).
     func testBroadcastFrameDelivered() async throws {
         let bridge = AESPWebSocketBridge(port: 49840)
         let client = TestWebSocketClient()
-        // Ensure cleanup even if test fails mid-way
         addTeardownBlock { client.disconnect(); await bridge.stop() }
 
         let delegate = MockBridgeDelegate()
@@ -540,6 +540,7 @@ final class AESPWebSocketBridgeBroadcastTests: XCTestCase {
         let testPixels: [UInt8] = [0xFF, 0x00, 0x00, 0xFF]
         await bridge.broadcastFrame(testPixels)
 
+        // First frame is always FRAME_RAW (delta encoder has no baseline)
         let response = try await client.receiveNext(timeout: 3.0)
         XCTAssertEqual(response.type, .frameRaw)
         XCTAssertEqual(Array(response.payload), testPixels)
@@ -710,3 +711,173 @@ final class AESPWebSocketBridgeMultiClientTests: XCTestCase {
 // causing the client-side NWConnection to hang indefinitely. The max client
 // limit is enforced in AESPWebSocketBridge.handleNewConnection() and can be
 // verified via manual testing or by inspecting the bridge's log output.
+
+// =============================================================================
+// MARK: - Video Delta Encoder Tests
+// =============================================================================
+
+/// Tests for the VideoDeltaEncoder used by the WebSocket bridge.
+///
+/// These are pure unit tests that don't require network connections — they
+/// test the delta encoding algorithm directly.
+final class VideoDeltaEncoderTests: XCTestCase {
+
+    /// Helper: creates a frame of solid color (4 bytes per pixel × pixelCount).
+    private func solidFrame(r: UInt8, g: UInt8, b: UInt8, a: UInt8 = 0xFF) -> [UInt8] {
+        let pixelCount = AESPConstants.frameWidth * AESPConstants.frameHeight
+        var frame = [UInt8](repeating: 0, count: pixelCount * 4)
+        for i in 0..<pixelCount {
+            frame[i * 4] = b      // BGRA order
+            frame[i * 4 + 1] = g
+            frame[i * 4 + 2] = r
+            frame[i * 4 + 3] = a
+        }
+        return frame
+    }
+
+    /// First frame should always be FRAME_RAW (no baseline to compare against).
+    func testFirstFrameIsRaw() {
+        var encoder = VideoDeltaEncoder()
+        let frame = solidFrame(r: 0xFF, g: 0x00, b: 0x00)
+        let message = encoder.encode(frame)
+        XCTAssertEqual(message.type, .frameRaw)
+        XCTAssertEqual(message.payload.count, AESPConstants.frameSize)
+    }
+
+    /// Identical frame should produce an empty FRAME_DELTA (0 changed pixels).
+    func testIdenticalFrameProducesEmptyDelta() {
+        var encoder = VideoDeltaEncoder()
+        let frame = solidFrame(r: 0xFF, g: 0x00, b: 0x00)
+
+        // First frame: raw
+        _ = encoder.encode(frame)
+
+        // Second frame: identical → empty delta
+        let message = encoder.encode(frame)
+        XCTAssertEqual(message.type, .frameDelta)
+        XCTAssertEqual(message.payload.count, 0, "No pixels changed, delta should be empty")
+    }
+
+    /// Changing a single pixel should produce a delta with one 8-byte entry.
+    func testSinglePixelChange() {
+        var encoder = VideoDeltaEncoder()
+        var frame = solidFrame(r: 0xFF, g: 0x00, b: 0x00)
+
+        // First frame: raw
+        _ = encoder.encode(frame)
+
+        // Change pixel at index 100 (byte offset 400)
+        frame[400] = 0x00     // B
+        frame[401] = 0xFF     // G
+        frame[402] = 0x00     // R
+        frame[403] = 0xFF     // A
+
+        let message = encoder.encode(frame)
+        XCTAssertEqual(message.type, .frameDelta)
+        XCTAssertEqual(message.payload.count, 8, "One changed pixel = 8 bytes")
+
+        // Verify the pixel index (big-endian UInt32 = 100)
+        let payload = Array(message.payload)
+        let pixelIndex = UInt32(payload[0]) << 24 | UInt32(payload[1]) << 16 |
+                         UInt32(payload[2]) << 8 | UInt32(payload[3])
+        XCTAssertEqual(pixelIndex, 100)
+
+        // Verify the BGRA values
+        XCTAssertEqual(payload[4], 0x00) // B
+        XCTAssertEqual(payload[5], 0xFF) // G
+        XCTAssertEqual(payload[6], 0x00) // R
+        XCTAssertEqual(payload[7], 0xFF) // A
+    }
+
+    /// Changing multiple pixels should produce the correct number of entries.
+    func testMultiplePixelChanges() {
+        var encoder = VideoDeltaEncoder()
+        var frame = solidFrame(r: 0xFF, g: 0x00, b: 0x00)
+
+        _ = encoder.encode(frame)
+
+        // Change 3 pixels
+        for pixelIndex in [0, 50, 999] {
+            let offset = pixelIndex * 4
+            frame[offset] = 0xAA
+        }
+
+        let message = encoder.encode(frame)
+        XCTAssertEqual(message.type, .frameDelta)
+        XCTAssertEqual(message.payload.count, 3 * 8, "Three changed pixels = 24 bytes")
+    }
+
+    /// When more than 50% of pixels change, should fall back to FRAME_RAW.
+    func testFallbackToRawWhenManyPixelsChange() {
+        var encoder = VideoDeltaEncoder()
+        let frame1 = solidFrame(r: 0xFF, g: 0x00, b: 0x00) // All red
+        let frame2 = solidFrame(r: 0x00, g: 0xFF, b: 0x00) // All green
+
+        _ = encoder.encode(frame1)
+
+        // Every pixel changes → should fall back to FRAME_RAW
+        let message = encoder.encode(frame2)
+        XCTAssertEqual(message.type, .frameRaw)
+        XCTAssertEqual(message.payload.count, AESPConstants.frameSize)
+    }
+
+    /// After a delta frame, the baseline updates correctly.
+    func testBaselineUpdatesAfterDelta() {
+        var encoder = VideoDeltaEncoder()
+        var frame = solidFrame(r: 0xFF, g: 0x00, b: 0x00)
+
+        _ = encoder.encode(frame) // Frame 1: raw
+
+        // Frame 2: change 1 pixel
+        frame[0] = 0xBB
+        _ = encoder.encode(frame) // Frame 2: delta
+
+        // Frame 3: same as frame 2 → should be empty delta
+        let message = encoder.encode(frame)
+        XCTAssertEqual(message.type, .frameDelta)
+        XCTAssertEqual(message.payload.count, 0, "Frame unchanged from baseline")
+    }
+
+    /// Reset should force the next frame to be FRAME_RAW.
+    func testResetForcesRawFrame() {
+        var encoder = VideoDeltaEncoder()
+        let frame = solidFrame(r: 0xFF, g: 0x00, b: 0x00)
+
+        _ = encoder.encode(frame) // Frame 1: raw
+        _ = encoder.encode(frame) // Frame 2: empty delta
+
+        encoder.reset()
+
+        // After reset, next frame should be raw again
+        let message = encoder.encode(frame)
+        XCTAssertEqual(message.type, .frameRaw)
+    }
+
+    /// Delta encoding preserves pixel index order (ascending).
+    func testDeltaPixelIndicesAscending() {
+        var encoder = VideoDeltaEncoder()
+        var frame = solidFrame(r: 0x00, g: 0x00, b: 0x00)
+        _ = encoder.encode(frame)
+
+        // Change pixels at indices 500, 100, 1000 (not in order)
+        for pixelIndex in [500, 100, 1000] {
+            frame[pixelIndex * 4] = 0xFF
+        }
+
+        let message = encoder.encode(frame)
+        XCTAssertEqual(message.type, .frameDelta)
+
+        // Parse pixel indices from the delta payload
+        let payload = Array(message.payload)
+        var indices: [UInt32] = []
+        for i in stride(from: 0, to: payload.count, by: 8) {
+            let idx = UInt32(payload[i]) << 24 | UInt32(payload[i+1]) << 16 |
+                      UInt32(payload[i+2]) << 8 | UInt32(payload[i+3])
+            indices.append(idx)
+        }
+
+        // Indices should be in ascending order (we iterate pixels sequentially)
+        XCTAssertEqual(indices, indices.sorted())
+        XCTAssertEqual(indices, [100, 500, 1000])
+    }
+}
