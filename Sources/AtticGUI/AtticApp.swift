@@ -175,6 +175,11 @@ class AtticViewModel: ObservableObject {
     /// This maps Mac keyboard events to Atari key codes.
     let keyboardHandler: KeyboardInputHandler
 
+    /// The game controller handler.
+    /// Monitors physical game controllers (USB/Bluetooth) and maps their
+    /// input to Atari joystick directions, trigger, and console keys.
+    let gameControllerHandler = GameControllerHandler()
+
     // =========================================================================
     // MARK: - Client Mode Components
     // =========================================================================
@@ -284,11 +289,13 @@ class AtticViewModel: ObservableObject {
     // Joystick emulation key-held tracking.
     // Each boolean tracks whether the corresponding key is currently held down.
     // Multiple keys can be held simultaneously for diagonal movement.
-    private var joystickUpHeld: Bool = false
-    private var joystickDownHeld: Bool = false
-    private var joystickLeftHeld: Bool = false
-    private var joystickRightHeld: Bool = false
-    private var joystickTriggerHeld: Bool = false
+    // Published so the JoystickOverlayView can read them for HUD display.
+    // private(set) prevents external modification while allowing read access.
+    @Published private(set) var joystickUpHeld: Bool = false
+    @Published private(set) var joystickDownHeld: Bool = false
+    @Published private(set) var joystickLeftHeld: Bool = false
+    @Published private(set) var joystickRightHeld: Bool = false
+    @Published private(set) var joystickTriggerHeld: Bool = false
 
     // =========================================================================
     // MARK: - Initialization
@@ -466,6 +473,9 @@ class AtticViewModel: ObservableObject {
             isRunning = true
             statusMessage = "Connected"
             audioEngine.resume()
+
+            // Start game controller discovery now that we have a client
+            gameControllerHandler.start(client: client!)
 
             // Fetch initial disk status from the server
             await refreshDiskStatus()
@@ -648,6 +658,7 @@ class AtticViewModel: ObservableObject {
         audioEngine.clearBuffer()
         keyboardHandler.reset()
         if isJoystickEmulationEnabled { resetJoystickState() }
+        gameControllerHandler.resetAllPorts()
         statusMessage = cold ? "Cold Reset" : "Warm Reset"
 
         // Trigger a brief CRT-like flash overlay so the user gets immediate
@@ -959,6 +970,9 @@ class AtticViewModel: ObservableObject {
 
     /// Cleans up resources including receiver tasks, wake observer, and client connection.
     private func cleanup() async {
+        // Stop game controller discovery before disconnecting the client
+        gameControllerHandler.stop()
+
         // Cancel receiver tasks
         frameReceiverTask?.cancel()
         audioReceiverTask?.cancel()
