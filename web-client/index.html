@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Attic — Atari 800 XL Emulator</title>
+  <link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+  <!-- Toolbar with connection status and controls -->
+  <div id="toolbar">
+    <span class="title">Attic</span>
+    <div id="status">
+      <span id="status-dot"></span>
+      <span id="status-text">Disconnected</span>
+    </div>
+    <button id="btn-fullscreen">Fullscreen</button>
+    <button id="btn-mute">Mute</button>
+    <button id="btn-reset">Reset</button>
+  </div>
+
+  <!-- Canvas container with focus overlay -->
+  <div id="canvas-container">
+    <canvas id="screen" tabindex="0"></canvas>
+    <div id="overlay">
+      <span>Click to start</span>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
