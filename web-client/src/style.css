@@ -1,0 +1,128 @@
+/* ==========================================================================
+   Attic Web Client — Atari 800 XL Emulator
+   Dark theme with responsive canvas scaling and retro pixel rendering.
+   ========================================================================== */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background: #0a0a1a;
+  color: #e0e0e0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ---------- Toolbar ---------- */
+
+#toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: #1a1a2e;
+  border-bottom: 1px solid #2a2a4a;
+  flex-shrink: 0;
+}
+
+#toolbar .title {
+  font-weight: 600;
+  font-size: 14px;
+  color: #8888bb;
+  margin-right: auto;
+}
+
+#status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+#status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #e74c3c;
+}
+
+#status-text {
+  color: #999;
+}
+
+#toolbar button {
+  padding: 4px 12px;
+  background: #2a2a4a;
+  color: #ccc;
+  border: 1px solid #3a3a5a;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+#toolbar button:hover {
+  background: #3a3a5a;
+  color: #fff;
+}
+
+/* ---------- Canvas container ---------- */
+
+#canvas-container {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  background: #000;
+}
+
+/* The canvas renders at native 336x240 and scales via CSS.
+   image-rendering: pixelated gives crisp upscaling without blur. */
+#screen {
+  /* Maintain 7:5 aspect ratio (336:240 = 7:5) */
+  aspect-ratio: 7 / 5;
+  max-width: 100%;
+  max-height: 100%;
+  /* Crisp pixel scaling — no smoothing/interpolation */
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  /* Remove focus outline (we show our own overlay instead) */
+  outline: none;
+}
+
+/* Fullscreen: canvas fills the entire screen */
+#screen:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  object-fit: contain;
+  background: #000;
+}
+
+/* ---------- Focus overlay ---------- */
+
+#overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  cursor: pointer;
+  z-index: 10;
+}
+
+#overlay span {
+  padding: 16px 32px;
+  background: rgba(42, 42, 74, 0.9);
+  border: 1px solid #4a4a7a;
+  border-radius: 8px;
+  font-size: 18px;
+  color: #ccc;
+  user-select: none;
+}
