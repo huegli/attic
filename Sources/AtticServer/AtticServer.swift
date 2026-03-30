@@ -54,6 +54,8 @@ struct ServerConfiguration {
     var audioPort: Int = AESPConstants.defaultAudioPort
     var socketPath: String? = nil  // nil means use default /tmp/attic-<pid>.sock
     var enableCLISocket: Bool = true
+    var enableWebSocket: Bool = false
+    var webSocketPort: Int = AESPConstants.defaultWebSocketPort
     var silent: Bool = false
     var showHelp: Bool = false
 
@@ -99,6 +101,16 @@ struct ServerConfiguration {
             case "--no-cli-socket":
                 config.enableCLISocket = false
 
+            case "--websocket":
+                config.enableWebSocket = true
+
+            case "--websocket-port":
+                index += 1
+                if index < arguments.count, let port = Int(arguments[index]) {
+                    config.webSocketPort = port
+                    config.enableWebSocket = true
+                }
+
             case "--silent":
                 config.silent = true
 
@@ -131,6 +143,8 @@ struct ServerConfiguration {
           --socket-path <p>    Unix socket path for CLI protocol
                                (default: /tmp/attic-<pid>.sock)
           --no-cli-socket      Disable CLI socket server
+          --websocket          Enable WebSocket bridge for web clients
+          --websocket-port <n> WebSocket port (default: 47803, implies --websocket)
           --silent             Disable audio generation
           --help, -h           Show this help message
 
@@ -326,6 +340,129 @@ final class ServerDelegate: AESPServerDelegate, @unchecked Sendable {
 
     func server(_ server: AESPServer, clientDidDisconnect clientId: UUID, channel: AESPChannel) async {
         print("[Server] Client disconnected: \(clientId) from \(channel.rawValue)")
+    }
+}
+
+// MARK: - WebSocket Bridge Delegate
+
+/// Delegate that handles incoming AESP messages from WebSocket clients.
+///
+/// This is a thin wrapper that forwards messages to the same emulator engine
+/// used by the AESP ServerDelegate. Control messages (pause, resume, reset, etc.)
+/// and input messages (key press, joystick) from web clients are processed
+/// identically to messages from native AESP clients.
+///
+/// Responses are sent back over the WebSocket bridge rather than the TCP-based
+/// AESP server, since WebSocket clients are on a different transport.
+final class WebSocketBridgeDelegate: AESPWebSocketBridgeDelegate, @unchecked Sendable {
+    /// Reference to the emulator engine.
+    private let emulator: EmulatorEngine
+
+    /// Reference to the bridge for sending responses.
+    weak var bridge: AESPWebSocketBridge?
+
+    /// Disk manager for querying mounted drives (shared with ServerDelegate).
+    var diskManager: DiskManager?
+
+    init(emulator: EmulatorEngine) {
+        self.emulator = emulator
+    }
+
+    func bridge(_ bridge: AESPWebSocketBridge, didReceiveMessage message: AESPMessage, from clientId: UUID) async {
+        switch message.type {
+        // Control messages
+        case .pause:
+            await emulator.pause()
+            await bridge.sendMessage(.ack(for: .pause), to: clientId)
+
+        case .resume:
+            await emulator.resume()
+            await bridge.sendMessage(.ack(for: .resume), to: clientId)
+
+        case .reset:
+            let cold = message.payload.first == 0x01
+            await emulator.reset(cold: cold)
+            await bridge.sendMessage(.ack(for: .reset), to: clientId)
+
+        case .bootFile:
+            if let filePath = message.parseBootFileRequest() {
+                let result = await emulator.bootFile(filePath)
+                if result.success, let dm = diskManager {
+                    await dm.trackBootedDisk(drive: 1, path: filePath)
+                }
+                let response = AESPMessage.bootFileResponse(
+                    success: result.success,
+                    message: result.success ? "Booted \(filePath)" : (result.errorMessage ?? "Unknown error")
+                )
+                await bridge.sendMessage(response, to: clientId)
+            } else {
+                await bridge.sendMessage(
+                    .error(code: 0x01, message: "Invalid boot file request"),
+                    to: clientId
+                )
+            }
+
+        case .status:
+            let state = await emulator.state
+            let isRunning = state == .running
+            var mountedDrives: [(drive: Int, filename: String)] = []
+            if let dm = diskManager {
+                let drives = await dm.listDrives()
+                for driveStatus in drives where driveStatus.mounted {
+                    let filename = driveStatus.path.map {
+                        URL(fileURLWithPath: $0).lastPathComponent
+                    } ?? "?"
+                    mountedDrives.append((drive: driveStatus.drive, filename: filename))
+                }
+            }
+            let response = AESPMessage.statusResponse(
+                isRunning: isRunning,
+                mountedDrives: mountedDrives
+            )
+            await bridge.sendMessage(response, to: clientId)
+
+        case .info:
+            // Return server info as JSON
+            let json = """
+            {"name":"AtticServer","version":"\(AtticCore.version)","protocol":"AESP","transport":"websocket"}
+            """
+            await bridge.sendMessage(.infoResponse(json: json), to: clientId)
+
+        // Input messages
+        case .keyDown:
+            if let (keyChar, keyCode, shift, control) = message.parseKeyPayload() {
+                await emulator.pressKey(keyChar: keyChar, keyCode: keyCode, shift: shift, control: control)
+            }
+
+        case .keyUp:
+            await emulator.releaseKey()
+
+        case .joystick:
+            if let (port, up, down, left, right, trigger) = message.parseJoystickPayload() {
+                var direction: UInt8 = 0
+                if up { direction |= 0x01 }
+                if down { direction |= 0x02 }
+                if left { direction |= 0x04 }
+                if right { direction |= 0x08 }
+                await emulator.setJoystick(port: Int(port), direction: direction, trigger: trigger)
+            }
+
+        case .consoleKeys:
+            if let (start, select, option) = message.parseConsoleKeysPayload() {
+                await emulator.setConsoleKeys(start: start, select: select, option: option)
+            }
+
+        default:
+            print("[WebSocket] Unhandled message type: \(message.type)")
+        }
+    }
+
+    func bridge(_ bridge: AESPWebSocketBridge, clientDidConnect clientId: UUID) async {
+        print("[WebSocket] Client connected: \(clientId)")
+    }
+
+    func bridge(_ bridge: AESPWebSocketBridge, clientDidDisconnect clientId: UUID) async {
+        print("[WebSocket] Client disconnected: \(clientId)")
     }
 }
 
@@ -1592,6 +1729,33 @@ struct AtticServer {
             }
         }
 
+        // Create and start WebSocket bridge (if enabled).
+        // wsBridgeDelegate is kept alive for the duration of the main loop
+        // because the bridge actor holds only a weak reference to its delegate.
+        var wsBridge: AESPWebSocketBridge?
+        let wsBridgeDelegate: WebSocketBridgeDelegate?
+
+        if config.enableWebSocket {
+            let bridge = AESPWebSocketBridge(port: config.webSocketPort)
+            let wsDelegate = WebSocketBridgeDelegate(emulator: emulator)
+            wsDelegate.bridge = bridge
+            wsDelegate.diskManager = delegate.diskManager
+            wsBridgeDelegate = wsDelegate
+            await bridge.setDelegate(wsDelegate)
+
+            do {
+                try await bridge.start()
+                print("WebSocket bridge listening on:")
+                print("  WebSocket: ws://localhost:\(config.webSocketPort)")
+                wsBridge = bridge
+            } catch {
+                print("Warning: Failed to start WebSocket bridge: \(error)")
+                // Continue without WebSocket - AESP TCP is still available
+            }
+        } else {
+            wsBridgeDelegate = nil
+        }
+
         // Start emulation
         await emulator.resume()
         print("Emulation started")
@@ -1665,12 +1829,14 @@ struct AtticServer {
             // Get frame buffer and broadcast to video clients
             let frameBuffer = await emulator.getFrameBuffer()
             await server.broadcastFrame(frameBuffer)
+            await wsBridge?.broadcastFrame(frameBuffer)
 
             // Get audio samples and broadcast to audio clients
             if !config.silent {
                 let audioSamples = await emulator.getAudioSamples()
                 if !audioSamples.isEmpty {
                     await server.broadcastAudio(audioSamples)
+                    await wsBridge?.broadcastAudio(audioSamples)
                 }
             }
 
@@ -1693,7 +1859,12 @@ struct AtticServer {
         // Shutdown
         print("Stopping servers...")
 
-        // Stop CLI socket server first
+        // Stop WebSocket bridge
+        if let bridge = wsBridge {
+            await bridge.stop()
+        }
+
+        // Stop CLI socket server
         if let cliServer = cliServer {
             await cliServer.stop()
         }
@@ -1704,6 +1875,11 @@ struct AtticServer {
         // Shutdown emulator
         await emulator.pause()
         await emulator.shutdown()
+
+        // Keep the WebSocket bridge delegate alive until shutdown completes.
+        // The bridge actor holds only a weak reference to its delegate.
+        withExtendedLifetime(wsBridgeDelegate) {}
+
         print("Server stopped")
     }
 }
