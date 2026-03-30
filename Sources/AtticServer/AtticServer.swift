@@ -1838,6 +1838,10 @@ struct AtticServer {
                     await server.broadcastAudio(audioSamples)
                     await wsBridge?.broadcastAudio(audioSamples)
                 }
+                // Send A/V sync to WebSocket clients every frame so they can
+                // correlate audio buffers with video frames.
+                let frameNum = await server.currentFrameNumber
+                await wsBridge?.broadcastAudioSync(frameNumber: frameNum)
             }
 
             // Calculate remaining time until next frame
