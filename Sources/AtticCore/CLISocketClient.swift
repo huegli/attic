@@ -640,16 +640,6 @@ public actor CLISocketClient {
             return "dos newdisk \(path)"
         case .dosFormat:
             return "dos format"
-
-        // CIO output capture
-        case .captureStart:
-            return "capture start"
-        case .captureStop:
-            return "capture stop"
-        case .captureRead:
-            return "capture read"
-        case .captureStatus:
-            return "capture status"
         }
     }
 

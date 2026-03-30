@@ -741,48 +741,6 @@ async def emulator_load_state(
     return await _send(f"state load {path}")
 
 
-@mcp.tool()
-async def emulator_capture_start() -> str:
-    """Start capturing E: device (screen editor) text output.
-
-    Installs a CIO interceptor that captures characters written through
-    BASIC PRINT and other CIO output to the E: device. Characters are
-    stored in a ring buffer and can be read with emulator_capture_read.
-    Must be stopped with emulator_capture_stop when done.
-    """
-    return await _send("capture start")
-
-
-@mcp.tool()
-async def emulator_capture_stop() -> str:
-    """Stop capturing E: device text output.
-
-    Uninstalls the CIO interceptor and restores the original PUT handler.
-    """
-    return await _send("capture stop")
-
-
-@mcp.tool()
-async def emulator_capture_read() -> str:
-    """Read captured text output from the E: device.
-
-    Drains new characters from the ring buffer since the last read.
-    Returns the text converted from ATASCII to UTF-8. Returns empty
-    string if no new output is available. Call this after running
-    frames to collect BASIC PRINT output.
-    """
-    return await _send("capture read")
-
-
-@mcp.tool()
-async def emulator_capture_status() -> str:
-    """Check whether CIO output capture is currently active.
-
-    Returns 'active' if the interceptor is installed, 'inactive' otherwise.
-    """
-    return await _send("capture status")
-
-
 # ===========================================================================
 #  Entry point
 # ===========================================================================

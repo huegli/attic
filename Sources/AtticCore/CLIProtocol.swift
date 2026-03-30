@@ -238,19 +238,6 @@ public enum CLICommand: Sendable {
     case dosNewDisk(path: String, type: String?)
     /// Format the current drive (erases all data).
     case dosFormat
-
-    // CIO output capture — intercept E: device output for text capture.
-    // These commands install/uninstall a 6502 stub in page 6 that captures
-    // characters written through CIO IOCB #0 (the screen editor).
-
-    /// Start capturing E: device output (installs the CIO interceptor).
-    case captureStart
-    /// Stop capturing E: device output (uninstalls the CIO interceptor).
-    case captureStop
-    /// Read captured text from the ring buffer (drains new characters).
-    case captureRead
-    /// Get capture status (installed or not).
-    case captureStatus
 }
 
 // =============================================================================
@@ -444,10 +431,6 @@ public struct CLICommandParser: Sendable {
         // DOS mode commands
         case "dos":
             return try parseDOS(argsString)
-
-        // CIO output capture
-        case "capture":
-            return try parseCapture(argsString)
 
         default:
             throw CLIProtocolError.invalidCommand(command)
@@ -1110,24 +1093,6 @@ public struct CLICommandParser: Sendable {
 
         // No drive prefix
         return (nil, input)
-    }
-
-    private func parseCapture(_ args: String) throws -> CLICommand {
-        let subcommand = args.trimmingCharacters(in: .whitespaces).lowercased()
-        switch subcommand {
-        case "start":
-            return .captureStart
-        case "stop":
-            return .captureStop
-        case "read":
-            return .captureRead
-        case "status":
-            return .captureStatus
-        case "":
-            throw CLIProtocolError.missingArgument("capture requires subcommand (start, stop, read, status)")
-        default:
-            throw CLIProtocolError.invalidCommand("capture \(subcommand)")
-        }
     }
 
     // MARK: - Helper Functions
