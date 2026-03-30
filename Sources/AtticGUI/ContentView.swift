@@ -156,12 +156,12 @@ struct EmulatorDisplayView: View {
             // corner when joystick emulation (F9) is active or a game controller is
             // connected. The overlay OR's keyboard and controller input for display.
             JoystickOverlayView(
-                up: viewModel.joystickUpHeld || viewModel.gameControllerHandler.port0Up,
-                down: viewModel.joystickDownHeld || viewModel.gameControllerHandler.port0Down,
-                left: viewModel.joystickLeftHeld || viewModel.gameControllerHandler.port0Left,
-                right: viewModel.joystickRightHeld || viewModel.gameControllerHandler.port0Right,
-                trigger: viewModel.joystickTriggerHeld || viewModel.gameControllerHandler.port0Trigger,
-                visible: viewModel.isJoystickEmulationEnabled || viewModel.gameControllerHandler.hasConnectedController
+                up: viewModel.joystickUpHeld || viewModel.gameControllerHandler.port0Up || viewModel.hidJoystickManager.port0Up,
+                down: viewModel.joystickDownHeld || viewModel.gameControllerHandler.port0Down || viewModel.hidJoystickManager.port0Down,
+                left: viewModel.joystickLeftHeld || viewModel.gameControllerHandler.port0Left || viewModel.hidJoystickManager.port0Left,
+                right: viewModel.joystickRightHeld || viewModel.gameControllerHandler.port0Right || viewModel.hidJoystickManager.port0Right,
+                trigger: viewModel.joystickTriggerHeld || viewModel.gameControllerHandler.port0Trigger || viewModel.hidJoystickManager.port0Trigger,
+                visible: viewModel.isJoystickEmulationEnabled || viewModel.gameControllerHandler.hasConnectedController || viewModel.hidJoystickManager.hasConnectedDevice
             )
 
             // Brief CRT-like flash overlay on reset.

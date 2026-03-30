@@ -180,6 +180,11 @@ class AtticViewModel: ObservableObject {
     /// input to Atari joystick directions, trigger, and console keys.
     let gameControllerHandler = GameControllerHandler()
 
+    /// The IOKit HID joystick manager.
+    /// Catches USB joysticks/gamepads not recognized by Apple's GameController
+    /// framework (e.g. retro joysticks like the CXStick from Retro Games LTD).
+    let hidJoystickManager = HIDJoystickManager()
+
     // =========================================================================
     // MARK: - Client Mode Components
     // =========================================================================
@@ -474,8 +479,12 @@ class AtticViewModel: ObservableObject {
             statusMessage = "Connected"
             audioEngine.resume()
 
-            // Start game controller discovery now that we have a client
+            // Start game controller discovery now that we have a client.
+            // GameControllerHandler covers standard controllers (Xbox, PS, etc.).
+            // HIDJoystickManager catches generic USB joysticks not recognized by
+            // Apple's GameController framework (e.g. retro joysticks).
             gameControllerHandler.start(client: client!)
+            hidJoystickManager.start(client: client!)
 
             // Fetch initial disk status from the server
             await refreshDiskStatus()
@@ -659,6 +668,7 @@ class AtticViewModel: ObservableObject {
         keyboardHandler.reset()
         if isJoystickEmulationEnabled { resetJoystickState() }
         gameControllerHandler.resetAllPorts()
+        hidJoystickManager.resetState()
         statusMessage = cold ? "Cold Reset" : "Warm Reset"
 
         // Trigger a brief CRT-like flash overlay so the user gets immediate
@@ -970,8 +980,9 @@ class AtticViewModel: ObservableObject {
 
     /// Cleans up resources including receiver tasks, wake observer, and client connection.
     private func cleanup() async {
-        // Stop game controller discovery before disconnecting the client
+        // Stop game controller and HID joystick discovery before disconnecting
         gameControllerHandler.stop()
+        hidJoystickManager.stop()
 
         // Cancel receiver tasks
         frameReceiverTask?.cancel()
