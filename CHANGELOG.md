@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-03-31
+
+### Added
+- WebSocket bridge for web browser clients (Phase 18)
+- Video delta encoding for efficient WebSocket streaming
+- A/V sync broadcast to WebSocket clients
+- Web browser client with Canvas 2D rendering and Web Audio (Phase 19)
+- Gamepad support in web client with joystick overlay
+- Game controller support (GameController framework) with joystick HUD overlay
+- IOKit HID fallback for USB joysticks not recognized by GameController
+- Dual launch modes: GUI mode (AESP TCP) and Web mode (`--no-aesp --websocket`)
+- `--no-aesp` flag for AtticServer to disable AESP TCP ports
+- `.gui` REPL command in Python CLI to serve web client via HTTP
+- Auto-detect ROM path when Python CLI launches AtticServer
+
+### Changed
+- Python CLI now launches AtticServer with `--no-aesp --websocket` by default
+- Web client canvas dynamically scales with browser window
+- Updated documentation for dual launch modes and Phase 18-19 completion
+
 ## [0.3.1] - 2026-03-28
 
 ### Changed
