@@ -70,9 +70,15 @@ def _connect_to_socket(client: CLISocketClient, path: str) -> None:
 
 
 def _connect_or_launch(client: CLISocketClient, *, silent: bool) -> None:
-    """Discover an existing server or launch a new one, then connect."""
+    """Discover an existing server or launch a new one, then connect.
+
+    When launching a new server, AESP TCP is disabled and WebSocket is
+    enabled.  The web client can then be served via the .gui REPL command.
+    """
     result = ensure_server_running(
         silent=silent,
+        no_aesp=True,
+        websocket=True,
         discover_fn=client.discover_socket,
     )
 

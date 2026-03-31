@@ -43,6 +43,11 @@ GLOBAL_HELP: dict[str, str] = {
         "  .state save <path>    — Save complete emulator state\n"
         "  .state load <path>    — Restore previously saved state"
     ),
+    "gui": (
+        "Start or stop the web client HTTP server.\n"
+        "  .gui           — Start web server and show URL\n"
+        "  .gui stop      — Stop the web server"
+    ),
     "quit": "Disconnect from server and exit (server keeps running).",
     "shutdown": "Disconnect, stop the server, and exit.",
 }
@@ -251,7 +256,8 @@ def print_help_overview(mode: str) -> None:
 
     for cmd in [
         "monitor", "basic", "dos", "help", "status", "screen",
-        "reset", "warmstart", "screenshot", "boot", "state", "quit", "shutdown",
+        "reset", "warmstart", "screenshot", "boot", "state",
+        "gui", "quit", "shutdown",
     ]:
         desc = GLOBAL_HELP[cmd].split("\n")[0]  # First line only
         global_table.add_row(f".{cmd}", desc)

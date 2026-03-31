@@ -54,6 +54,7 @@ struct ServerConfiguration {
     var audioPort: Int = AESPConstants.defaultAudioPort
     var socketPath: String? = nil  // nil means use default /tmp/attic-<pid>.sock
     var enableCLISocket: Bool = true
+    var enableAESP: Bool = true
     var enableWebSocket: Bool = false
     var webSocketPort: Int = AESPConstants.defaultWebSocketPort
     var silent: Bool = false
@@ -101,6 +102,9 @@ struct ServerConfiguration {
             case "--no-cli-socket":
                 config.enableCLISocket = false
 
+            case "--no-aesp":
+                config.enableAESP = false
+
             case "--websocket":
                 config.enableWebSocket = true
 
@@ -143,6 +147,7 @@ struct ServerConfiguration {
           --socket-path <p>    Unix socket path for CLI protocol
                                (default: /tmp/attic-<pid>.sock)
           --no-cli-socket      Disable CLI socket server
+          --no-aesp            Disable AESP TCP server (ports 47800-47802)
           --websocket          Enable WebSocket bridge for web clients
           --websocket-port <n> WebSocket port (default: 47803, implies --websocket)
           --silent             Disable audio generation
@@ -1669,27 +1674,36 @@ struct AtticServer {
             return
         }
 
-        // Create server configuration
-        let serverConfig = AESPServerConfiguration(
-            controlPort: config.controlPort,
-            videoPort: config.videoPort,
-            audioPort: config.audioPort
-        )
-
-        // Create and start AESP server
-        let server = AESPServer(configuration: serverConfig)
+        // Create and start AESP TCP server (if enabled).
+        // When --no-aesp is used (e.g., Python CLI with WebSocket mode),
+        // the AESP TCP ports (47800-47802) are not opened. The emulator
+        // still runs and broadcasts via WebSocket and/or CLI socket.
+        var server: AESPServer?
         let delegate = ServerDelegate(emulator: emulator)
-        await server.setDelegate(delegate)
 
-        do {
-            try await server.start()
-            print("AESP server listening on:")
-            print("  Control: localhost:\(config.controlPort)")
-            print("  Video:   localhost:\(config.videoPort)")
-            print("  Audio:   localhost:\(config.audioPort)")
-        } catch {
-            print("Error starting AESP server: \(error)")
-            return
+        if config.enableAESP {
+            let serverConfig = AESPServerConfiguration(
+                controlPort: config.controlPort,
+                videoPort: config.videoPort,
+                audioPort: config.audioPort
+            )
+
+            let aespServer = AESPServer(configuration: serverConfig)
+            await aespServer.setDelegate(delegate)
+
+            do {
+                try await aespServer.start()
+                print("AESP server listening on:")
+                print("  Control: localhost:\(config.controlPort)")
+                print("  Video:   localhost:\(config.videoPort)")
+                print("  Audio:   localhost:\(config.audioPort)")
+                server = aespServer
+            } catch {
+                print("Error starting AESP server: \(error)")
+                return
+            }
+        } else {
+            print("AESP TCP server disabled (--no-aesp)")
         }
 
         // Create a DiskManager for AESP status responses.
@@ -1786,6 +1800,7 @@ struct AtticServer {
         // We measure elapsed time and only sleep for the remainder to maintain 60fps
         let targetFrameTime: UInt64 = 16_666_667  // ~60fps in nanoseconds
         var nextFrameTime = DispatchTime.now().uptimeNanoseconds + targetFrameTime
+        var frameCounter: UInt64 = 0  // Used for A/V sync when AESP TCP is disabled
 
         while delegate.shouldRun {
             // Execute one frame
@@ -1828,19 +1843,26 @@ struct AtticServer {
 
             // Get frame buffer and broadcast to video clients
             let frameBuffer = await emulator.getFrameBuffer()
-            await server.broadcastFrame(frameBuffer)
+            await server?.broadcastFrame(frameBuffer)
             await wsBridge?.broadcastFrame(frameBuffer)
 
             // Get audio samples and broadcast to audio clients
             if !config.silent {
                 let audioSamples = await emulator.getAudioSamples()
                 if !audioSamples.isEmpty {
-                    await server.broadcastAudio(audioSamples)
+                    await server?.broadcastAudio(audioSamples)
                     await wsBridge?.broadcastAudio(audioSamples)
                 }
                 // Send A/V sync to WebSocket clients every frame so they can
                 // correlate audio buffers with video frames.
-                let frameNum = await server.currentFrameNumber
+                // When AESP is disabled, use a local frame counter instead.
+                let frameNum: UInt64
+                if let srv = server {
+                    frameNum = await srv.currentFrameNumber
+                } else {
+                    frameNum = frameCounter
+                }
+                frameCounter += 1
                 await wsBridge?.broadcastAudioSync(frameNumber: frameNum)
             }
 
@@ -1873,8 +1895,8 @@ struct AtticServer {
             await cliServer.stop()
         }
 
-        // Stop AESP server
-        await server.stop()
+        // Stop AESP server (if it was started)
+        await server?.stop()
 
         // Shutdown emulator
         await emulator.pause()

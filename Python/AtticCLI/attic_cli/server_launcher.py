@@ -40,6 +40,24 @@ class LaunchResult:
     error: str = ""
 
 
+def _find_rom_path() -> str | None:
+    """Locate the ROM directory relative to the project root.
+
+    When the Python CLI launches AtticServer, the working directory may
+    not be the project root.  This helper ensures the server can find
+    the ROMs by checking the known development layout.
+
+    Returns:
+        Absolute path to the ROM directory, or None if not found.
+    """
+    pkg_dir = Path(__file__).resolve().parent.parent  # attic_cli -> AtticCLI
+    project_root = pkg_dir.parent.parent  # AtticCLI -> Python -> attic
+    rom_dir = project_root / "Resources" / "ROM"
+    if rom_dir.is_dir() and (rom_dir / "ATARIXL.ROM").is_file():
+        return str(rom_dir)
+    return None
+
+
 def find_server_executable() -> str | None:
     """Search for the AtticServer executable.
 
@@ -100,12 +118,16 @@ def launch_server(
     *,
     silent: bool = False,
     rom_path: str | None = None,
+    no_aesp: bool = False,
+    websocket: bool = False,
 ) -> LaunchResult:
     """Launch AtticServer and wait for its socket to appear.
 
     Args:
         silent: Pass --silent to suppress audio output.
         rom_path: Pass --rom-path to specify ROM directory.
+        no_aesp: Pass --no-aesp to disable AESP TCP server.
+        websocket: Pass --websocket to enable WebSocket bridge.
 
     Returns:
         LaunchResult indicating success or failure.
@@ -125,6 +147,16 @@ def launch_server(
         args.append("--silent")
     if rom_path:
         args.extend(["--rom-path", rom_path])
+    else:
+        # Auto-detect ROM path relative to project root so the server
+        # can find ROMs regardless of the current working directory.
+        detected = _find_rom_path()
+        if detected:
+            args.extend(["--rom-path", detected])
+    if no_aesp:
+        args.append("--no-aesp")
+    if websocket:
+        args.append("--websocket")
 
     logger.debug("Launching AtticServer: %s", " ".join(args))
 
@@ -158,6 +190,8 @@ def ensure_server_running(
     *,
     silent: bool = False,
     rom_path: str | None = None,
+    no_aesp: bool = False,
+    websocket: bool = False,
     discover_fn=None,
 ) -> LaunchResult:
     """Ensure AtticServer is running, launching it if necessary.
@@ -165,6 +199,8 @@ def ensure_server_running(
     Args:
         silent: Pass --silent when launching a new server.
         rom_path: Pass --rom-path when launching a new server.
+        no_aesp: Pass --no-aesp to disable AESP TCP server.
+        websocket: Pass --websocket to enable WebSocket bridge.
         discover_fn: Optional callable that returns an existing socket path.
             Defaults to CLISocketClient.discover_socket behavior.
 
@@ -190,4 +226,4 @@ def ensure_server_running(
         return LaunchResult(success=True, socket_path=existing, pid=pid)
 
     # No existing server — launch one
-    return launch_server(silent=silent, rom_path=rom_path)
+    return launch_server(silent=silent, rom_path=rom_path, no_aesp=no_aesp, websocket=websocket)
