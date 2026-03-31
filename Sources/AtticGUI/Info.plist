@@ -28,9 +28,9 @@
 
 	<!-- Version info — must match AtticCore.version (single source of truth) -->
 	<key>CFBundleShortVersionString</key>
-	<string>0.4.0</string>
+	<string>0.4.1</string>
 	<key>CFBundleVersion</key>
-	<string>8</string>
+	<string>9</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 

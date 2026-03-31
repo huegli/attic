@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-03-31
+
+### Fixed
+- Build failure on machines without Xcode (removed `#Preview` macros that require Xcode's PreviewsMacros plugin)
+
 ## [0.4.0] - 2026-03-31
 
 ### Added
