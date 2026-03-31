@@ -193,26 +193,3 @@ struct DirectionTriangle: Shape {
     }
 }
 
-// MARK: - Preview
-
-#Preview("Joystick Overlay - Idle") {
-    ZStack {
-        Color.black
-        JoystickOverlayView(
-            up: false, down: false, left: false, right: false,
-            trigger: false, visible: true
-        )
-    }
-    .frame(width: 400, height: 300)
-}
-
-#Preview("Joystick Overlay - Up+Right+Fire") {
-    ZStack {
-        Color.black
-        JoystickOverlayView(
-            up: true, down: false, left: false, right: true,
-            trigger: true, visible: true
-        )
-    }
-    .frame(width: 400, height: 300)
-}

@@ -532,12 +532,3 @@ struct ConsoleButton: View {
     }
 }
 
-// =============================================================================
-// MARK: - Preview
-// =============================================================================
-
-#Preview {
-    ContentView()
-        .environmentObject(AtticViewModel())
-        .frame(width: 1152, height: 720)
-}
