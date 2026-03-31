@@ -7,23 +7,42 @@
   <link rel="stylesheet" href="/src/style.css">
 </head>
 <body>
-  <!-- Toolbar with connection status and controls -->
-  <div id="toolbar">
-    <span class="title">Attic</span>
-    <div id="status">
-      <span id="status-dot"></span>
-      <span id="status-text">Disconnected</span>
-    </div>
-    <button id="btn-fullscreen">Fullscreen</button>
-    <button id="btn-mute">Mute</button>
-    <button id="btn-reset">Reset</button>
-  </div>
-
-  <!-- Canvas container with focus overlay -->
+  <!-- Canvas container with focus overlay and floating status -->
   <div id="canvas-container">
     <canvas id="screen" tabindex="0"></canvas>
     <div id="overlay">
       <span>Click to start</span>
+    </div>
+    <!-- Floating status indicators (top-right corner of canvas) -->
+    <div id="status-bar">
+      <div id="status">
+        <span id="status-dot"></span>
+        <span id="status-text">Disconnected</span>
+      </div>
+    </div>
+
+    <!-- Joystick overlay (bottom-right corner, visible when gamepad connected) -->
+    <div id="joystick-overlay" style="display: none;">
+      <!-- Direction cross: four triangular arrows -->
+      <svg id="joystick-cross" width="56" height="56" viewBox="0 0 56 56">
+        <!-- Center dot -->
+        <circle cx="28" cy="28" r="3" fill="rgba(255,255,255,0.15)"/>
+        <!-- Up arrow -->
+        <polygon id="joy-up" points="28,4 20,18 36,18" fill="rgba(255,255,255,0.2)"/>
+        <!-- Down arrow -->
+        <polygon id="joy-down" points="28,52 20,38 36,38" fill="rgba(255,255,255,0.2)"/>
+        <!-- Left arrow -->
+        <polygon id="joy-left" points="4,28 18,20 18,36" fill="rgba(255,255,255,0.2)"/>
+        <!-- Right arrow -->
+        <polygon id="joy-right" points="52,28 38,20 38,36" fill="rgba(255,255,255,0.2)"/>
+      </svg>
+      <!-- Fire button -->
+      <div id="joy-fire-wrap">
+        <svg width="24" height="24" viewBox="0 0 24 24">
+          <circle id="joy-fire" cx="12" cy="12" r="10" fill="rgba(255,255,255,0.2)" stroke="rgba(255,255,255,0.3)" stroke-width="1"/>
+        </svg>
+        <span id="joy-fire-label">FIRE</span>
+      </div>
     </div>
   </div>
 

@@ -19,58 +19,6 @@ body {
   overflow: hidden;
 }
 
-/* ---------- Toolbar ---------- */
-
-#toolbar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 16px;
-  background: #1a1a2e;
-  border-bottom: 1px solid #2a2a4a;
-  flex-shrink: 0;
-}
-
-#toolbar .title {
-  font-weight: 600;
-  font-size: 14px;
-  color: #8888bb;
-  margin-right: auto;
-}
-
-#status {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-}
-
-#status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #e74c3c;
-}
-
-#status-text {
-  color: #999;
-}
-
-#toolbar button {
-  padding: 4px 12px;
-  background: #2a2a4a;
-  color: #ccc;
-  border: 1px solid #3a3a5a;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 12px;
-}
-
-#toolbar button:hover {
-  background: #3a3a5a;
-  color: #fff;
-}
-
 /* ---------- Canvas container ---------- */
 
 #canvas-container {
@@ -80,7 +28,7 @@ body {
   justify-content: center;
   position: relative;
   background: #000;
-  padding-top: 8px;
+  padding: 8px 64px 0;
 }
 
 /* The canvas renders at native 336x240 and scales via CSS.
@@ -89,7 +37,7 @@ body {
    while preserving the native 7:5 (336:240) aspect ratio. */
 #screen {
   width: 100%;
-  height: calc(100% - 80px);
+  height: 100%;
   object-fit: contain;
   object-position: top;
   /* Crisp pixel scaling — no smoothing/interpolation */
@@ -105,6 +53,71 @@ body {
   height: 100vh;
   object-fit: contain;
   background: #000;
+}
+
+/* ---------- Floating status bar ---------- */
+
+#status-bar {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 4px 10px;
+  background: rgba(26, 26, 46, 0.75);
+  border-radius: 6px;
+  font-size: 12px;
+  pointer-events: none;
+  z-index: 5;
+}
+
+#status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #e74c3c;
+}
+
+#status-text {
+  color: #999;
+}
+
+/* ---------- Joystick overlay ---------- */
+
+#joystick-overlay {
+  position: absolute;
+  bottom: 48px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 8px;
+  pointer-events: none;
+  z-index: 5;
+}
+
+#joy-fire-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+#joy-fire-label {
+  font-size: 8px;
+  font-family: ui-monospace, 'SF Mono', monospace;
+  color: rgba(255, 255, 255, 0.4);
+  letter-spacing: 1px;
 }
 
 /* ---------- Focus overlay ---------- */

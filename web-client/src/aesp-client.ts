@@ -296,6 +296,24 @@ export class AESPClient {
     this.send(MsgType.CONSOLE_KEYS, new Uint8Array([flags]));
   }
 
+  /**
+   * Sends joystick state for a given port.
+   *
+   * Payload matches the AESP JOYSTICK message (type 0x42): 2 bytes where
+   * byte 0 is the port number (0 or 1) and byte 1 is a bitmask of
+   * directions and trigger (bit0=up, bit1=down, bit2=left, bit3=right,
+   * bit4=trigger).
+   */
+  sendJoystick(port: number, up: boolean, down: boolean, left: boolean, right: boolean, trigger: boolean): void {
+    let flags = 0;
+    if (up) flags |= 0x01;
+    if (down) flags |= 0x02;
+    if (left) flags |= 0x04;
+    if (right) flags |= 0x08;
+    if (trigger) flags |= 0x10;
+    this.send(MsgType.JOYSTICK, new Uint8Array([port, flags]));
+  }
+
   /** Sends a PAUSE command. */
   sendPause(): void {
     this.send(MsgType.PAUSE);

@@ -11,6 +11,7 @@ import { AESPClient } from './aesp-client';
 import { VideoRenderer } from './video-renderer';
 import { AudioPlayer } from './audio-player';
 import { KeyboardHandler } from './keyboard-handler';
+import { GamepadHandler } from './gamepad-handler';
 import { UI } from './ui';
 
 // ---------------------------------------------------------------------------
@@ -49,9 +50,18 @@ const client = new AESPClient(wsUrl, {
 const keyboard = new KeyboardHandler(client, canvas);
 keyboard.attach();
 
-// UI — toolbar buttons, status indicator, focus overlay
-const ui = new UI(client, audioPlayer);
+// UI — status indicators, joystick overlay, focus overlay
+const ui = new UI(audioPlayer);
 ui.init();
+
+// Gamepad handler — maps browser Gamepad API to Atari joystick input.
+// Supports standard controllers (Xbox, PS) and generic HID joysticks (CX Stick).
+const gamepad = new GamepadHandler(
+  client,
+  (count) => ui.setGamepadCount(count),
+  (state) => ui.setJoystickState(state),
+);
+gamepad.attach();
 
 // ---------------------------------------------------------------------------
 // Connect
