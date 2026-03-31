@@ -69,12 +69,23 @@ Emulator Status
 | `.state save <path>` | Save emulator state to file |
 | `.state load <path>` | Load emulator state from file |
 
+### Web Client
+
+| Command | Description |
+|---------|-------------|
+| `.gui` | Start web client HTTP server and display URL |
+| `.gui stop` | Stop the web client HTTP server |
+
+The `.gui` command starts a local HTTP server (port 8080) that serves the web client
+from `web-client/dist/`. Open the displayed URL in a browser to view the Atari screen.
+Requires the web client to be built first (`cd web-client && npm run build`).
+
 ### Session
 
 | Command | Description |
 |---------|-------------|
-| `.quit` | Exit CLI (leave GUI running) |
-| `.shutdown` | Exit CLI and terminate GUI |
+| `.quit` | Exit CLI (leave server running) |
+| `.shutdown` | Exit CLI and terminate server |
 
 ## Monitor Mode
 

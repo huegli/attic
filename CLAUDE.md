@@ -88,9 +88,11 @@ See `docs/IMPLEMENTATION_PLAN.md` for detailed phase-by-phase progress. Summary:
 - Phase 7: Emulator Server (AtticServer executable)
 - Phase 8: GUI as Protocol Client (AtticGUI connects to AtticServer via AESP)
 - Phase 9-17: CLI socket protocol, joystick input, 6502 disassembler, monitor mode, ATR filesystem, DOS mode, BASIC tokenizer, state save/load, polish
-
-**Pending:**
 - Phase 18-19: WebSocket bridge and web browser client
+
+**Dual Launch Modes:**
+- **GUI mode**: AtticGUI launches AtticServer with AESP TCP enabled (default)
+- **Web mode**: `attic-py` launches AtticServer with `--no-aesp --websocket`; `.gui` REPL command serves the web client
 
 ## Key Files to Reference
 

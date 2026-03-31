@@ -47,6 +47,10 @@ The project is built with Swift Package Manager. There is no `.app` bundle; exec
 └── attic               # Command-line REPL tool (libatari800 statically linked)
 ```
 
+A Python CLI (`attic-py`) is also available under `Python/AtticCLI/`. It communicates
+with AtticServer over the same CLI socket protocol and can serve the web client via
+the `.gui` REPL command.
+
 ROMs are resolved at runtime from multiple search paths (see Startup Sequence below), not embedded in a bundle.
 
 **Note:** libatari800 is statically linked into all executables rather than distributed
@@ -151,7 +155,42 @@ Joystick input is emulated via the keyboard (toggled with ⌘J):
 - AudioEngine converts 8-bit or 16-bit PCM to Float for AVAudioEngine
 - Larger ring buffer prevents underruns during system load spikes
 
-## 3. CLI Application
+## 3. AtticServer
+
+### Command-Line Arguments
+
+```
+USAGE: AtticServer [options]
+
+OPTIONS:
+  --rom-path <path>      Path to ROM directory (default: auto-detect)
+  --control-port <n>     Control port (default: 47800)
+  --video-port <n>       Video port (default: 47801)
+  --audio-port <n>       Audio port (default: 47802)
+  --socket-path <path>   Unix socket path (default: /tmp/attic-<pid>.sock)
+  --no-cli-socket        Disable CLI socket server
+  --no-aesp              Disable AESP TCP server (ports 47800-47802)
+  --websocket            Enable WebSocket bridge for web clients
+  --websocket-port <n>   WebSocket port (default: 47803, implies --websocket)
+  --silent               Disable audio generation
+  --help, -h             Show help message
+```
+
+### Launch Modes
+
+AtticServer supports two launch configurations:
+
+| Mode | Flags | AESP TCP | WebSocket | CLI Socket | Used By |
+|------|-------|----------|-----------|------------|---------|
+| GUI mode | *(default)* | :47800-:47802 | Off | On | AtticGUI |
+| Web mode | `--no-aesp --websocket` | Off | :47803 | On | attic-py |
+
+In **GUI mode** (default), AESP TCP ports are active for native SwiftUI/Metal clients.
+In **Web mode**, AESP TCP is disabled and the WebSocket bridge provides video/audio
+streaming to browser-based clients. The CLI socket is always available in both modes
+for REPL interaction.
+
+## 4. CLI Application (Swift)
 
 ### Command-Line Arguments
 
@@ -175,6 +214,41 @@ EXAMPLES:
 
 **Note:** The CLI always starts in REPL mode by default; there is no `--repl` flag.
 
+## 5. CLI Application (Python)
+
+### Command-Line Arguments
+
+```
+USAGE: attic-py [options]
+
+OPTIONS:
+  --silent            Launch server without audio output
+  --socket <path>     Connect to a specific server socket path
+  --headless          Launch server in headless mode (no GUI)
+  --help              Show help information
+  --version           Show version
+
+EXAMPLES:
+  attic-py                             Launch server and connect REPL
+  attic-py --silent                    Launch without audio
+  attic-py --socket /tmp/attic-1234.sock  Connect to existing server
+```
+
+### Web Client Integration
+
+When `attic-py` launches a new AtticServer, it always uses `--no-aesp --websocket`
+so the server is ready for browser-based display. The `.gui` REPL command starts a
+local HTTP server on port 8080 serving the web client:
+
+```
+[monitor] $E477> .gui
+Web client available at http://localhost:8080
+[monitor] $E477> .gui stop
+Web client server stopped
+```
+
+The web client files must be pre-built in `web-client/dist/` (see `web-client/README.md`).
+
 ### REPL Prompt Format
 
 Prompts must be recognizable by Emacs comint:
@@ -187,7 +261,7 @@ Prompts must be recognizable by Emacs comint:
 
 The prompt always ends with `> ` followed by a space, making it easy to match with regex: `^\[.+\] .+> $`
 
-## 4. Startup Sequence
+## 6. Startup Sequence
 
 ### GUI Startup
 
@@ -222,7 +296,7 @@ The prompt always ends with `> ` followed by a space, making it easy to match wi
 
 **Note:** Socket server for CLI communication is implemented in Phase 9 (CLI Socket Protocol).
 
-### CLI Startup (Normal)
+### Swift CLI Startup (Normal)
 
 ```
 1. Parse command-line arguments
@@ -239,7 +313,24 @@ The prompt always ends with `> ` followed by a space, making it easy to match wi
 9. Begin REPL loop
 ```
 
-### CLI Startup (Headless)
+### Python CLI Startup (attic-py)
+
+```
+1. Parse command-line arguments (--silent, --socket, --headless)
+2. Look for existing socket: /tmp/attic-*.sock
+3. If no socket found:
+   a. Find AtticServer executable (.build/release, .build/debug, PATH)
+   b. Auto-detect ROM path relative to project root
+   c. Launch AtticServer with --no-aesp --websocket --rom-path <path>
+   d. Poll for socket (200ms intervals, 20 retries)
+4. Connect to socket
+5. Print welcome banner
+6. Enter monitor mode (default)
+7. Begin REPL loop
+8. (Optional) User types .gui to start HTTP server on :8080
+```
+
+### Swift CLI Startup (Headless)
 
 ```
 1. Parse command-line arguments
@@ -252,7 +343,7 @@ The prompt always ends with `> ` followed by a space, making it easy to match wi
 8. Begin REPL loop
 ```
 
-## 5. State Persistence
+## 7. State Persistence
 
 ### Save State Contents
 
@@ -287,7 +378,7 @@ Using a combination of libatari800's native format and our metadata:
 
 - `.attic` - Attic State file
 
-## 6. Screenshot Capability
+## 8. Screenshot Capability
 
 ### Screenshot Command
 
@@ -303,7 +394,7 @@ Using a combination of libatari800's native format and our metadata:
 - No post-processing effects
 - sRGB color space
 
-## 7. Disk Image Support
+## 9. Disk Image Support
 
 ### Supported Formats
 
@@ -318,7 +409,7 @@ Using a combination of libatari800's native format and our metadata:
 - D1: is the default/current drive
 - Auto-boot from D1: if bootable disk present
 
-## 8. Error Handling
+## 10. Error Handling
 
 ### Error Message Format
 

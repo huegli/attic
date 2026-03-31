@@ -15,12 +15,13 @@ Both share a common core library (`AtticCore`) containing the emulator wrapper, 
 
 ### Server Architecture (Phases 6-8, complete)
 
-Four executables with protocol-based communication:
+Multiple executables with protocol-based communication:
 
 1. **AtticServer** - Standalone emulator server process ✅ (Phase 7 complete)
 2. **AtticGUI** - Protocol client with Metal rendering ✅ (Phase 8 complete)
-3. **attic** - Command-line REPL tool (connects via text protocol)
-4. **Web Client** - Browser-based client via WebSocket (Phases 18-19, future)
+3. **attic** - Swift command-line REPL tool (connects via text protocol)
+4. **attic-py** - Python command-line REPL tool (connects via text protocol, serves web client)
+5. **Web Client** - Browser-based client via WebSocket ✅ (Phases 18-19 complete)
 
 Supporting library:
 - **AtticProtocol** - AESP protocol implementation ✅ (Phase 6 complete)
@@ -51,7 +52,7 @@ This separation enables:
 | 15 | BASIC Tokenizer | ✅ Complete |
 | 16 | State Save/Load | ✅ Complete |
 | 17 | Polish | ✅ Complete |
-| 18-19 | Web Browser Support | Pending |
+| 18-19 | Web Browser Support | ✅ Complete |
 
 ## Versioning and Protocol Stability
 
@@ -118,9 +119,13 @@ All AtticCore files are at the module top level (no subdirectories). Files are g
                                 └─────────────────┘
 ```
 
-## Server Architecture Component Diagram (Phase 8 Complete)
+## Server Architecture Component Diagram
 
-With the Attic Emulator Server Protocol (AESP) implemented, the architecture now supports:
+AtticServer supports two launch modes depending on which client drives the session:
+
+### Mode 1: GUI Mode (AtticGUI launches server)
+
+AESP TCP enabled on ports 47800-47802. AtticGUI connects as a native protocol client.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -141,25 +146,52 @@ With the Attic Emulator Server Protocol (AESP) implemented, the architecture now
 │  └──────────┼──────────────────┼──────────────────┼─────────────────────┘│
 └─────────────┼──────────────────┼──────────────────┼──────────────────────┘
               │                  │                  │
-    ┌─────────┴─────────┬────────┴──────────────────┤
-    │                   │                           │
-    ▼                   ▼                           ▼
-┌─────────────────┐ ┌─────────────────┐     ┌─────────────────┐
-│   AtticGUI      │ │   AtticGUI #2   │     │  WebSocket      │
-│   (Process 2)   │ │   (Process 3)   │     │  Bridge :47803  │
-│                 │ │                 │     │                 │
-│  AESPClient     │ │  AESPClient     │     └────────┬────────┘
-│  MetalRenderer  │ │  MetalRenderer  │              │
-│  AVAudioEngine  │ │  AVAudioEngine  │              ▼
-└─────────────────┘ └─────────────────┘     ┌─────────────────┐
-                                            │   Web Browser   │
-┌─────────────────┐                         │   (JavaScript)  │
-│   attic CLI     │                         │                 │
-│   (Process 4)   │                         │  Canvas/WebGL   │
-│                 │                         │  Web Audio API  │
-│  Text Protocol  │                         └─────────────────┘
-│  (Unix Socket)  │
-└─────────────────┘
+    ┌─────────┴─────────┬────────┴──────────────────┘
+    │                   │
+    ▼                   ▼
+┌─────────────────┐ ┌─────────────────┐
+│   AtticGUI      │ │   AtticGUI #2   │
+│   (Process 2)   │ │   (Process 3)   │
+│                 │ │                 │
+│  AESPClient     │ │  AESPClient     │
+│  MetalRenderer  │ │  MetalRenderer  │
+│  AVAudioEngine  │ │  AVAudioEngine  │
+└─────────────────┘ └─────────────────┘
+```
+
+### Mode 2: Web Mode (Python CLI launches server)
+
+AESP TCP disabled (`--no-aesp`), WebSocket bridge enabled (`--websocket`) on port 47803.
+The Python CLI provides a REPL over the Unix socket, and the `.gui` command starts an
+HTTP server to serve the web client in a browser.
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│              AtticServer --no-aesp --websocket (Process 1)               │
+│  ┌─────────────────────────────────────────────────────────────────────┐│
+│  │                         AtticCore                                    ││
+│  │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────┐  ││
+│  │  │ EmulatorEngine  │  │   AudioEngine   │  │ KeyboardInputHandler│  ││
+│  │  │ LibAtari800Wrap │  │   (samples)     │  │   (state tracking)  │  ││
+│  │  └─────────────────┘  └─────────────────┘  └─────────────────────┘  ││
+│  └─────────────────────────────────────────────────────────────────────┘│
+│  ┌─────────────────────────────────────────────────────────────────────┐│
+│  │  ┌───────────────┐  ┌──────────────────────────┐                    ││
+│  │  │ CLI Socket    │  │  WebSocket Bridge :47803 │                    ││
+│  │  │ (Unix domain) │  │  (AESP-over-WebSocket)   │                    ││
+│  │  └───────┬───────┘  └────────────┬─────────────┘                    ││
+│  └──────────┼───────────────────────┼──────────────────────────────────┘│
+└─────────────┼───────────────────────┼──────────────────────────────────┘
+              │                       │
+              ▼                       ▼
+┌─────────────────┐           ┌─────────────────┐
+│  attic-py CLI   │           │   Web Browser   │
+│  (Process 2)    │           │   (JavaScript)  │
+│                 │           │                 │
+│  Text Protocol  │           │  Canvas 2D      │
+│  + HTTP :8080   │──serves──▶│  Web Audio API  │
+│  (.gui command) │           │                 │
+└─────────────────┘           └─────────────────┘
         │
         ▼
 ┌─────────────────┐

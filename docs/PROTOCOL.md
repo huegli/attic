@@ -19,6 +19,11 @@ This document describes the two communication protocols used by the Attic Emulat
 
 AESP is a binary protocol for high-performance communication between the emulator server (AtticServer) and GUI/web clients. It supports video streaming at 60fps, audio streaming, and real-time input handling.
 
+> **Note:** The AESP TCP server (ports 47800-47802) can be disabled with `--no-aesp`
+> when AtticServer is launched in web mode. In that configuration, only the WebSocket
+> bridge (port 47803) and CLI socket are active. See `docs/SPECIFICATION.md` for
+> launch mode details.
+
 ## Transport Architecture
 
 ```
