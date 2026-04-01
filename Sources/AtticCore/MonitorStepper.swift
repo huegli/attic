@@ -299,7 +299,7 @@ public actor MonitorStepper {
         }
 
         // Execute one frame (bypasses shouldRun guard so stepping works when paused)
-        let result = await emulator.stepFrame()
+        _ = await emulator.stepFrame()
 
         // Clear temporary breakpoints
         await breakpoints.clearTemporaryBreakpoint(memory: memory)

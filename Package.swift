@@ -169,7 +169,10 @@ let package = Package(
         .executableTarget(
             name: "AtticGUI",
             dependencies: ["AtticCore", "AtticProtocol"],
-            path: "Sources/AtticGUI"
+            path: "Sources/AtticGUI",
+            resources: [
+					.process("Credits.rtf")
+			],
         ),
 
         // =================================================================
