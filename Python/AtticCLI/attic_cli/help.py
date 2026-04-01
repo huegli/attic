@@ -48,6 +48,16 @@ GLOBAL_HELP: dict[str, str] = {
         "  .gui           — Start web server and show URL\n"
         "  .gui stop      — Stop the web server"
     ),
+    "edit": (
+        "Open the current BASIC program in an external editor.\n"
+        "  .edit          — Export program to temp file, open in $VISUAL/$EDITOR/vim\n"
+        "  .edit stop     — Stop background file watcher (GUI editor mode)\n"
+        "\n"
+        "Uses diff-based reimport: only changed, added, or deleted lines are\n"
+        "injected back into the emulator.  GUI editors run a background watcher\n"
+        "that applies changes on every save.  Terminal editors block the REPL\n"
+        "and apply changes once when the editor exits."
+    ),
     "quit": "Disconnect from server and exit (server keeps running).",
     "shutdown": "Disconnect, stop the server, and exit.",
 }
@@ -257,7 +267,7 @@ def print_help_overview(mode: str) -> None:
     for cmd in [
         "monitor", "basic", "dos", "help", "status", "screen",
         "reset", "warmstart", "screenshot", "boot", "state",
-        "gui", "quit", "shutdown",
+        "edit", "gui", "quit", "shutdown",
     ]:
         desc = GLOBAL_HELP[cmd].split("\n")[0]  # First line only
         global_table.add_row(f".{cmd}", desc)
