@@ -857,7 +857,11 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
             return .error("BASIC line injection is disabled. Use keyboard input instead.")
 
         case .basicNew:
-            return .error("BASIC NEW injection is disabled. Use keyboard input instead.")
+            // Re-enabled for edit mode (.edit command in CLI). Unlike basicLine,
+            // NEW just resets memory pointers — no tokenized data is injected.
+            // This is less invasive than the already-enabled basicDelete/basicImport.
+            let result = await basicHandler.newProgram()
+            return result.success ? .ok(result.message) : .error(result.message)
 
         case .basicRun:
             return .error("BASIC RUN injection is disabled. Use keyboard input instead.")

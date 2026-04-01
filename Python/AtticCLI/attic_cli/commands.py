@@ -109,6 +109,9 @@ def handle_dot_command(
     if cmd == ".gui":
         return _handle_gui(args)
 
+    if cmd == ".edit":
+        return _handle_edit(client, args, mode)
+
     return f"[red]Unknown command: {stripped}[/red]"
 
 
@@ -168,6 +171,22 @@ def _handle_state(client: CLISocketClient, args: str) -> str:
         return f"[red]Usage: .state {subcmd} <path>[/red]"
 
     return _send_and_format(client, f"state {subcmd} {path}")
+
+
+def _handle_edit(client: CLISocketClient, args: str, mode: str) -> str | None:
+    """Handle .edit command to open BASIC program in an external editor.
+
+    Only available in BASIC mode. Exports the current program, opens it
+    in the user's editor ($VISUAL/$EDITOR/vim), watches for saves, and
+    reimports changes.
+    """
+    if mode not in ("basic", "basic_turbo"):
+        return "[red].edit is only available in BASIC mode[/red]"
+
+    from .editor import run_edit_mode
+
+    path = args.strip() if args.strip() else None
+    return run_edit_mode(client, path=path)
 
 
 def _handle_gui(args: str) -> str:

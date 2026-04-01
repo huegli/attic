@@ -58,4 +58,5 @@ class BasicMode(BaseMode):
             "list", "del", "run", "stop", "cont", "new",
             "vars", "var", "info", "renum",
             "save", "load", "import", "export", "dir",
+            ".edit",
         ]
