@@ -43,10 +43,11 @@ GLOBAL_HELP: dict[str, str] = {
         "  .state save <path>    — Save complete emulator state\n"
         "  .state load <path>    — Restore previously saved state"
     ),
-    "gui": (
-        "Start or stop the web client HTTP server.\n"
-        "  .gui           — Start web server and show URL\n"
-        "  .gui stop      — Stop the web server"
+    "sound": (
+        "Show or change audio output state.\n"
+        "  .sound         — Show whether sound is on or off\n"
+        "  .sound on      — Instructions to enable sound (requires restart)\n"
+        "  .sound off     — Instructions to disable sound (requires restart)"
     ),
     "edit": (
         "Open the current BASIC program in an external editor.\n"
@@ -269,7 +270,7 @@ def print_help_overview(mode: str) -> None:
     for cmd in [
         "monitor", "basic", "dos", "help", "status", "screen",
         "reset", "warmstart", "screenshot", "boot", "state",
-        "edit", "gui", "quit", "shutdown",
+        "sound", "edit", "quit", "shutdown",
     ]:
         desc = GLOBAL_HELP[cmd].split("\n")[0]  # First line only
         global_table.add_row(f".{cmd}", desc)

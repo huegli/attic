@@ -1,8 +1,8 @@
 """Simple HTTP server for hosting the Attic web client.
 
 Serves static files from the web-client/dist/ directory on a background
-daemon thread. The .gui REPL command starts this server so users can
-open the Atari emulator display in a web browser.
+daemon thread. Auto-started on attic-py launch so the web client is
+always available in the browser.
 """
 
 import logging

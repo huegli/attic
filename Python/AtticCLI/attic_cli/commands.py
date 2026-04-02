@@ -106,11 +106,11 @@ def handle_dot_command(
     if cmd == ".state":
         return _handle_state(client, args)
 
-    if cmd == ".gui":
-        return _handle_gui(args)
-
     if cmd == ".edit":
         return _handle_edit(args, client=client)
+
+    if cmd == ".sound":
+        return _handle_sound(args)
 
     return f"[red]Unknown command: {stripped}[/red]"
 
@@ -173,6 +173,34 @@ def _handle_state(client: CLISocketClient, args: str) -> str:
     return _send_and_format(client, f"state {subcmd} {path}")
 
 
+def _handle_sound(args: str) -> str:
+    """Handle .sound command to show current audio state.
+
+    .sound       — Show whether sound is on or off.
+    .sound on    — Inform user to restart with --sound.
+    .sound off   — Inform user to restart without --sound.
+    """
+    from .main import sound_enabled
+
+    subcmd = args.strip().lower()
+
+    if not subcmd:
+        state = "on" if sound_enabled else "off"
+        return f"Sound is [bold]{state}[/bold]"
+
+    if subcmd in ("on", "off"):
+        if (subcmd == "on") == sound_enabled:
+            return f"Sound is already {subcmd}"
+        flag = "--sound" if subcmd == "on" else "(no flag needed, off is default)"
+        return (
+            f"[yellow]Sound cannot be toggled at runtime.[/yellow]\n"
+            f"Restart attic-py with {flag}:\n"
+            f"  [dim]attic-py{' --sound' if subcmd == 'on' else ''}[/dim]"
+        )
+
+    return "[red]Usage: .sound [on|off][/red]"
+
+
 def _handle_edit(args: str, *, client: CLISocketClient) -> str:
     """Handle .edit command to open BASIC program in an external editor.
 
@@ -195,39 +223,3 @@ def _handle_edit(args: str, *, client: CLISocketClient) -> str:
     return editor.start_edit(client)
 
 
-def _handle_gui(args: str) -> str:
-    """Handle .gui command to start/stop the web client HTTP server.
-
-    .gui        — Start the web server and display the URL.
-    .gui stop   — Stop the web server.
-    """
-    from . import web_server
-
-    subcmd = args.strip().lower()
-
-    if subcmd == "stop":
-        if web_server.stop_web_server():
-            return "Web client server stopped"
-        return "[dim]Web client server is not running[/dim]"
-
-    if subcmd and subcmd != "":
-        return f"[red]Usage: .gui [stop][/red]"
-
-    # Start the web server
-    if web_server.is_running():
-        port = web_server.get_port()
-        return f"[dim]Web client already running at[/dim] http://localhost:{port}"
-
-    dist_dir = web_server.find_dist_dir()
-    if dist_dir is None:
-        return (
-            "[red]Error:[/red] web-client/dist/ not found.\n"
-            "[dim]Build the web client first: cd web-client && npm run build[/dim]"
-        )
-
-    try:
-        web_server.start_web_server(dist_dir, port=8080)
-    except OSError as exc:
-        return f"[red]Error starting web server:[/red] {exc}"
-
-    return f"Web client available at http://localhost:8080"

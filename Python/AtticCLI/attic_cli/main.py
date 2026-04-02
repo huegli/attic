@@ -14,13 +14,22 @@ from .server_launcher import ensure_server_running, find_server_executable
 
 console = Console()
 
+# Current sound state, set at launch. Accessible by .sound command.
+sound_enabled: bool = False
+
 
 @click.command()
 @click.option(
     "--silent",
     is_flag=True,
+    default=True,
+    help="Launch server without audio output (default).",
+)
+@click.option(
+    "--sound",
+    is_flag=True,
     default=False,
-    help="Launch server without audio output.",
+    help="Launch server with audio output enabled.",
 )
 @click.option(
     "--socket",
@@ -29,19 +38,20 @@ console = Console()
     type=click.Path(),
     help="Connect to a specific server socket path.",
 )
-@click.option(
-    "--headless",
-    is_flag=True,
-    default=False,
-    help="Launch server in headless mode (no GUI).",
-)
 @click.version_option(version=__version__, prog_name="attic-py")
-def cli(silent: bool, socket_path: str | None, headless: bool) -> None:
+def cli(silent: bool, sound: bool, socket_path: str | None) -> None:
     """Python CLI for the Attic Atari 800 XL emulator.
 
     Connects to a running AtticServer instance, or launches one
     automatically. Provides a REPL with monitor, BASIC, and DOS modes.
+
+    Sound is off by default. Use --sound to enable audio output.
     """
+    # --sound overrides --silent
+    global sound_enabled
+    effective_silent = not sound
+    sound_enabled = sound
+
     client = CLISocketClient()
 
     if socket_path:
@@ -49,10 +59,13 @@ def cli(silent: bool, socket_path: str | None, headless: bool) -> None:
         _connect_to_socket(client, socket_path)
     else:
         # Discover or launch server
-        _connect_or_launch(client, silent=silent)
+        _connect_or_launch(client, silent=effective_silent)
+
+    # Auto-start web client HTTP server
+    web_url = _start_web_client()
 
     # Show banner
-    _print_banner(client)
+    _print_banner(client, web_url=web_url)
 
     # Hand off to REPL
     from .repl import run_repl
@@ -73,7 +86,7 @@ def _connect_or_launch(client: CLISocketClient, *, silent: bool) -> None:
     """Discover an existing server or launch a new one, then connect.
 
     When launching a new server, AESP TCP is disabled and WebSocket is
-    enabled.  The web client can then be served via the .gui REPL command.
+    enabled.  The web client HTTP server is auto-started on launch.
     """
     result = ensure_server_running(
         silent=silent,
@@ -101,10 +114,31 @@ def _connect_or_launch(client: CLISocketClient, *, silent: bool) -> None:
         console.print(f"[dim]Connected to AtticServer (pid {result.pid})[/dim]")
 
 
-def _print_banner(client: CLISocketClient) -> None:
+def _start_web_client() -> str | None:
+    """Auto-start the web client HTTP server.
+
+    Returns:
+        The URL string if the server started, or None if dist dir not found.
+    """
+    from . import web_server
+
+    dist_dir = web_server.find_dist_dir()
+    if dist_dir is None:
+        return None
+
+    try:
+        web_server.start_web_server(dist_dir, port=8080)
+        return "http://localhost:8080"
+    except OSError:
+        return None
+
+
+def _print_banner(client: CLISocketClient, *, web_url: str | None = None) -> None:
     """Print the welcome banner with version info."""
     console.print()
     console.print("[bold]Attic[/bold] — Atari 800 XL Emulator", highlight=False)
     console.print(f"[dim]Python CLI v{__version__}[/dim]")
+    if web_url:
+        console.print(f"[dim]Web client at {web_url}[/dim]")
     console.print("[dim]Type .help for commands, .quit to exit[/dim]")
     console.print()
