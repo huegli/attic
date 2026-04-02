@@ -65,7 +65,8 @@ public struct Breakpoint: Sendable, Equatable {
     public let type: BreakpointType
 
     /// The original byte at this address (for RAM breakpoints).
-    public let originalByte: UInt8?
+    /// Mutable so it can be updated when user writes to a breakpointed address.
+    public var originalByte: UInt8?
 
     /// Number of times this breakpoint has been hit.
     public var hitCount: Int
@@ -383,6 +384,26 @@ public actor BreakpointManager {
             bp.hitCount += 1
             breakpoints[address] = bp
         }
+    }
+
+    /// Updates the tracked original byte for a RAM breakpoint.
+    ///
+    /// When a user writes to an address that has a breakpoint, the BRK opcode
+    /// in memory would be overwritten. This method updates the tracked original
+    /// byte so the correct value is restored when the breakpoint is cleared.
+    ///
+    /// - Parameters:
+    ///   - address: The breakpoint address.
+    ///   - value: The new original byte value.
+    /// - Returns: True if a breakpoint existed at the address and was updated.
+    @discardableResult
+    public func updateOriginalByte(at address: UInt16, value: UInt8) -> Bool {
+        guard var bp = breakpoints[address], bp.type == .ram else {
+            return false
+        }
+        bp.originalByte = value
+        breakpoints[address] = bp
+        return true
     }
 
     /// Gets the original byte at a breakpoint address.

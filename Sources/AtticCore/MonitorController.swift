@@ -238,23 +238,43 @@ public actor MonitorController {
 
     /// Writes a byte to memory.
     ///
-    /// Note: Writing to a breakpoint address will update the "original byte"
-    /// that gets restored when the breakpoint is cleared.
+    /// If the address has a RAM breakpoint, this updates the tracked original
+    /// byte instead of writing directly (since memory holds the BRK opcode).
+    /// This ensures the correct value is restored when the breakpoint is cleared.
     public func writeMemory(at address: UInt16, value: UInt8) async {
-        // TODO: Update breakpoint original byte if needed
+        if await breakpoints.updateOriginalByte(at: address, value: value) {
+            // Breakpoint exists: updated the tracked byte, memory keeps its BRK
+            return
+        }
         await emulator.writeMemory(at: address, value: value)
     }
 
     /// Writes a block of memory.
+    ///
+    /// For each byte in the block, if the target address has a RAM breakpoint,
+    /// the tracked original byte is updated instead of writing to memory.
     public func writeMemoryBlock(at address: UInt16, bytes: [UInt8]) async {
-        await emulator.writeMemoryBlock(at: address, bytes: bytes)
+        for (i, byte) in bytes.enumerated() {
+            let addr = address &+ UInt16(i)
+            if await breakpoints.updateOriginalByte(at: addr, value: byte) {
+                // Breakpoint exists at this address: tracked byte updated
+                continue
+            }
+            await emulator.writeMemory(at: addr, value: byte)
+        }
     }
 
     /// Fills a memory range with a value.
+    ///
+    /// For each address in the range, if it has a RAM breakpoint, the tracked
+    /// original byte is updated instead of writing to memory.
     public func fillMemory(from start: UInt16, to end: UInt16, value: UInt8) async {
-        let count = Int(end) - Int(start) + 1
-        let bytes = [UInt8](repeating: value, count: count)
-        await emulator.writeMemoryBlock(at: start, bytes: bytes)
+        for addr in start...end {
+            if await breakpoints.updateOriginalByte(at: addr, value: value) {
+                continue
+            }
+            await emulator.writeMemory(at: addr, value: value)
+        }
     }
 
     // =========================================================================
