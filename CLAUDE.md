@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-This is a macOS application that emulates the Atari 800 XL home computer. It uses a client-server architecture where the emulator runs as a standalone server (AtticServer) communicating with clients via the Attic Emulator Server Protocol (AESP). Clients include a native SwiftUI/Metal GUI and a CLI tool for REPL-based interaction designed to work with Emacs comint mode.
+This is a macOS application that emulates the Atari 800 XL home computer. It uses a client-server architecture where the emulator runs as a standalone server (AtticServer) communicating with clients via the Attic Emulator Server Protocol (AESP). Clients include a native SwiftUI/Metal GUI, a CLI tool for REPL-based interaction, and a browser-based web client.
 
 ## Technology Stack
 
@@ -45,8 +45,7 @@ attic/
 4. **CLI Launches GUI**: By default, CLI starts the GUI if not running; `--headless` flag for no-GUI operation
 5. **BASIC Tokenization**: We tokenize BASIC source and inject into emulator memory rather than interpreting
 6. **BRK-Based Breakpoints**: Debugger uses 6502 BRK instruction ($00) for breakpoints
-7. **Emacs Integration**: REPL designed for comint compatibility with clear prompts
-8. **MCP Integration**: AtticMCP server exposes emulator tools to AI assistants like Claude Code
+7. **MCP Integration**: AtticMCP server exposes emulator tools to AI assistants like Claude Code
 
 ## Versioning
 
@@ -113,14 +112,13 @@ See `docs/IMPLEMENTATION_PLAN.md` for detailed phase-by-phase progress. Summary:
 - Use Swift's structured concurrency (async/await, actors) for thread safety
 - EmulatorEngine should be an actor to serialize access from multiple sources
 - Memory operations on the emulator must pause execution first
-- All REPL output must end with the appropriate prompt for comint compatibility
 - Error messages should be detailed with suggestions for correction
 
 ## Testing Approach
 
 - Unit tests for tokenizer, detokenizer, ATR parser, disassembler
 - Integration tests for socket protocol
-- Manual testing with Emacs comint for REPL interaction
+- Manual testing with terminal REPL and web client
 
 ## Comments
 - Add detailed comments to all the files that make up this project.

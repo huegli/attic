@@ -9,7 +9,7 @@ The Attic Atari 800 XL Emulator is a macOS application that will evolve through 
 Two cooperating executables:
 
 1. **AtticGUI** - SwiftUI application with Metal rendering and audio output
-2. **attic** - Command-line REPL tool for Emacs integration
+2. **attic** - Command-line REPL tool
 
 Both share a common core library (`AtticCore`) containing the emulator wrapper, REPL logic, tokenizers, and file format handlers.
 
@@ -114,9 +114,6 @@ All AtticCore files are at the module top level (no subdirectories). Files are g
     └─────────────────┘         └─────────────────┘
                                        │
                                        ▼
-                                ┌─────────────────┐
-                                │  Emacs comint   │
-                                └─────────────────┘
 ```
 
 ## Server Architecture Component Diagram
@@ -194,9 +191,6 @@ HTTP server to serve the web client in a browser.
 └─────────────────┘           └─────────────────┘
         │
         ▼
-┌─────────────────┐
-│  Emacs comint   │
-└─────────────────┘
 ```
 
 ## Communication Protocols
@@ -208,9 +202,8 @@ The Attic Emulator uses two communication protocols:
    - Control, video, and audio on separate ports (47800-47802)
    - WebSocket bridge on port 47803 for web clients
 
-2. **CLI Protocol** - Text-based protocol for REPL/Emacs integration
+2. **CLI Protocol** - Text-based protocol for REPL integration
    - Line-based commands over Unix domain socket
-   - Designed for Emacs comint mode compatibility
 
 For complete protocol specifications including message formats, payload structures, and test coverage requirements, see **[PROTOCOL.md](PROTOCOL.md)**.
 
@@ -316,13 +309,13 @@ CLI Process (attic)                 AtticServer Process
 
 ### Message Flow
 
-1. User types command in Emacs
-2. Emacs sends to CLI via stdin
+1. User types command in terminal
+2. CLI reads from stdin
 3. CLI translates command and sends to AtticServer via socket
 4. AtticServer executes command against EmulatorEngine
 5. AtticServer sends response via socket
 6. CLI formats response and writes to stdout
-7. Emacs displays in comint buffer
+7. Terminal displays output
 
 ## Memory Architecture
 

@@ -13,7 +13,7 @@
 //    BASIC tokenizer, and file format handlers. Both CLI and GUI depend on this.
 //
 // 2. AtticCLI (attic) - The command-line executable that provides a REPL
-//    interface for interacting with the emulator. Designed for Emacs comint mode.
+//    interface for interacting with the emulator.
 //
 // 3. AtticGUI - The SwiftUI application with Metal rendering for display output.
 //
@@ -150,8 +150,7 @@ let package = Package(
         // - Argument parsing (--repl, --headless, --silent, --socket)
         // - Three modes: Monitor (debugging), BASIC, DOS (disk management)
         // - Unix socket communication with GUI when not in headless mode
-        // - Designed for Emacs comint-mode compatibility
-        // - libedit integration for Emacs-style line editing and history
+        // - libedit integration for line editing and history
         .executableTarget(
             name: "AtticCLI",
             dependencies: ["AtticCore", "CEditLineShim"],

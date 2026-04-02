@@ -1,13 +1,12 @@
 # Attic
 
-**A macOS Atari 800 XL emulator with Emacs integration**
+**A macOS Atari 800 XL emulator**
 
-Attic is an Atari 800 XL emulator designed for developers and retrocomputing enthusiasts. It pairs a native SwiftUI/Metal GUI with a powerful REPL interface that integrates seamlessly with Emacs.
+Attic is an Atari 800 XL emulator designed for developers and retrocomputing enthusiasts. It pairs a native SwiftUI/Metal GUI with a powerful REPL interface and a browser-based web client.
 
 ## Features
 
 - **Native macOS app** — SwiftUI interface with Metal rendering at 60fps
-- **Emacs integration** — Full comint-mode REPL for debugging, BASIC programming, and disk management
 - **6502 monitor** — Disassembler, assembler, breakpoints, memory inspection, and single-stepping
 - **BASIC mode** — Enter and edit Atari BASIC programs directly from your terminal
 - **DOS mode** — Mount, browse, and manipulate ATR disk images
@@ -268,27 +267,6 @@ Breakpoint set at $E479
  2 files, 73 sectors used
 ```
 
-## Emacs Integration
-
-Add to your init file:
-
-```elisp
-(add-to-list 'load-path "/path/to/attic/emacs")
-(require 'attic)
-```
-
-Then `M-x attic-run` to start the REPL in a comint buffer.
-
-Key bindings in `attic-mode`:
-| Key | Command |
-|-----|---------|
-| `C-c C-m` | Switch to monitor |
-| `C-c C-b` | Switch to BASIC |
-| `C-c C-d` | Switch to DOS |
-| `C-c C-g` | Go (resume) |
-| `C-c C-n` | Step instruction |
-| `C-c C-p` | Pause |
-
 ## Architecture
 
 Attic uses a client-server architecture where the emulator runs as a standalone server process:
@@ -305,17 +283,12 @@ Attic uses a client-server architecture where the emulator runs as a standalone 
               │                  │                  │
               ▼                  ▼                  ▼
        ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-       │  AtticGUI   │    │  AtticCLI   │    │  (Future)   │
-       │             │    │             │    │  Web Client │
-       │  SwiftUI    │    │  REPL       │    │             │
+       │  AtticGUI   │    │  AtticCLI   │    │  Web Client │
+       │             │    │             │    │             │
+       │  SwiftUI    │    │  REPL       │    │  Browser    │
        │  Metal      │    │             │    │  WebSocket  │
-       │  Audio      │    └──────┬──────┘    └─────────────┘
-       └─────────────┘           │
-                                 ▼
-                          ┌─────────────┐
-                          │   Emacs     │
-                          │  comint     │
-                          └─────────────┘
+       │  Audio      │    └─────────────┘    └─────────────┘
+       └─────────────┘
 ```
 
 **AESP (Attic Emulator Server Protocol):**

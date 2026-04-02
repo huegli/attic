@@ -251,7 +251,7 @@ The web client files must be pre-built in `web-client/dist/` (see `web-client/RE
 
 ### REPL Prompt Format
 
-Prompts must be recognizable by Emacs comint:
+Prompts use a consistent format:
 
 ```
 [monitor] $E477> 

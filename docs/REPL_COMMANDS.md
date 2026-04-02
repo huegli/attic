@@ -6,7 +6,7 @@ The REPL operates in three modes: Monitor, BASIC, and DOS. Global commands are a
 
 ## Prompt Format
 
-Each mode has a distinctive prompt for Emacs comint recognition:
+Each mode has a distinctive prompt:
 
 ```
 [monitor] $E477>      Monitor mode (shows current PC)
@@ -14,7 +14,7 @@ Each mode has a distinctive prompt for Emacs comint recognition:
 [dos] D1:>            DOS mode (shows current drive)
 ```
 
-Prompt regex for comint: `^\[.+\] .+> $`
+Prompt regex: `^\[.+\] .+> $`
 
 ## Global Commands
 
@@ -536,8 +536,8 @@ Error: File 'LOCKED.COM' is locked
 ## Line Editing
 
 When running in a terminal, the CLI uses libedit (macOS's built-in editline library)
-to provide Emacs-style line editing and persistent command history. When running under
-Emacs comint mode or piped input, libedit is bypassed and Emacs provides its own editing.
+to provide line editing and persistent command history. When running with piped input,
+libedit is bypassed and simple line reading is used instead.
 
 Command history is saved to `~/.attic_history` between sessions.
 

@@ -11,7 +11,7 @@
 This document describes the two communication protocols used by the Attic Emulator:
 
 1. **AESP (Attic Emulator Server Protocol)** - Binary protocol for GUI/web clients
-2. **CLI Protocol** - Text-based protocol for REPL/Emacs integration
+2. **CLI Protocol** - Text-based protocol for REPL integration
 
 ---
 
@@ -557,7 +557,7 @@ Server → Client (Video): [0xAE, 0x50, 0x01, 0x60, 0x00, 0x05, 0xA0, 0x00, <368
 
 # Part 2: CLI/GUI Socket Protocol
 
-The CLI protocol is a text-based protocol for REPL communication between the `attic` CLI tool and the GUI application. It is designed for Emacs comint mode compatibility.
+The CLI protocol is a text-based protocol for REPL communication between the `attic` CLI tool and the emulator server.
 
 ## Connection
 
