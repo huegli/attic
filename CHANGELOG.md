@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-04-02
+
+### Added
+- `.edit` command for editing BASIC programs in an external editor ($VISUAL/$EDITOR/vim)
+  with diff-based reimport — only changed, added, or deleted lines are injected back
+- Background file watcher for GUI editors (VS Code, Sublime, etc.) applies changes on every save
+- Editor auto-stop when the editor process exits
+- `.sound` command to show current audio output state
+- `--sound` CLI flag to enable audio output (sound is now off by default)
+- Web client HTTP server auto-starts on launch with URL shown in banner
+
+### Changed
+- Sound is off by default when launching AtticServer via attic-py (use `--sound` to enable)
+- Web client is always available without needing `.gui` command
+
+### Removed
+- `.gui` REPL command (web client auto-starts instead)
+- `--headless` CLI flag (was parsed but never used)
+
 ## [0.4.1] - 2026-03-31
 
 ### Fixed
