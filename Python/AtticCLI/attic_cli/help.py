@@ -56,7 +56,9 @@ GLOBAL_HELP: dict[str, str] = {
         "Uses diff-based reimport: only changed, added, or deleted lines are\n"
         "injected back into the emulator.  GUI editors run a background watcher\n"
         "that applies changes on every save.  Terminal editors block the REPL\n"
-        "and apply changes once when the editor exits."
+        "and apply changes once when the editor exits.\n"
+        "Auto-stops when the editor process exits. For VS Code, set\n"
+        "VISUAL=\"code --wait\" so the process stays alive until the tab closes."
     ),
     "quit": "Disconnect from server and exit (server keeps running).",
     "shutdown": "Disconnect, stop the server, and exit.",

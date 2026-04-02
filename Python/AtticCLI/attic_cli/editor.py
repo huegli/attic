@@ -25,9 +25,12 @@ import threading
 import time
 from pathlib import Path
 
+from rich.console import Console
+
 from .cli_client import CLISocketClient, escape_for_inject
 
 logger = logging.getLogger(__name__)
+console = Console()
 
 # ---------------------------------------------------------------------------
 # Module-level state
@@ -48,6 +51,9 @@ _watcher_client: CLISocketClient | None = None
 
 # Path to the temporary file currently being edited (if any).
 _temp_path: str | None = None
+
+# The editor subprocess, tracked so we can auto-stop when it exits.
+_editor_proc: subprocess.Popen | None = None
 
 # Known GUI editors -- we detect these to decide whether to watch the file
 # in the background (GUI) or block until the process exits (terminal).
@@ -210,6 +216,9 @@ def _reimport_full(client: CLISocketClient, content: str) -> str:
         return "[dim]No BASIC lines found in file[/dim]"
 
     # Issue NEW to clear the current program.
+    # After sending NEW + Return, BASIC needs time to process the
+    # command and display the "Ready" prompt before we can enter
+    # new lines. A brief sleep lets the emulator's main loop catch up.
     escaped_new = escape_for_inject("NEW\n")
     try:
         resp = client.send(f"inject keys {escaped_new}")
@@ -217,6 +226,8 @@ def _reimport_full(client: CLISocketClient, content: str) -> str:
             return f"[red]Error sending NEW:[/red] {resp.payload}"
     except Exception as exc:
         return f"[red]Error sending NEW:[/red] {exc}"
+
+    time.sleep(0.5)  # Let BASIC process NEW and show Ready prompt
 
     errors: list[str] = []
     for num in sorted(lines):
@@ -310,6 +321,27 @@ def _watch_file(path: str, client: CLISocketClient) -> None:
         if _watcher_stop.is_set():
             break
 
+        # Auto-stop if the editor process has exited (user closed the
+        # file or quit the editor). Requires the editor to keep its
+        # process alive while the file is open — for VS Code, set
+        # VISUAL="code --wait".
+        if _editor_proc is not None and _editor_proc.poll() is not None:
+            # Do a final reimport if the file changed since last import
+            try:
+                current_mtime = os.path.getmtime(path)
+                if current_mtime > last_mtime:
+                    new_content = Path(path).read_text(encoding="utf-8")
+                    with _lock:
+                        old = _previous_content
+                        result = _reimport_diff(client, old, new_content)
+                        _previous_content = new_content
+                        console.print(f"\n[dim][edit] Editor exited — {result}[/dim]")
+            except OSError:
+                pass
+            console.print("[dim][edit] Editor exited — watcher stopped[/dim]")
+            _watcher_stop.set()
+            break
+
         try:
             current_mtime = os.path.getmtime(path)
         except OSError:
@@ -330,7 +362,7 @@ def _watch_file(path: str, client: CLISocketClient) -> None:
             old = _previous_content
             result = _reimport_diff(client, old, new_content)
             _previous_content = new_content
-            logger.info("Watcher: %s", result)
+            console.print(f"\n[dim][edit][/dim] {result}")
 
 
 # ---------------------------------------------------------------------------
@@ -361,24 +393,29 @@ def start_edit(client: CLISocketClient) -> str:
             )
 
     # --- Export current program to a temp file ---
-    try:
-        resp = client.send("basic export")
-        if not resp.success:
-            return f"[red]Error exporting BASIC:[/red] {resp.payload}"
-        current_content = resp.payload
-        # Multi-line responses use 0x1E separator; convert to newlines.
-        current_content = current_content.replace("\x1e", "\n")
-    except Exception as exc:
-        return f"[red]Error exporting BASIC:[/red] {exc}"
-
-    # Write to a temp file for the editor to open.
+    # Create temp file first so we can pass the path to basic export.
     fd, tmp_path = tempfile.mkstemp(suffix=".bas", prefix="attic-edit-")
+    os.close(fd)
+
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(current_content)
+        resp = client.send(f"basic export {tmp_path}")
+        if not resp.success:
+            # "No program" is fine — start with an empty file
+            if "no program" in resp.payload.lower():
+                Path(tmp_path).write_text("", encoding="utf-8")
+            else:
+                os.unlink(tmp_path)
+                return f"[red]Error exporting BASIC:[/red] {resp.payload}"
     except Exception as exc:
         os.unlink(tmp_path)
-        return f"[red]Error writing temp file:[/red] {exc}"
+        return f"[red]Error exporting BASIC:[/red] {exc}"
+
+    # Read back the exported content for diffing later.
+    try:
+        current_content = Path(tmp_path).read_text(encoding="utf-8")
+    except Exception as exc:
+        os.unlink(tmp_path)
+        return f"[red]Error reading temp file:[/red] {exc}"
 
     editor = _detect_editor()
     is_gui = _is_gui_editor(editor)
@@ -390,9 +427,12 @@ def start_edit(client: CLISocketClient) -> str:
     if is_gui:
         # --- GUI editor: launch and watch in background ---
         # Build the command; honour flags like "code --wait".
+        # We keep the Popen handle so the watcher can detect when the
+        # editor exits and auto-stop.
+        global _editor_proc
         cmd_parts = editor.split() + [tmp_path]
         try:
-            subprocess.Popen(cmd_parts)
+            _editor_proc = subprocess.Popen(cmd_parts)
         except Exception as exc:
             _cleanup_temp()
             return f"[red]Error launching editor:[/red] {exc}"
@@ -411,7 +451,8 @@ def start_edit(client: CLISocketClient) -> str:
         return (
             f"[dim]Opened {editor.split()[0]} — editing {tmp_path}\n"
             f"Changes will be applied automatically on save.\n"
-            f"Use .edit stop to end the session.[/dim]"
+            f"Stops when editor exits, or use .edit stop.\n"
+            f"Tip: set VISUAL=\"code --wait\" for VS Code auto-stop.[/dim]"
         )
 
     else:
@@ -453,10 +494,11 @@ def stop_edit() -> str:
     Returns:
         A status message for the REPL to display.
     """
-    global _watcher_thread, _watcher_client
+    global _watcher_thread, _watcher_client, _editor_proc
 
     with _lock:
         if _watcher_thread is None or not _watcher_thread.is_alive():
+            _editor_proc = None
             _cleanup_temp()
             return "[dim]No edit session active[/dim]"
 
@@ -468,6 +510,7 @@ def stop_edit() -> str:
     with _lock:
         _watcher_thread = None
         _watcher_client = None
+        _editor_proc = None
 
     path = _cleanup_temp()
     if path:
