@@ -193,6 +193,10 @@ def run_repl(client: CLISocketClient) -> None:
                 _display_event(event)
 
     finally:
+        # Clean up any active edit session (background watcher, temp files).
+        from . import editor
+        editor.cleanup()
+
         client.disconnect()
 
 

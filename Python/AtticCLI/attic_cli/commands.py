@@ -109,6 +109,9 @@ def handle_dot_command(
     if cmd == ".gui":
         return _handle_gui(args)
 
+    if cmd == ".edit":
+        return _handle_edit(args, client=client)
+
     return f"[red]Unknown command: {stripped}[/red]"
 
 
@@ -168,6 +171,28 @@ def _handle_state(client: CLISocketClient, args: str) -> str:
         return f"[red]Usage: .state {subcmd} <path>[/red]"
 
     return _send_and_format(client, f"state {subcmd} {path}")
+
+
+def _handle_edit(args: str, *, client: CLISocketClient) -> str:
+    """Handle .edit command to open BASIC program in an external editor.
+
+    .edit        — Export current program and open in $VISUAL/$EDITOR/vim.
+    .edit stop   — Stop the background file watcher (GUI editor mode).
+
+    Uses diff-based reimport: only changed lines are injected back into
+    the emulator, rather than clearing and reimporting the whole program.
+    """
+    from . import editor
+
+    subcmd = args.strip().lower()
+
+    if subcmd == "stop":
+        return editor.stop_edit()
+
+    if subcmd:
+        return "[red]Usage: .edit [stop][/red]"
+
+    return editor.start_edit(client)
 
 
 def _handle_gui(args: str) -> str:
