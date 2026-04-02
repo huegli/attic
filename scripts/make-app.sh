@@ -65,6 +65,11 @@ if [ "$SKIP_BUILD" = false ]; then
     PYTHON_CLI_DIR="$PROJECT_ROOT/Python/AtticCLI"
     (cd "$PYTHON_CLI_DIR" && uv run pyinstaller --clean --noconfirm attic.spec 2>&1 | tail -5)
     echo "Python CLI build complete."
+
+    echo "Building web client..."
+    WEB_CLIENT_DIR="$PROJECT_ROOT/web-client"
+    (cd "$WEB_CLIENT_DIR" && npm install --silent && npm run build 2>&1 | tail -5)
+    echo "Web client build complete."
 else
     echo "Skipping build (--skip-build)"
 fi
@@ -86,6 +91,14 @@ fi
 if [ ! -f "$PYTHON_CLI_BIN" ]; then
     echo "Error: Python CLI not found at $PYTHON_CLI_BIN"
     echo "Run 'cd Python/AtticCLI && uv run pyinstaller --clean --noconfirm attic.spec' first."
+    exit 1
+fi
+
+# Web client build output
+WEB_CLIENT_INDEX="$PROJECT_ROOT/web-client/dist/index.html"
+if [ ! -f "$WEB_CLIENT_INDEX" ]; then
+    echo "Error: Web client not found at $WEB_CLIENT_INDEX"
+    echo "Run 'cd web-client && npm install && npm run build' first."
     exit 1
 fi
 
@@ -171,7 +184,19 @@ else
 fi
 
 # -------------------------------------------------------------------------
-# Step 7: Copy ROM files if present
+# Step 7: Copy web client
+# -------------------------------------------------------------------------
+
+WEB_CLIENT_DIST="$PROJECT_ROOT/web-client/dist"
+if [ -d "$WEB_CLIENT_DIST" ]; then
+    echo "Copying web client..."
+    cp -R "$WEB_CLIENT_DIST" "$RESOURCES_DIR/web-client"
+else
+    echo "Warning: Web client dist not found at $WEB_CLIENT_DIST, skipping"
+fi
+
+# -------------------------------------------------------------------------
+# Step 8: Copy ROM files if present
 # -------------------------------------------------------------------------
 
 ROM_DIR="$PROJECT_ROOT/Resources/ROM"
@@ -183,7 +208,7 @@ if [ -d "$ROM_DIR" ] && [ "$(ls -A "$ROM_DIR" 2>/dev/null)" ]; then
 fi
 
 # -------------------------------------------------------------------------
-# Step 8: Summary
+# Step 9: Summary
 # -------------------------------------------------------------------------
 
 echo ""
