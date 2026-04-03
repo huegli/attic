@@ -50,16 +50,17 @@ GLOBAL_HELP: dict[str, str] = {
         "  .sound off     — Instructions to disable sound (requires restart)"
     ),
     "edit": (
-        "Open the current BASIC program in an external editor.\n"
-        "  .edit          — Export program to temp file, open in $VISUAL/$EDITOR/vim\n"
-        "  .edit stop     — Stop background file watcher (GUI editor mode)\n"
+        "Edit the current BASIC program.\n"
+        "  .edit          — Open built-in TUI editor (full-screen, Atari colors)\n"
+        "  .edit <editor> — Open in external editor (e.g. .edit vim, .edit code)\n"
+        "  .edit stop     — Stop background file watcher (external GUI editor)\n"
+        "\n"
+        "Built-in editor keys: Ctrl+S save, Ctrl+Q quit, Ctrl+G goto, Ctrl+F find.\n"
         "\n"
         "Uses diff-based reimport: only changed, added, or deleted lines are\n"
-        "injected back into the emulator.  GUI editors run a background watcher\n"
-        "that applies changes on every save.  Terminal editors block the REPL\n"
-        "and apply changes once when the editor exits.\n"
-        "Auto-stops when the editor process exits. For VS Code, set\n"
-        "VISUAL=\"code --wait\" so the process stays alive until the tab closes."
+        "injected back into the emulator.  External GUI editors run a background\n"
+        "watcher that applies changes on every save.  Terminal editors block the\n"
+        "REPL and apply changes once when the editor exits."
     ),
     "quit": "Disconnect from server and exit (server keeps running).",
     "shutdown": "Disconnect, stop the server, and exit.",

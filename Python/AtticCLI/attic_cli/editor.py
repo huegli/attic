@@ -369,6 +369,80 @@ def _watch_file(path: str, client: CLISocketClient) -> None:
 # Public API
 # ---------------------------------------------------------------------------
 
+def start_tui_edit(client: CLISocketClient) -> str:
+    """Export the current BASIC program and open it in the built-in TUI editor.
+
+    Uses the full-screen prompt_toolkit editor (tui_editor) instead of an
+    external editor.  When the user saves (Ctrl+S), only changed lines are
+    diffed and reimported.  If the user quits without saving (Ctrl+Q), no
+    changes are applied.
+
+    Args:
+        client: Connected CLI socket client.
+
+    Returns:
+        A status message for the REPL to display.
+    """
+    global _previous_content
+
+    with _lock:
+        if _watcher_thread is not None and _watcher_thread.is_alive():
+            return (
+                "[dim]External edit session already active. "
+                "Use .edit stop to end it first.[/dim]"
+            )
+
+    # --- Export current program ---
+    fd, tmp_path = tempfile.mkstemp(suffix=".bas", prefix="attic-edit-")
+    os.close(fd)
+
+    try:
+        resp = client.send(f"basic export {tmp_path}")
+        if not resp.success:
+            if "no program" in resp.payload.lower():
+                Path(tmp_path).write_text("", encoding="utf-8")
+            else:
+                os.unlink(tmp_path)
+                return f"[red]Error exporting BASIC:[/red] {resp.payload}"
+    except Exception as exc:
+        os.unlink(tmp_path)
+        return f"[red]Error exporting BASIC:[/red] {exc}"
+
+    try:
+        current_content = Path(tmp_path).read_text(encoding="utf-8")
+    except Exception as exc:
+        os.unlink(tmp_path)
+        return f"[red]Error reading temp file:[/red] {exc}"
+    finally:
+        # Temp file no longer needed — editor works in-memory.
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+    with _lock:
+        _previous_content = current_content
+
+    # --- Launch built-in TUI editor ---
+    from .tui_editor import run_editor
+
+    new_content = run_editor(current_content)
+
+    if new_content is None:
+        return "[dim]Editor quit — no changes applied[/dim]"
+
+    # --- Apply diff ---
+    with _lock:
+        old = _previous_content
+        if old:
+            result = _reimport_diff(client, old, new_content)
+        else:
+            result = _reimport_full(client, new_content)
+        _previous_content = new_content
+
+    return result
+
+
 def start_edit(client: CLISocketClient) -> str:
     """Export the current BASIC program and open it in an external editor.
 

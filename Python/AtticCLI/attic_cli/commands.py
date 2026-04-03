@@ -202,24 +202,37 @@ def _handle_sound(args: str) -> str:
 
 
 def _handle_edit(args: str, *, client: CLISocketClient) -> str:
-    """Handle .edit command to open BASIC program in an external editor.
+    """Handle .edit command to open BASIC program in an editor.
 
-    .edit        — Export current program and open in $VISUAL/$EDITOR/vim.
-    .edit stop   — Stop the background file watcher (GUI editor mode).
+    .edit              — Open built-in TUI editor (full-screen, Atari colors).
+    .edit <editor>     — Open in a specific external editor (e.g. .edit vim).
+    .edit stop         — Stop the background file watcher (external GUI editor).
 
     Uses diff-based reimport: only changed lines are injected back into
     the emulator, rather than clearing and reimporting the whole program.
     """
     from . import editor
 
-    subcmd = args.strip().lower()
+    subcmd = args.strip()
 
-    if subcmd == "stop":
+    if subcmd.lower() == "stop":
         return editor.stop_edit()
 
-    if subcmd:
-        return "[red]Usage: .edit [stop][/red]"
+    if not subcmd:
+        # Bare .edit — use built-in TUI editor.
+        return editor.start_tui_edit(client)
 
-    return editor.start_edit(client)
+    # .edit <name> — use the specified external editor.
+    # Temporarily set $VISUAL so start_edit() picks it up.
+    import os
+    old_visual = os.environ.get("VISUAL")
+    os.environ["VISUAL"] = subcmd
+    try:
+        return editor.start_edit(client)
+    finally:
+        if old_visual is None:
+            os.environ.pop("VISUAL", None)
+        else:
+            os.environ["VISUAL"] = old_visual
 
 
