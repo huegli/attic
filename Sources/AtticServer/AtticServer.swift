@@ -1450,6 +1450,18 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
         // several frames before it will accept a new press of the same key
         let extraFramesForRepeat = 4
 
+        // Ensure SHFLOK ($02BE) is 0x00 (lowercase mode) so that the
+        // keychar→AKEY mapping produces the correct case on screen.
+        // After boot or cold reset, SHFLOK defaults to 0x40 (uppercase-
+        // only mode), which forces all letters to uppercase regardless
+        // of the keychar value. Both inject keys and the GUI keyboard
+        // path need SHFLOK=0x00, so we set it unconditionally and leave
+        // it — this also re-enables lowercase for the GUI after a reset.
+        let shflokAddress: UInt16 = 0x02BE
+        if await emulator.readMemory(at: shflokAddress) != 0x00 {
+            await emulator.writeMemory(at: shflokAddress, value: 0x00)
+        }
+
         var injectedCount = 0
         var previousKeyChar: UInt8 = 0
         var previousKeyCode: UInt8 = 0xFF
