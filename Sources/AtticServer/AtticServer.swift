@@ -1783,9 +1783,19 @@ struct AtticServer {
         // Start emulation
         await emulator.resume()
 
-        // Lowercase input is enabled by enableLowercaseMode() in
-        // EmulatorEngine.reset(), which writes SHFLOK ($02BE) = 0x00
-        // directly after the boot frame sequence. No Caps Toggle needed.
+        // Toggle Caps Lock to enable lowercase input.
+        // The Altirra BASIC ROM boots with SHFLOK=0x40 (uppercase-only mode),
+        // which ignores shift state for letter case. Sending CAPSTOGGLE sets
+        // SHFLOK=0x00, allowing both uppercase ('A' keychar) and lowercase
+        // ('a' keychar) to work correctly via the AKEY mapping.
+        Task {
+            // Wait for boot to complete before toggling
+            try? await Task.sleep(nanoseconds: 500_000_000)  // 0.5s
+            await emulator.pressKey(keyChar: 0, keyCode: 0x3C)  // AKEY_CAPSTOGGLE
+            for _ in 0..<5 { await emulator.executeFrame() }
+            await emulator.releaseKey()
+            for _ in 0..<3 { await emulator.executeFrame() }
+        }
 
         print("Emulation started")
         print("Press Ctrl+C to stop")
