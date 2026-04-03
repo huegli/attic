@@ -1542,15 +1542,13 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
             return (ascii, 0xFF, false, true)
         }
 
-        // Lowercase letters - convert to uppercase for Atari
-        if ascii >= 0x61 && ascii <= 0x7A {
-            let uppercase = ascii - 0x20
-            return (uppercase, 0xFF, false, false)
-        }
-
-        // Uppercase letters - need shift
-        if ascii >= 0x41 && ascii <= 0x5A {
-            return (ascii, 0xFF, true, false)
+        // Letters: send as-is to libatari800.
+        // PLATFORM_Keyboard maps 'A' → AKEY_A (has AKEY_SHFT, displays UPPERCASE)
+        // and 'a' → AKEY_a (no AKEY_SHFT, displays lowercase). The keychar value
+        // directly determines the case on screen, so inject keys text appears
+        // exactly as written.
+        if (ascii >= 0x41 && ascii <= 0x5A) || (ascii >= 0x61 && ascii <= 0x7A) {
+            return (ascii, 0xFF, false, false)
         }
 
         // Numbers and most punctuation pass through as-is
@@ -1772,6 +1770,21 @@ struct AtticServer {
 
         // Start emulation
         await emulator.resume()
+
+        // Toggle Caps Lock to enable lowercase input.
+        // The Altirra BASIC ROM boots with SHFLOK=0x40 (uppercase-only mode),
+        // which ignores shift state for letter case. Sending CAPSTOGGLE sets
+        // SHFLOK=0x00, allowing both uppercase ('A' keychar) and lowercase
+        // ('a' keychar) to work correctly via the AKEY mapping.
+        Task {
+            // Wait for boot to complete before toggling
+            try? await Task.sleep(nanoseconds: 500_000_000)  // 0.5s
+            await emulator.pressKey(keyChar: 0, keyCode: 0x3C)  // AKEY_CAPSTOGGLE
+            for _ in 0..<5 { await emulator.executeFrame() }
+            await emulator.releaseKey()
+            for _ in 0..<3 { await emulator.executeFrame() }
+        }
+
         print("Emulation started")
         print("Press Ctrl+C to stop")
 

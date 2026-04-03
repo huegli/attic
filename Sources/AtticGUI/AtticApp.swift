@@ -791,6 +791,7 @@ class AtticViewModel: ObservableObject {
             keyCode: event.keyCode,
             characters: event.characters,
             shift: shift,
+            capsLock: event.modifierFlags.contains(.capsLock),
             control: control
         ) {
             // Send to server via AESP protocol

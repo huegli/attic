@@ -808,9 +808,11 @@ final class MCPToolHandler: Sendable {
         // Handle modifiers (SHIFT+X, CTRL+X)
         if upper.hasPrefix("SHIFT+") {
             let char = String(upper.dropFirst(6))
-            // For shift, just return the character - shift is implicit for uppercase
+            // On the Atari, SHIFT+letter produces lowercase (inverted from modern).
+            // Return lowercase so characterToAtariKey sends lowercase keychar
+            // → AKEY_a (no shift bit) → lowercase on screen.
             if char.count == 1 {
-                return char.uppercased()
+                return char.lowercased()
             }
         } else if upper.hasPrefix("CTRL+") {
             let char = String(upper.dropFirst(5))

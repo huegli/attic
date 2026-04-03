@@ -332,7 +332,10 @@ def translate_key(key: str) -> str:
         char = char.strip()
         if len(char) == 1:
             if modifier == "SHIFT":
-                return char.upper()
+                # On the Atari, SHIFT+letter produces lowercase (inverted).
+                # Return lowercase so characterToAtariKey sends lowercase
+                # keychar → AKEY_a (no shift bit) → lowercase on screen.
+                return char.lower()
             elif modifier == "CTRL":
                 # Ctrl+A = 0x01, Ctrl+Z = 0x1A, etc.
                 code = ord(char.upper()) - 64
