@@ -214,12 +214,6 @@ public actor EmulatorEngine {
                 for _ in 0..<150 {
                     _ = wrapper.executeFrame(input: &input)
                 }
-                // Set SHFLOK ($02BE) to 0x00 (lowercase mode) after boot.
-                // The Atari OS defaults SHFLOK to 0x40 (uppercase-only),
-                // which ignores the case encoded in keychar values. All
-                // clients (GUI, web, CLI) need this set to 0x00 so that
-                // shifted/unshifted letter case works correctly.
-                enableLowercaseMode()
                 clearBASICProgram()
                 state = wasRunning ? .running : .paused
                 return
@@ -238,10 +232,6 @@ public actor EmulatorEngine {
                 for _ in 0..<150 {
                     _ = wrapper.executeFrame(input: &input)
                 }
-
-                // Set SHFLOK ($02BE) to 0x00 (lowercase mode) after boot.
-                // See enableLowercaseMode() for details.
-                enableLowercaseMode()
 
                 // Clear breakpoints and frame counter
                 breakpoints.removeAll()
@@ -476,9 +466,6 @@ public actor EmulatorEngine {
             for _ in 0..<150 {
                 _ = wrapper.executeFrame(input: &input)
             }
-            // Set SHFLOK ($02BE) to 0x00 (lowercase mode) after boot.
-            // See enableLowercaseMode() for details.
-            enableLowercaseMode()
             state = .running
             return (success: true, errorMessage: nil)
         } else {
@@ -701,29 +688,6 @@ public actor EmulatorEngine {
         } else if port == 1 {
             inputState.joystick1 = direction
             inputState.trigger1 = trigger
-        }
-    }
-
-    // =========================================================================
-    // MARK: - Keyboard State
-    // =========================================================================
-
-    /// Sets SHFLOK ($02BE) to 0x00 to enable lowercase letter input.
-    ///
-    /// The Atari OS uses SHFLOK to control keyboard shift lock behavior.
-    /// After boot or cold reset, SHFLOK defaults to 0x40 (uppercase-only
-    /// mode), which forces all typed letters to uppercase regardless of
-    /// the keychar value sent to the emulator. Setting SHFLOK to 0x00
-    /// enables proper lowercase/uppercase handling based on the Shift key
-    /// and Caps Lock state.
-    ///
-    /// This is called after every boot/reset sequence so that all clients
-    /// (native GUI, web client, CLI inject-keys) get correct case behavior
-    /// immediately without requiring the user to press Caps Lock first.
-    private func enableLowercaseMode() {
-        let shflokAddress: UInt16 = 0x02BE
-        if readMemory(at: shflokAddress) != 0x00 {
-            writeMemory(at: shflokAddress, value: 0x00)
         }
     }
 
