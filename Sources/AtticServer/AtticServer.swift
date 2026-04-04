@@ -1450,13 +1450,11 @@ final class CLIServerDelegate: CLISocketServerDelegate, @unchecked Sendable {
         // several frames before it will accept a new press of the same key
         let extraFramesForRepeat = 4
 
-        // Ensure SHFLOK ($02BE) is 0x00 (lowercase mode) so that the
-        // keychar→AKEY mapping produces the correct case on screen.
-        // After boot or cold reset, SHFLOK defaults to 0x40 (uppercase-
-        // only mode), which forces all letters to uppercase regardless
-        // of the keychar value. Both inject keys and the GUI keyboard
-        // path need SHFLOK=0x00, so we set it unconditionally and leave
-        // it — this also re-enables lowercase for the GUI after a reset.
+        // Ensure SHFLOK ($02BE) is 0x00 so the Atari OS keyboard handler
+        // respects the case encoded in the keychar value. With the default
+        // SHFLOK=0x40 (uppercase lock), all letters are forced uppercase
+        // regardless of keychar. EmulatorEngine.reset() sets this at boot,
+        // but we re-check here as a safety net.
         let shflokAddress: UInt16 = 0x02BE
         if await emulator.readMemory(at: shflokAddress) != 0x00 {
             await emulator.writeMemory(at: shflokAddress, value: 0x00)
@@ -1783,18 +1781,15 @@ struct AtticServer {
         // Start emulation
         await emulator.resume()
 
-        // Toggle Caps Lock to enable lowercase input.
-        // The Altirra BASIC ROM boots with SHFLOK=0x40 (uppercase-only mode),
-        // which ignores shift state for letter case. Sending CAPSTOGGLE sets
-        // SHFLOK=0x00, allowing both uppercase ('A' keychar) and lowercase
-        // ('a' keychar) to work correctly via the AKEY mapping.
+        // Enable lowercase mode after the Atari OS finishes boot.
+        // EmulatorEngine.reset() sets SHFLOK=0x00 after 150 boot frames,
+        // but the OS keyboard init may overwrite it slightly later.
+        // This delayed write ensures SHFLOK=0x00 sticks after all OS
+        // initialization is complete.
         Task {
-            // Wait for boot to complete before toggling
             try? await Task.sleep(nanoseconds: 500_000_000)  // 0.5s
-            await emulator.pressKey(keyChar: 0, keyCode: 0x3C)  // AKEY_CAPSTOGGLE
-            for _ in 0..<5 { await emulator.executeFrame() }
-            await emulator.releaseKey()
-            for _ in 0..<3 { await emulator.executeFrame() }
+            let shflokAddress: UInt16 = 0x02BE
+            await emulator.writeMemory(at: shflokAddress, value: 0x00)
         }
 
         print("Emulation started")

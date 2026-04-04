@@ -210,7 +210,6 @@ public final class KeyboardInputHandler: ObservableObject {
         keyCode: UInt16,
         characters: String?,
         shift: Bool,
-        capsLock: Bool = false,
         control: Bool
     ) -> (keyChar: UInt8, keyCode: UInt8, shift: Bool, control: Bool)? {
         // Track pressed key
@@ -233,7 +232,7 @@ public final class KeyboardInputHandler: ObservableObject {
 
         // Handle regular character keys
         if let chars = characters, let firstChar = chars.first {
-            let result = handleCharacterKey(character: firstChar, shift: shift, capsLock: capsLock, control: control)
+            let result = handleCharacterKey(character: firstChar, shift: shift, control: control)
             currentKeyChar = result.keyChar
             currentKeyCode = result.keyCode
 
@@ -363,9 +362,9 @@ public final class KeyboardInputHandler: ObservableObject {
         case MacKeyCode.grave:
             return (0, AtariKeyCode.atari, shift, control)
 
-        // Caps Lock is handled via handleFlagsChanged() in AtticApp.swift, which
-        // detects Caps Lock transitions and sends AKEY_CAPSTOGGLE to the emulator.
-        // macOS fires flagsChanged events for Caps Lock, not keyDown events.
+        // Caps Lock is intentionally ignored. The Atari's inverted case
+        // behavior (no shift = uppercase, shift = lowercase) is handled
+        // entirely through the Shift key in handleCharacterKey().
 
         // Space
         case MacKeyCode.space:
@@ -384,7 +383,6 @@ public final class KeyboardInputHandler: ObservableObject {
     private func handleCharacterKey(
         character: Character,
         shift: Bool,
-        capsLock: Bool,
         control: Bool
     ) -> (keyChar: UInt8, keyCode: UInt8, shift: Bool, control: Bool) {
         let ascii = character.asciiValue ?? 0
@@ -405,21 +403,18 @@ public final class KeyboardInputHandler: ObservableObject {
             }
         }
 
-        // For letters, compute the case from modifier flags, not from the
-        // macOS character. macOS gives the same uppercase 'A' for both
-        // CapsLock-only and CapsLock+Shift, so we can't distinguish them
-        // from the character alone.
+        // For letters, compute the case from the Shift key only.
+        // Caps Lock is intentionally ignored — the Atari keyboard uses
+        // inverted case from modern keyboards:
+        //   No Shift → UPPERCASE (send 'A', 0x41)
+        //   Shift    → lowercase (send 'a', 0x61)
         //
         // libatari800 maps: 'A' (0x41) → AKEY_A → UPPERCASE on screen
         //                   'a' (0x61) → AKEY_a → lowercase on screen
         //
-        // Atari keyboard behavior (inverted from modern):
-        //   No mods        → UPPERCASE    (send 'A')
-        //   Shift           → lowercase    (send 'a')
-        //   CapsLock        → lowercase    (send 'a')
-        //   CapsLock+Shift  → UPPERCASE    (send 'A')
-        //
-        // This is: lowercase when (shift XOR capsLock), uppercase otherwise.
+        // We always derive from the uppercase ASCII base and add 0x20 for
+        // lowercase, because macOS may give us different characters depending
+        // on the system Caps Lock state — we want consistent Atari behavior.
         let isLetter = (ascii >= 0x41 && ascii <= 0x5A) || (ascii >= 0x61 && ascii <= 0x7A)
         if isLetter {
             // Get the base uppercase letter regardless of what macOS gave us
@@ -430,8 +425,7 @@ public final class KeyboardInputHandler: ObservableObject {
                 upperAscii = ascii
             }
 
-            let wantLowercase = shift != capsLock  // XOR
-            let atasciiChar = wantLowercase ? (upperAscii + 0x20) : upperAscii
+            let atasciiChar = shift ? (upperAscii + 0x20) : upperAscii
 
             // Don't pass shift flag for letters — case is encoded in keychar.
             // Passing shift would cause PLATFORM_Keyboard to OR AKEY_SHFT

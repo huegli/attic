@@ -57,11 +57,18 @@ def find_dist_dir() -> str | None:
 
 
 class _QuietHandler(SimpleHTTPRequestHandler):
-    """HTTP handler that suppresses request logging."""
+    """HTTP handler that suppresses request logging and disables caching."""
 
     def log_message(self, format, *args):
         # Silence per-request output; errors still go to logger.
         pass
+
+    def end_headers(self):
+        # Disable browser caching so rebuilt assets are always fetched fresh.
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
+        super().end_headers()
 
 
 def start_web_server(dist_dir: str, port: int = 8080) -> HTTPServer:

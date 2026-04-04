@@ -33,7 +33,6 @@ const AKEY_DOWN      = 0x8F;
 const AKEY_LEFT      = 0x86;
 const AKEY_RIGHT     = 0x87;
 const AKEY_ATARI     = 0x27;
-const AKEY_CAPSTOGGLE = 0x3C;
 const AKEY_HELP      = 0x11;
 
 // ---------------------------------------------------------------------------
@@ -56,7 +55,8 @@ const SPECIAL_KEYS: Record<string, [number, number]> = {
   'ArrowLeft':   [0, AKEY_LEFT],
   'ArrowRight':  [0, AKEY_RIGHT],
   'Backquote':   [0, AKEY_ATARI],
-  'CapsLock':    [0, AKEY_CAPSTOGGLE],
+  // CapsLock intentionally omitted — case is handled entirely by
+  // the Shift key to match Atari keyboard behavior.
   'F4':          [0, AKEY_HELP],
 };
 
@@ -161,16 +161,18 @@ export class KeyboardHandler {
 
       // libatari800 maps 'A'→AKEY_A (UPPERCASE on screen) and
       // 'a'→AKEY_a (lowercase on screen). The Atari keyboard is inverted
-      // from modern keyboards (no shift = uppercase, shift = lowercase).
-      // e.code always gives uppercase, so invert when shift or caps lock
-      // is active (XOR) to produce lowercase on the Atari.
-      const capsLock = e.getModifierState('CapsLock');
-      const wantLowercase = capsLock !== e.shiftKey; // XOR
-      const keyChar = wantLowercase
+      // from modern keyboards: no shift = uppercase, shift = lowercase.
+      // Caps Lock is intentionally ignored.
+      // e.code always gives uppercase (e.g. 'KeyA' → 'A'), so send
+      // lowercase only when Shift is held.
+      const keyChar = e.shiftKey
         ? letter.toLowerCase().charCodeAt(0)
         : letter.charCodeAt(0);
 
-      this.client.sendKeyDown(keyChar, AKEY_NONE, e.shiftKey, e.ctrlKey);
+      // Don't pass shift for letters — case is already encoded in keychar.
+      // Passing shift would cause PLATFORM_Keyboard to OR AKEY_SHFT back
+      // into the key code, undoing our case selection.
+      this.client.sendKeyDown(keyChar, AKEY_NONE, false, e.ctrlKey);
       return;
     }
 

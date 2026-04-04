@@ -214,6 +214,7 @@ public actor EmulatorEngine {
                 for _ in 0..<150 {
                     _ = wrapper.executeFrame(input: &input)
                 }
+                enableLowercaseMode()
                 clearBASICProgram()
                 state = wasRunning ? .running : .paused
                 return
@@ -232,6 +233,8 @@ public actor EmulatorEngine {
                 for _ in 0..<150 {
                     _ = wrapper.executeFrame(input: &input)
                 }
+
+                enableLowercaseMode()
 
                 // Clear breakpoints and frame counter
                 breakpoints.removeAll()
@@ -466,6 +469,7 @@ public actor EmulatorEngine {
             for _ in 0..<150 {
                 _ = wrapper.executeFrame(input: &input)
             }
+            enableLowercaseMode()
             state = .running
             return (success: true, errorMessage: nil)
         } else {
@@ -689,6 +693,28 @@ public actor EmulatorEngine {
             inputState.joystick1 = direction
             inputState.trigger1 = trigger
         }
+    }
+
+    // =========================================================================
+    // MARK: - Keyboard State
+    // =========================================================================
+
+    /// Sets SHFLOK ($02BE) to 0x00 to enable mixed-case letter input.
+    ///
+    /// The Atari OS uses SHFLOK to control keyboard shift lock behavior.
+    /// After boot or cold reset, SHFLOK defaults to 0x40 (uppercase-only
+    /// mode), which forces all typed letters to uppercase regardless of
+    /// the keychar value sent to the emulator. Setting SHFLOK to 0x00
+    /// allows the keychar value to determine case: uppercase 'A' (0x41)
+    /// produces uppercase on screen, lowercase 'a' (0x61) produces
+    /// lowercase on screen.
+    ///
+    /// This is called after every boot/reset sequence so that all clients
+    /// (native GUI, web client, CLI inject-keys) get correct case behavior
+    /// using only the Shift key — Caps Lock is intentionally disabled.
+    private func enableLowercaseMode() {
+        let shflokAddress: UInt16 = 0x02BE
+        writeMemory(at: shflokAddress, value: 0x00)
     }
 
     // =========================================================================
