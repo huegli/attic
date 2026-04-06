@@ -458,17 +458,16 @@ public struct BASICDetokenizer: Sendable {
 
     /// Looks up a variable name by its index for display in detokenized output.
     ///
-    /// Array types (numericArray, stringArray) have a `(` in their type suffix
-    /// (e.g. `fullName` returns `"A("` or `"A$("`) because the VNT encodes the
-    /// parenthesis as part of the type. However, the tokenized program stream
-    /// also contains a separate `(` operator token for the subscript expression.
-    /// To avoid a doubled parenthesis like `A((10)`, we strip the trailing `(`
-    /// from array variable names here — the `(` will come from the operator token.
+    /// In Atari BASIC, array types include `(` as part of the variable type —
+    /// there is no separate `(` operator token in the token stream for array
+    /// subscripts. The `fullName` property includes the `(` suffix (e.g.
+    /// `"A("` for numericArray, `"ITEM$("` for stringArray), which correctly
+    /// produces the opening parenthesis in the detokenized output.
     ///
     /// - Parameters:
     ///   - index: The variable index (0-127).
     ///   - variables: The Variable Name Table.
-    /// - Returns: The variable name for display, or "?VARn" if not found.
+    /// - Returns: The full variable name with type suffix, or "?VARn" if not found.
     private func variableName(
         at index: Int,
         variables: [BASICVariableName]
@@ -476,17 +475,7 @@ public struct BASICDetokenizer: Sendable {
         guard index >= 0 && index < variables.count else {
             return "?VAR\(index)"
         }
-        let v = variables[index]
-        // For array types, return name + "$" (string array) or just name
-        // (numeric array), omitting the trailing "(" that fullName includes.
-        switch v.type {
-        case .numericArray:
-            return v.name
-        case .stringArray:
-            return v.name + "$"
-        case .numeric, .string:
-            return v.fullName
-        }
+        return variables[index].fullName
     }
 
     /// Decodes raw bytes as text (ATASCII to displayable characters).
