@@ -159,15 +159,14 @@ export class KeyboardHandler {
         return;
       }
 
-      // libatari800 maps 'A'→AKEY_A (UPPERCASE on screen) and
-      // 'a'→AKEY_a (lowercase on screen). The Atari keyboard is inverted
-      // from modern keyboards: no shift = uppercase, shift = lowercase.
-      // Caps Lock is intentionally ignored.
+      // Modern keyboard conventions (inverted from the Atari's native):
+      //   No Shift → lowercase (send 'a') → lowercase on screen
+      //   Shift    → UPPERCASE (send 'A') → UPPERCASE on screen
       // e.code always gives uppercase (e.g. 'KeyA' → 'A'), so send
-      // lowercase only when Shift is held.
+      // lowercase when Shift is NOT held.
       const keyChar = e.shiftKey
-        ? letter.toLowerCase().charCodeAt(0)
-        : letter.charCodeAt(0);
+        ? letter.charCodeAt(0)
+        : letter.toLowerCase().charCodeAt(0);
 
       // Don't pass shift for letters — case is already encoded in keychar.
       // Passing shift would cause PLATFORM_Keyboard to OR AKEY_SHFT back

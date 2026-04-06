@@ -54,13 +54,17 @@ def cli(silent: bool, sound: bool, socket_path: str | None) -> None:
 
     client = CLISocketClient()
 
-    websocket_active = False
+    launched = False
     if socket_path:
         # Connect to a specific socket
         _connect_to_socket(client, socket_path)
     else:
         # Discover or launch server
-        websocket_active = _connect_or_launch(client, silent=effective_silent)
+        launched = _connect_or_launch(client, silent=effective_silent)
+
+    # Detect WebSocket: if we launched the server, we know it has WebSocket.
+    # If we connected to an existing server, probe the WebSocket port.
+    websocket_active = launched or _probe_websocket_port()
 
     # Auto-start web client HTTP server only when WebSocket is active
     web_url = _start_web_client() if websocket_active else None
@@ -118,6 +122,21 @@ def _connect_or_launch(client: CLISocketClient, *, silent: bool) -> bool:
         console.print(f"[dim]Connected to AtticServer (pid {result.pid})[/dim]")
 
     return result.launched
+
+
+def _probe_websocket_port(port: int = 47803, timeout: float = 0.3) -> bool:
+    """Check if the AtticServer WebSocket port is listening.
+
+    Performs a quick TCP connect to detect whether the server was started
+    with --websocket. Returns True if the port accepts connections.
+    """
+    import socket
+
+    try:
+        with socket.create_connection(("localhost", port), timeout=timeout):
+            return True
+    except (OSError, TimeoutError):
+        return False
 
 
 def _start_web_client() -> str | None:

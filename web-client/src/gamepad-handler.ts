@@ -311,18 +311,24 @@ export class GamepadHandler {
   /**
    * Reads input from a non-standard (generic HID) gamepad.
    *
-   * Generic HID joysticks typically report:
-   *   axes[0] = X axis (left/right)
-   *   axes[1] = Y axis (up/down)
-   *   buttons[0] = primary fire button
+   * Generic HID joysticks may report directions via:
+   *   - axes[0]/axes[1] (analog stick X/Y)
+   *   - axes[9] (hat switch, encoded as a single axis value)
+   *   - buttons (some browsers map hat switches to button indices)
    *
    * This mirrors HIDJoystickManager.swift which normalizes raw HID axes
-   * and maps any button press to trigger.
+   * and OR's hat switch directions with analog axes.
    */
   private readNonStandardMapping(gp: Gamepad): [JoystickState, ConsoleKeyState] {
-    // Axes with deadzone (same normalization as HIDJoystickManager)
+    // Analog axes with deadzone (same normalization as HIDJoystickManager)
     const axisX = gp.axes[0] ?? 0;
     const axisY = gp.axes[1] ?? 0;
+
+    // Hat switch — some browsers expose the HID hat switch as axes[9].
+    // The value encodes direction as a fraction: -1.0 = N, progressing
+    // clockwise. Neutral/center is typically > 1.0 or exactly 0 on
+    // some browsers. Try to decode all common encodings.
+    const hat = this.decodeHatSwitch(gp);
 
     // Any button counts as trigger (CX Stick has just one fire button,
     // but other generic joysticks may have more)
@@ -334,16 +340,63 @@ export class GamepadHandler {
       }
     }
 
+    // OR analog axes with hat switch (either input source works,
+    // matching the native HIDJoystickManager behavior)
     const joystick: JoystickState = {
-      up:    axisY < -DEADZONE,
-      down:  axisY > DEADZONE,
-      left:  axisX < -DEADZONE,
-      right: axisX > DEADZONE,
+      up:    axisY < -DEADZONE || hat.up,
+      down:  axisY > DEADZONE  || hat.down,
+      left:  axisX < -DEADZONE || hat.left,
+      right: axisX > DEADZONE  || hat.right,
       trigger,
     };
 
     // No console key mapping for generic joysticks (not enough buttons)
     return [joystick, neutralConsole()];
+  }
+
+  /**
+   * Decodes hat switch (D-pad) from a non-standard gamepad.
+   *
+   * Browsers may expose the HID hat switch as:
+   * - axes[9]: Common for Chrome/Firefox with non-standard gamepads.
+   *   Values: -1.0=N, -0.714=NE, -0.429=E, -0.143=SE, 0.143=S,
+   *           0.429=SW, 0.714=W, 1.0=NW, ~3.29/center=neutral
+   *
+   * Falls back to checking high-numbered buttons (12-15) which some
+   * browsers use for hat switch directions on non-standard pads.
+   */
+  private decodeHatSwitch(gp: Gamepad): { up: boolean; down: boolean; left: boolean; right: boolean } {
+    let up = false, down = false, left = false, right = false;
+
+    // Try axes[9] hat switch encoding (Chrome/Firefox)
+    if (gp.axes.length > 9) {
+      const hat = gp.axes[9];
+      // Neutral is typically ~3.29 or a value > 1.1
+      if (hat <= 1.1) {
+        // 8-direction hat: map value ranges to directions
+        // -1.0=N, -0.714=NE, -0.429=E, -0.143=SE,
+        //  0.143=S, 0.429=SW, 0.714=W, 1.0=NW
+        // North component (N, NE, NW)
+        up    = hat < -0.5;
+        // South component (S, SE, SW)
+        down  = hat > -0.2 && hat < 0.5;
+        // East component (E, NE, SE)
+        right = hat > -0.8 && hat < 0.0;
+        // West component (W, NW, SW)
+        left  = hat > 0.35 && hat <= 1.1;
+      }
+    }
+
+    // Fallback: some browsers map hat to buttons 12-15 even for
+    // non-standard gamepads (same indices as standard D-pad)
+    if (!up && !down && !left && !right) {
+      up    = this.btn(gp, 12);
+      down  = this.btn(gp, 13);
+      left  = this.btn(gp, 14);
+      right = this.btn(gp, 15);
+    }
+
+    return { up, down, left, right };
   }
 
   // -------------------------------------------------------------------------

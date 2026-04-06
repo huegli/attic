@@ -403,18 +403,17 @@ public final class KeyboardInputHandler: ObservableObject {
             }
         }
 
-        // For letters, compute the case from the Shift key only.
-        // Caps Lock is intentionally ignored — the Atari keyboard uses
-        // inverted case from modern keyboards:
-        //   No Shift → UPPERCASE (send 'A', 0x41)
-        //   Shift    → lowercase (send 'a', 0x61)
+        // For letters, compute the case from the Shift key using modern
+        // keyboard conventions (inverted from the Atari's native behavior):
+        //   No Shift → lowercase (send 'a', 0x61)
+        //   Shift    → UPPERCASE (send 'A', 0x41)
         //
         // libatari800 maps: 'A' (0x41) → AKEY_A → UPPERCASE on screen
         //                   'a' (0x61) → AKEY_a → lowercase on screen
         //
         // We always derive from the uppercase ASCII base and add 0x20 for
         // lowercase, because macOS may give us different characters depending
-        // on the system Caps Lock state — we want consistent Atari behavior.
+        // on the system Caps Lock state — we want consistent behavior.
         let isLetter = (ascii >= 0x41 && ascii <= 0x5A) || (ascii >= 0x61 && ascii <= 0x7A)
         if isLetter {
             // Get the base uppercase letter regardless of what macOS gave us
@@ -425,7 +424,7 @@ public final class KeyboardInputHandler: ObservableObject {
                 upperAscii = ascii
             }
 
-            let atasciiChar = shift ? (upperAscii + 0x20) : upperAscii
+            let atasciiChar = shift ? upperAscii : (upperAscii + 0x20)
 
             // Don't pass shift flag for letters — case is encoded in keychar.
             // Passing shift would cause PLATFORM_Keyboard to OR AKEY_SHFT
