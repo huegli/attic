@@ -317,16 +317,47 @@ final class BASICDetokenizerTests: XCTestCase {
             BASICVariableName(name: "DATA", type: .numericArray)
         ]
 
-        // Reference to DATA(
+        // PRINT DATA(5) — variable ref + array subscript + number + close paren
+        // 0x20=PRINT, 0x80=var 0 (DATA), 0x37=leftParenArray,
+        // 0x0E=BCD prefix + 6 BCD bytes for 5, 0x2C=rightParen
         let bytes = makeLineBytes(
             lineNumber: 10,
-            content: [0x20, 0x80]  // PRINT + var 0 (DATA()
+            content: [0x20, 0x80, 0x37, 0x0E, 0x40, 0x05, 0x00, 0x00, 0x00, 0x00, 0x2C]
         )
 
         let result = detokenizer.detokenizeLine(bytes, variables: variables)
 
         XCTAssertNotNil(result)
-        XCTAssertTrue(result?.text.contains("DATA(") ?? false)
+        // Must NOT have doubled parenthesis "DATA((" — the key bug fix
+        XCTAssertFalse(result?.text.contains("DATA((") ?? true,
+                       "Doubled parenthesis in: \(result?.text ?? "nil")")
+        // Must have "DATA(" somewhere in the output
+        XCTAssertTrue(result?.text.contains("DATA(") ?? false,
+                      "Expected 'DATA(' but got: \(result?.text ?? "nil")")
+    }
+
+    func testDetokenizeDimStringArray() {
+        let variables = [
+            BASICVariableName(name: "ITEMS", type: .stringArray)
+        ]
+
+        // DIM ITEMS$(6) — DIM + var ref + array subscript + number + close paren
+        // 0x14=DIM, 0x80=var 0 (ITEMS$), 0x37=leftParenArray,
+        // 0x0E=BCD prefix + 6 BCD bytes for 6, 0x2C=rightParen
+        let bytes = makeLineBytes(
+            lineNumber: 10,
+            content: [0x14, 0x80, 0x37, 0x0E, 0x40, 0x06, 0x00, 0x00, 0x00, 0x00, 0x2C]
+        )
+
+        let result = detokenizer.detokenizeLine(bytes, variables: variables)
+
+        XCTAssertNotNil(result)
+        // Must NOT have doubled parenthesis "ITEMS$((" — the key bug fix
+        XCTAssertFalse(result?.text.contains("ITEMS$((") ?? true,
+                       "Doubled parenthesis in: \(result?.text ?? "nil")")
+        // Must have "ITEMS$(" somewhere in the output
+        XCTAssertTrue(result?.text.contains("ITEMS$(") ?? false,
+                      "Expected 'ITEMS$(' but got: \(result?.text ?? "nil")")
     }
 
     func testDetokenizeUnknownVariable() {
