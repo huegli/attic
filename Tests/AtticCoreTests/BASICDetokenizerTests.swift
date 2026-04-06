@@ -319,18 +319,24 @@ final class BASICDetokenizerTests: XCTestCase {
             BASICVariableName(name: "DATA", type: .numericArray)
         ]
 
-        // PRINT DATA(5) — In Atari BASIC, the "(" is part of the variable
-        // type (fullName = "DATA("), NOT a separate operator token.
-        // Token stream: PRINT, var_ref, BCD(5), rightParen
-        // 0x20=PRINT, 0x80=var 0 (DATA(), 0x0E+BCD(5), 0x2C=rightParen
+        // PRINT DATA(5) — variable ref + leftParenArray + BCD(5) + rightParen
+        // The VNT stores DATA as numericArray (fullName = "DATA("), and the
+        // token stream includes a separate leftParenArray (0x37) token.
+        // The detokenizer strips the "(" from the variable name to avoid
+        // doubled parentheses.
+        // 0x20=PRINT, 0x80=var 0, 0x37=leftParenArray,
+        // 0x0E+BCD(5), 0x2C=rightParen
         let bytes = makeLineBytes(
             lineNumber: 10,
-            content: [0x20, 0x80, 0x0E, 0x40, 0x05, 0x00, 0x00, 0x00, 0x00, 0x2C]
+            content: [0x20, 0x80, 0x37, 0x0E, 0x40, 0x05, 0x00, 0x00, 0x00, 0x00, 0x2C]
         )
 
         let result = detokenizer.detokenizeLine(bytes, variables: variables)
 
         XCTAssertNotNil(result)
+        // Must NOT have doubled parenthesis "DATA(("
+        XCTAssertFalse(result?.text.contains("DATA((") ?? true,
+                       "Doubled parenthesis in: \(result?.text ?? "nil")")
         XCTAssertTrue(result?.text.contains("DATA(") ?? false,
                       "Expected 'DATA(' but got: \(result?.text ?? "nil")")
     }
@@ -340,18 +346,22 @@ final class BASICDetokenizerTests: XCTestCase {
             BASICVariableName(name: "ITEMS", type: .stringArray)
         ]
 
-        // DIM ITEMS$(6) — The "$(" is part of the variable type
-        // (fullName = "ITEMS$("), NOT separate operator tokens.
-        // Token stream: DIM, var_ref, BCD(6), rightParen
-        // 0x14=DIM, 0x80=var 0 (ITEMS$(), 0x0E+BCD(6), 0x2C=rightParen
+        // DIM ITEMS$(6) — variable ref + leftParenArray + BCD(6) + rightParen
+        // The VNT stores ITEMS as stringArray (fullName = "ITEMS$("), and the
+        // token stream includes a separate leftParenArray (0x37) token.
+        // 0x14=DIM, 0x80=var 0, 0x37=leftParenArray,
+        // 0x0E+BCD(6), 0x2C=rightParen
         let bytes = makeLineBytes(
             lineNumber: 10,
-            content: [0x14, 0x80, 0x0E, 0x40, 0x06, 0x00, 0x00, 0x00, 0x00, 0x2C]
+            content: [0x14, 0x80, 0x37, 0x0E, 0x40, 0x06, 0x00, 0x00, 0x00, 0x00, 0x2C]
         )
 
         let result = detokenizer.detokenizeLine(bytes, variables: variables)
 
         XCTAssertNotNil(result)
+        // Must NOT have doubled parenthesis "ITEMS$(("
+        XCTAssertFalse(result?.text.contains("ITEMS$((") ?? true,
+                       "Doubled parenthesis in: \(result?.text ?? "nil")")
         XCTAssertTrue(result?.text.contains("ITEMS$(") ?? false,
                       "Expected 'ITEMS$(' but got: \(result?.text ?? "nil")")
     }

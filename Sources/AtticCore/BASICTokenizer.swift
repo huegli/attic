@@ -342,12 +342,20 @@ public struct BASICLexer: Sendable {
             advance()
         }
 
-        // Check for array indicator (opening paren after variable)
-        // Note: We include this in the identifier for array variables
+        // Check for array indicator (opening paren after variable).
+        // In Atari BASIC, `(` after a variable name is part of the variable
+        // type — `A(` is a numeric array, `A$(` is a string array. We include
+        // the `(` in the identifier so the tokenizer creates the correct
+        // array variable type in the VNT and emits `leftParenArray` (0x37).
+        // This only applies to identifiers (not keywords like PEEK, ASC, etc.).
         if currentChar == "(" {
-            // Peek ahead - if this looks like a function call or array access
-            // we might want to include the paren
-            // For now, keep the paren separate and let the tokenizer handle it
+            let upperWord = word.uppercased().replacingOccurrences(of: ".", with: "")
+            let isKeyword = BASICTokenLookup.matchStatement(upperWord) != nil ||
+                            BASICTokenLookup.matchFunction(upperWord) != nil
+            if !isKeyword {
+                word.append("(")
+                advance()
+            }
         }
 
         // Try to match as keyword
@@ -731,19 +739,32 @@ public struct BASICTokenizer: Sendable {
     }
 
     /// Tokenizes an identifier (variable reference).
+    ///
+    /// Array variables (identifiers ending in `(` or `$(`) emit a
+    /// `leftParenArray` (0x37) token after the variable reference byte.
+    /// This matches the real Atari BASIC ROM tokenization format where
+    /// array subscript open-parens use a distinct token from regular parens.
     private func tokenizeIdentifier(
         _ identifier: String,
         context: inout TokenizerContext
     ) throws -> [UInt8] {
+        // Strip trailing `(` before keyword checks — identifiers like
+        // "PEEK(" won't reach here (the lexer only appends `(` to
+        // non-keywords), but guard against edge cases.
+        let bareId = identifier.hasSuffix("(")
+            ? String(identifier.dropLast())
+            : identifier
+
         // Check if this is actually a keyword we missed
-        if let _ = BASICTokenLookup.matchStatement(identifier) {
-            return try tokenizeKeyword(identifier, context: &context)
+        if let _ = BASICTokenLookup.matchStatement(bareId) {
+            return try tokenizeKeyword(bareId, context: &context)
         }
-        if let _ = BASICTokenLookup.matchFunction(identifier) {
-            return try tokenizeKeyword(identifier, context: &context)
+        if let _ = BASICTokenLookup.matchFunction(bareId) {
+            return try tokenizeKeyword(bareId, context: &context)
         }
 
-        // Parse as variable name
+        // Parse as variable name (BASICVariableName.parse handles the
+        // `(` and `$(` suffixes to determine array types).
         guard let varName = BASICVariableName.parse(identifier) else {
             throw BASICTokenizerError.syntaxError(
                 column: 0,
@@ -761,6 +782,14 @@ public struct BASICTokenizer: Sendable {
             bytes.append(BASICStatementToken.impliedLet.rawValue)
         }
         bytes.append(tokenByte)
+
+        // For array types, emit leftParenArray (0x37) — the array subscript
+        // open paren. This is a distinct token from leftParen (0x2B) used
+        // for function calls and grouping. The real Atari BASIC ROM uses
+        // 0x37 for all array subscript parens.
+        if varName.type == .numericArray || varName.type == .stringArray {
+            bytes.append(BASICOperatorToken.leftParenArray.rawValue)
+        }
 
         return bytes
     }
