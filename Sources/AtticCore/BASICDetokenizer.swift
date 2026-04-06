@@ -322,8 +322,9 @@ public struct BASICDetokenizer: Sendable {
                         afterStatement: afterStatement
                     )
 
-                // Add spacing as needed
-                if needsLeadingSpace && !result.isEmpty && !result.hasSuffix(" ") {
+                // Add spacing as needed — but never after an open paren
+                if needsLeadingSpace && !result.isEmpty
+                    && !result.hasSuffix(" ") && !result.hasSuffix("(") {
                     result += " "
                 }
 
