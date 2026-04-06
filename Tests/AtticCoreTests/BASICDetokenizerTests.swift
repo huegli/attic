@@ -319,7 +319,7 @@ final class BASICDetokenizerTests: XCTestCase {
             BASICVariableName(name: "DATA", type: .numericArray)
         ]
 
-        // PRINT DATA(5) — variable ref + leftParenArray + BCD(5) + rightParen
+        // PRINT DATA(5) — variable ref + leftParenArray($37) + BCD(5) + rightParen
         // The VNT stores DATA as numericArray (fullName = "DATA("), and the
         // token stream includes a separate leftParenArray (0x37) token.
         // The detokenizer strips the "(" from the variable name to avoid
@@ -346,14 +346,13 @@ final class BASICDetokenizerTests: XCTestCase {
             BASICVariableName(name: "ITEMS", type: .stringArray)
         ]
 
-        // DIM ITEMS$(6) — variable ref + leftParenArray + BCD(6) + rightParen
-        // The VNT stores ITEMS as stringArray (fullName = "ITEMS$("), and the
-        // token stream includes a separate leftParenArray (0x37) token.
-        // 0x14=DIM, 0x80=var 0, 0x37=leftParenArray,
+        // DIM ITEMS$(6) — variable ref + leftParenDimStr($3B) + BCD(6) + rightParen
+        // The ROM uses $3B (leftParenDimStr) for DIM subscripts on strings.
+        // 0x14=DIM, 0x80=var 0, 0x3B=leftParenDimStr,
         // 0x0E+BCD(6), 0x2C=rightParen
         let bytes = makeLineBytes(
             lineNumber: 10,
-            content: [0x14, 0x80, 0x37, 0x0E, 0x40, 0x06, 0x00, 0x00, 0x00, 0x00, 0x2C]
+            content: [0x14, 0x80, 0x3B, 0x0E, 0x40, 0x06, 0x00, 0x00, 0x00, 0x00, 0x2C]
         )
 
         let result = detokenizer.detokenizeLine(bytes, variables: variables)

@@ -166,15 +166,25 @@ final class BASICTokenizerTests: XCTestCase {
         let encoded = x.encodeForVNT()
         XCTAssertEqual(encoded, [UInt8(0x58 | 0x80)])  // 'X' = $58, with high bit = $D8
 
-        // String variable "A$" encodes as 'A' with high bit + '$'
+        // String variable "A$" — ROM format: A, $|0x80 ($ is last char with high bit)
         let aStr = BASICVariableName(name: "A", type: .string)
         let encodedStr = aStr.encodeForVNT()
-        XCTAssertEqual(encodedStr, [UInt8(0x41 | 0x80), 0x24])  // 'A' | $80, '$'
+        XCTAssertEqual(encodedStr, [0x41, UInt8(0x24 | 0x80)])  // 'A', '$' | $80
 
         // Multi-char variable "ABC"
         let abc = BASICVariableName(name: "ABC", type: .numeric)
         let encodedAbc = abc.encodeForVNT()
         XCTAssertEqual(encodedAbc, [0x41, 0x42, UInt8(0x43 | 0x80)])  // A, B, C|$80
+
+        // Numeric array "B(" — ROM format: B, (|0x80
+        let bArr = BASICVariableName(name: "B", type: .numericArray)
+        let encodedArr = bArr.encodeForVNT()
+        XCTAssertEqual(encodedArr, [0x42, UInt8(0x28 | 0x80)])  // 'B', '(' | $80
+
+        // String array "C$(" — ROM format: C, $, (|0x80
+        let cStrArr = BASICVariableName(name: "C", type: .stringArray)
+        let encodedStrArr = cStrArr.encodeForVNT()
+        XCTAssertEqual(encodedStrArr, [0x43, 0x24, UInt8(0x28 | 0x80)])  // 'C', '$', '(' | $80
     }
 
     func testInvalidVariableNames() {

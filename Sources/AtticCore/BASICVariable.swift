@@ -161,40 +161,33 @@ public struct BASICVariableName: Sendable, Equatable, Hashable {
 
     /// Encodes the variable name for storage in the VNT.
     ///
-    /// Format:
-    /// - Characters of name (ATASCII)
-    /// - Last character has bit 7 set (OR with $80)
-    /// - For non-numeric types, type indicator byte follows
+    /// The ROM format stores the full name including type suffix characters
+    /// (`$` for strings, `(` for arrays) as part of the name. The LAST
+    /// character (which may be a suffix char) has bit 7 set.
+    ///
+    /// Examples:
+    /// - Numeric `X` → [0xD8] (X|0x80)
+    /// - String `A$` → [0x41, 0xA4] (A, $|0x80)
+    /// - Numeric array `B(` → [0x42, 0xA8] (B, (|0x80)
+    /// - String array `C$(` → [0x43, 0x24, 0xA8] (C, $, (|0x80)
     ///
     /// - Returns: The encoded bytes for this variable name.
     public func encodeForVNT() -> [UInt8] {
         var bytes: [UInt8] = []
 
-        // Convert name to ATASCII bytes
-        let nameBytes = name.map { UInt8(ascii: $0) }
+        // Build the full name including type suffix
+        let fullNameStr = fullName  // e.g., "X", "A$", "B(", "C$("
+        let fullBytes = fullNameStr.map { UInt8(ascii: $0) }
+
+        guard !fullBytes.isEmpty else { return bytes }
 
         // Add all but last character
-        for i in 0..<(nameBytes.count - 1) {
-            bytes.append(nameBytes[i])
+        for i in 0..<(fullBytes.count - 1) {
+            bytes.append(fullBytes[i])
         }
 
         // Add last character with high bit set
-        if let lastByte = nameBytes.last {
-            bytes.append(lastByte | 0x80)
-        }
-
-        // Add type indicator for non-numeric variables
-        switch type {
-        case .numeric:
-            break  // No indicator byte
-        case .string:
-            bytes.append(0x24)  // '$' character
-        case .numericArray:
-            bytes.append(0x28)  // '(' character
-        case .stringArray:
-            bytes.append(0x24)  // '$'
-            bytes.append(0x28)  // '('
-        }
+        bytes.append(fullBytes.last! | 0x80)
 
         return bytes
     }
@@ -322,8 +315,17 @@ public enum BASICVariableTable {
     /// Parses all variables from the Variable Name Table in memory.
     ///
     /// The VNT is a contiguous block of variable name entries. Each entry
-    /// consists of the variable name (with last character OR'd with $80)
-    /// followed by type indicator bytes for non-numeric variables.
+    /// consists of the variable name characters with the LAST character
+    /// having bit 7 set. The variable type is determined by the name itself:
+    ///
+    /// - Name ends with `$` and `(`: string array (e.g., "A$(")
+    /// - Name ends with `$`: string (e.g., "A$")
+    /// - Name ends with `(`: numeric array (e.g., "A(")
+    /// - Otherwise: numeric scalar (e.g., "A")
+    ///
+    /// The ROM stores the `$` and `(` type suffixes as part of the variable
+    /// name in the VNT, with the last character (including suffix chars)
+    /// having bit 7 set. There are NO separate type indicator bytes.
     ///
     /// - Parameters:
     ///   - memory: The VNT memory bytes.
@@ -334,14 +336,16 @@ public enum BASICVariableTable {
         var offset = 0
 
         while offset < memory.count {
-            // Read variable name until we find byte with high bit set
+            // Read variable name until we find byte with high bit set.
+            // The high bit marks the LAST character of the name (including
+            // any type suffix like $ or ().
             var nameBytes: [UInt8] = []
             while offset < memory.count {
                 let byte = memory[offset]
                 offset += 1
 
                 if byte & 0x80 != 0 {
-                    // Last character of name (high bit set)
+                    // Last character of name (high bit set) — strip the bit
                     nameBytes.append(byte & 0x7F)
                     break
                 } else {
@@ -351,29 +355,30 @@ public enum BASICVariableTable {
 
             guard !nameBytes.isEmpty else { break }
 
-            // Convert to string
-            let name = String(nameBytes.map { Character(UnicodeScalar($0)) })
+            // Convert to string — this includes any type suffix chars
+            let fullName = String(nameBytes.map { Character(UnicodeScalar($0)) })
 
-            // Determine type from following bytes
-            var type: BASICVariableType = .numeric
+            // Determine type from the suffix characters in the name.
+            // The ROM stores "$(" for string arrays, "$" for strings,
+            // "(" for numeric arrays, and nothing for numeric scalars.
+            let type: BASICVariableType
+            let baseName: String
 
-            if offset < memory.count {
-                let nextByte = memory[offset]
-                if nextByte == 0x24 {  // '$'
-                    offset += 1
-                    if offset < memory.count && memory[offset] == 0x28 {  // '('
-                        type = .stringArray
-                        offset += 1
-                    } else {
-                        type = .string
-                    }
-                } else if nextByte == 0x28 {  // '('
-                    type = .numericArray
-                    offset += 1
-                }
+            if fullName.hasSuffix("$(") {
+                type = .stringArray
+                baseName = String(fullName.dropLast(2))
+            } else if fullName.hasSuffix("$") {
+                type = .string
+                baseName = String(fullName.dropLast())
+            } else if fullName.hasSuffix("(") {
+                type = .numericArray
+                baseName = String(fullName.dropLast())
+            } else {
+                type = .numeric
+                baseName = fullName
             }
 
-            variables.append(BASICVariableName(name: name, type: type))
+            variables.append(BASICVariableName(name: baseName, type: type))
         }
 
         return variables
@@ -393,22 +398,15 @@ public enum BASICVariableTable {
 
     /// Calculates the size of a VNT entry for a given variable.
     ///
+    /// The size is the length of the full name including type suffix
+    /// characters (`$`, `(`). The last byte has bit 7 set but still
+    /// counts as one byte.
+    ///
     /// - Parameter variable: The variable name.
     /// - Returns: The number of bytes this variable uses in the VNT.
     public static func vntEntrySize(for variable: BASICVariableName) -> Int {
-        var size = variable.name.count  // Name characters
-
-        // Type indicator bytes
-        switch variable.type {
-        case .numeric:
-            break
-        case .string, .numericArray:
-            size += 1
-        case .stringArray:
-            size += 2
-        }
-
-        return size
+        // Full name includes base name + type suffix (e.g., "A$(" = 3 bytes)
+        return variable.fullName.count
     }
 
     /// Finds a variable by name in a list of existing variables.

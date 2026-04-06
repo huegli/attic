@@ -12,8 +12,8 @@
 // Token ranges (expression position — all other bytes):
 // - $0E + 6 bytes: BCD floating-point constant
 // - $0F + length + chars: String constant
-// - $12-$37: Operator tokens (arithmetic, comparison, logical)
-// - $38-$4F: Function tokens (STR$, CHR$, ABS, etc.)
+// - $12-$3C: Operator tokens (arithmetic, comparison, logical, parens)
+// - $3D-$54: Function tokens (STR$, CHR$, ABS, etc.)
 // - $16: End of line marker (also operator token .endOfLine)
 // - $80-$FF: Variable reference (index into Variable Name Table)
 //
@@ -156,19 +156,28 @@ public enum BASICStatementToken: UInt8, CaseIterable, Sendable {
 }
 
 // =============================================================================
-// MARK: - Operator Tokens ($37-$5C)
+// MARK: - Operator Tokens ($12-$3C)
 // =============================================================================
 
 /// Operator tokens represent punctuation, arithmetic, comparison, and logical operators.
 ///
 /// These tokens appear within the EXPRESSION portion of tokenized lines (after
-/// the statement name token). Their byte values ($12-$37) overlap with statement
+/// the statement name token). Their byte values ($12-$3C) overlap with statement
 /// token values ($00-$36) — the Atari BASIC ROM uses position context to
 /// disambiguate: the first byte after the header (and after each colon separator)
 /// is a statement name, while all other bytes use the expression token space.
 ///
-/// Note that some operators have different tokens depending on context
-/// (e.g., assignment = vs comparison =).
+/// Note that some operators have different tokens depending on context.
+/// In particular, `(` has FIVE different tokens depending on usage:
+/// - $2B: grouping in expressions, e.g. `(A+B)*C`
+/// - $37: array/string subscript on right side, e.g. `PRINT A(5)`, `PRINT A$(1,3)`
+/// - $38: array/string subscript on left side (assignment), e.g. `A(5)=10`
+/// - $39: DIM subscript for numeric arrays, e.g. `DIM A(10)`
+/// - $3A: function argument paren, e.g. `PEEK(0)`
+/// - $3B: DIM subscript for strings, e.g. `DIM A$(20)`
+///
+/// Similarly, `,` has two tokens: $12 for normal comma (PRINT separator,
+/// function args) and $3C for subscript separator in array/string indices.
 ///
 /// Reference: De Re Atari Chapter 10, Atari BASIC Source Book
 public enum BASICOperatorToken: UInt8, CaseIterable, Sendable {
@@ -197,7 +206,7 @@ public enum BASICOperatorToken: UInt8, CaseIterable, Sendable {
     case not = 0x28               // NOT
     case or = 0x29                // OR
     case and = 0x2A               // AND
-    case leftParen = 0x2B         // (
+    case leftParen = 0x2B         // ( (grouping)
     case rightParen = 0x2C        // )
     case equalsAssign = 0x2D      // = (assignment)
     case equalsCompare = 0x2E     // = (comparison, alternate)
@@ -209,12 +218,17 @@ public enum BASICOperatorToken: UInt8, CaseIterable, Sendable {
     case equals2 = 0x34           // = (alternate)
     case unaryPlus = 0x35         // + (unary)
     case unaryMinus = 0x36        // - (unary)
-    case leftParenArray = 0x37    // ( (array subscript)
+    case leftParenArray = 0x37    // ( (array/string subscript, right side)
+    case leftParenArrayAssign = 0x38  // ( (array/string subscript, assignment target)
+    case leftParenDimNum = 0x39   // ( (DIM subscript for numeric arrays)
+    case leftParenFunc = 0x3A     // ( (function argument paren)
+    case leftParenDimStr = 0x3B   // ( (DIM subscript for strings)
+    case commaArray = 0x3C        // , (subscript separator in arrays/substrings)
 
     /// The string representation of this operator.
     public var symbol: String {
         switch self {
-        case .comma: return ","
+        case .comma, .commaArray: return ","
         case .dollarSign: return "$"
         case .colon: return ":"
         case .semicolon: return ";"
@@ -239,51 +253,52 @@ public enum BASICOperatorToken: UInt8, CaseIterable, Sendable {
         case .not: return "NOT"
         case .or: return "OR"
         case .and: return "AND"
-        case .leftParen, .leftParenArray: return "("
+        case .leftParen, .leftParenArray, .leftParenArrayAssign,
+             .leftParenDimNum, .leftParenFunc, .leftParenDimStr: return "("
         case .rightParen: return ")"
         }
     }
 }
 
 // =============================================================================
-// MARK: - Function Tokens ($5D-$74)
+// MARK: - Function Tokens ($3D-$54)
 // =============================================================================
 
 /// Function tokens represent built-in BASIC functions.
 ///
 /// Like operator tokens, these appear in the EXPRESSION portion of tokenized
-/// lines (after the statement name token). Their byte values ($38-$4F) do not
-/// overlap with statement tokens ($00-$36) or operator tokens ($12-$37).
+/// lines (after the statement name token). Their byte values ($3D-$54) follow
+/// immediately after the operator token range ($12-$3C).
 ///
-/// Functions are used within expressions and always have parentheses
-/// following them (even if empty, like RND).
+/// Functions are always followed by a `leftParenFunc` ($3A) token for their
+/// argument list (even RND, which takes a dummy argument in Atari BASIC).
 ///
 /// Reference: De Re Atari Chapter 10, Atari BASIC Source Book
 public enum BASICFunctionToken: UInt8, CaseIterable, Sendable {
-    case str = 0x38               // STR$
-    case chr = 0x39               // CHR$
-    case usr = 0x3A               // USR
-    case asc = 0x3B               // ASC
-    case val = 0x3C               // VAL
-    case len = 0x3D               // LEN
-    case adr = 0x3E               // ADR
-    case atn = 0x3F               // ATN
-    case cos = 0x40               // COS
-    case peek = 0x41              // PEEK
-    case sin = 0x42               // SIN
-    case rnd = 0x43               // RND
-    case fre = 0x44               // FRE
-    case exp = 0x45               // EXP
-    case log = 0x46               // LOG
-    case clog = 0x47              // CLOG
-    case sqr = 0x48               // SQR
-    case sgn = 0x49               // SGN
-    case abs = 0x4A               // ABS
-    case int = 0x4B               // INT
-    case paddle = 0x4C            // PADDLE
-    case stick = 0x4D             // STICK
-    case ptrig = 0x4E             // PTRIG
-    case strig = 0x4F             // STRIG
+    case str = 0x3D               // STR$
+    case chr = 0x3E               // CHR$
+    case usr = 0x3F               // USR
+    case asc = 0x40               // ASC
+    case val = 0x41               // VAL
+    case len = 0x42               // LEN
+    case adr = 0x43               // ADR
+    case atn = 0x44               // ATN
+    case cos = 0x45               // COS
+    case peek = 0x46              // PEEK
+    case sin = 0x47               // SIN
+    case rnd = 0x48               // RND
+    case fre = 0x49               // FRE
+    case exp = 0x4A               // EXP
+    case log = 0x4B               // LOG
+    case clog = 0x4C              // CLOG
+    case sqr = 0x4D               // SQR
+    case sgn = 0x4E               // SGN
+    case abs = 0x4F               // ABS
+    case int = 0x50               // INT
+    case paddle = 0x51            // PADDLE
+    case stick = 0x52             // STICK
+    case ptrig = 0x53             // PTRIG
+    case strig = 0x54             // STRIG
 
     /// The keyword string for this function.
     public var keyword: String {

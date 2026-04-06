@@ -610,6 +610,15 @@ public struct BASICTokenizer: Sendable {
         /// Whether we're in an assignment (after = ).
         var inAssignment: Bool = false
 
+        /// Whether the current statement is DIM (affects paren token choice).
+        var inDimStatement: Bool = false
+
+        /// The type of the last emitted variable (for choosing paren context).
+        var lastVariableType: BASICVariableType?
+
+        /// Whether the last emitted token was a function (for choosing paren context).
+        var lastWasFunction: Bool = false
+
         init(existingVariables: [BASICVariable]) {
             self.allVariables = existingVariables
         }
@@ -719,12 +728,18 @@ public struct BASICTokenizer: Sendable {
                 // LET is often implied - but if explicitly stated, use it
                 return [statementToken.rawValue]
             }
+            // Track DIM context for choosing the right paren token
+            context.inDimStatement = (statementToken == .dim || statementToken == .com)
             context.atStatementStart = false
+            context.lastWasFunction = false
+            context.lastVariableType = nil
             return [statementToken.rawValue]
         }
 
         // Check for function token
         if let functionToken = BASICTokenLookup.matchFunction(upper) {
+            context.lastWasFunction = true
+            context.lastVariableType = nil
             return [functionToken.rawValue]
         }
 
@@ -740,10 +755,13 @@ public struct BASICTokenizer: Sendable {
 
     /// Tokenizes an identifier (variable reference).
     ///
-    /// Array variables (identifiers ending in `(` or `$(`) emit a
-    /// `leftParenArray` (0x37) token after the variable reference byte.
-    /// This matches the real Atari BASIC ROM tokenization format where
-    /// array subscript open-parens use a distinct token from regular parens.
+    /// Array variables (identifiers ending in `(` or `$(`) emit a context-
+    /// dependent paren token after the variable reference byte. The real
+    /// Atari BASIC ROM uses different `(` tokens depending on context:
+    /// - $37: array subscript on right side of expression
+    /// - $38: array subscript on left side (assignment target)
+    /// - $39: DIM subscript for numeric arrays
+    /// - $3B: DIM subscript for strings
     private func tokenizeIdentifier(
         _ identifier: String,
         context: inout TokenizerContext
@@ -783,12 +801,30 @@ public struct BASICTokenizer: Sendable {
         }
         bytes.append(tokenByte)
 
-        // For array types, emit leftParenArray (0x37) — the array subscript
-        // open paren. This is a distinct token from leftParen (0x2B) used
-        // for function calls and grouping. The real Atari BASIC ROM uses
-        // 0x37 for all array subscript parens.
+        // Track variable type for paren token selection
+        context.lastVariableType = varName.type
+        context.lastWasFunction = false
+
+        // For array types, emit the correct context-dependent paren token.
+        // The real Atari BASIC ROM uses different `(` tokens:
+        // - DIM string: $3B (leftParenDimStr)
+        // - DIM numeric array: $39 (leftParenDimNum)
+        // - Assignment target: $38 (leftParenArrayAssign)
+        // - Expression (right side): $37 (leftParenArray)
         if varName.type == .numericArray || varName.type == .stringArray {
-            bytes.append(BASICOperatorToken.leftParenArray.rawValue)
+            let parenToken: BASICOperatorToken
+            if context.inDimStatement {
+                parenToken = (varName.type == .stringArray)
+                    ? .leftParenDimStr
+                    : .leftParenDimNum
+            } else if context.atStatementStart || !context.inAssignment {
+                // At statement start (implied LET) = assignment target
+                parenToken = .leftParenArrayAssign
+            } else {
+                // In expression context (right side of assignment, PRINT args, etc.)
+                parenToken = .leftParenArray
+            }
+            bytes.append(parenToken.rawValue)
         }
 
         return bytes
@@ -848,6 +884,20 @@ public struct BASICTokenizer: Sendable {
     }
 
     /// Tokenizes punctuation.
+    ///
+    /// The `(` token depends on context:
+    /// - After a function keyword: `leftParenFunc` ($3A)
+    /// - Otherwise: `leftParen` ($2B) for grouping
+    ///
+    /// Note: Array subscript `(` tokens are emitted by `tokenizeIdentifier`
+    /// because the lexer includes `(` in array variable identifiers.
+    ///
+    /// The `,` token also depends on context — `commaArray` ($3C) is used
+    /// inside array/string subscripts, but for simplicity we always emit
+    /// the regular comma ($12) here. The ROM's context-sensitive comma
+    /// selection is handled by the real Atari BASIC ROM during tokenization;
+    /// our tokenizer uses the regular comma which works for PRINT separators,
+    /// function arguments, and most contexts.
     private func tokenizePunctuation(
         _ punct: Character,
         context: inout TokenizerContext
@@ -860,10 +910,19 @@ public struct BASICTokenizer: Sendable {
         case ":":
             context.atStatementStart = true
             context.inAssignment = false
+            context.inDimStatement = false
+            context.lastWasFunction = false
+            context.lastVariableType = nil
             return [BASICOperatorToken.colon.rawValue]
         case "#":
             return [BASICOperatorToken.pound.rawValue]
         case "(":
+            // After a function keyword, emit leftParenFunc ($3A)
+            if context.lastWasFunction {
+                context.lastWasFunction = false
+                return [BASICOperatorToken.leftParenFunc.rawValue]
+            }
+            // Otherwise, regular grouping paren
             return [BASICOperatorToken.leftParen.rawValue]
         case ")":
             return [BASICOperatorToken.rightParen.rawValue]

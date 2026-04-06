@@ -19,8 +19,8 @@
 // Expression position (all other bytes after the statement name):
 // - $0E + 6 bytes: BCD floating-point constant
 // - $0F + len + chars: String literal
-// - $12-$37: Operator tokens (,  ;  =  TO  +  -  etc.)
-// - $38-$4F: Function tokens (STR$, CHR$, PEEK, etc.)
+// - $12-$3C: Operator tokens (,  ;  =  TO  +  -  etc.)
+// - $3D-$54: Function tokens (STR$, CHR$, PEEK, etc.)
 // - $80-$FF: Variable reference (index into VNT)
 //
 // Operator byte values $12-$36 OVERLAP with statement tokens. The real
@@ -250,7 +250,7 @@ public struct BASICDetokenizer: Sendable {
     /// This is the core detokenization logic. It is CONTEXT-AWARE: the first
     /// byte of each statement is decoded as a STATEMENT NAME token (using the
     /// statement token table $00-$36), while all subsequent bytes are decoded
-    /// as EXPRESSION tokens (operators $12-$37, functions $38-$4F, constants,
+    /// as EXPRESSION tokens (operators $12-$3C, functions $3D-$54, constants,
     /// and variable references $80-$FF).
     ///
     /// This context distinction is necessary because operator byte values
@@ -357,8 +357,8 @@ public struct BASICDetokenizer: Sendable {
     /// - $0D + byte: Legacy small integer constant (our old format, kept for compat)
     /// - $0E + 6 bytes: BCD floating-point constant
     /// - $0F + len + chars: String literal
-    /// - $12-$37: Operator tokens (comma, =, TO, +, -, etc.)
-    /// - $38-$4F: Function tokens (STR$, CHR$, PEEK, etc.)
+    /// - $12-$3C: Operator tokens (comma, =, TO, +, -, (, etc.)
+    /// - $3D-$54: Function tokens (STR$, CHR$, PEEK, etc.)
     /// - $80-$FF: Variable references
     ///
     /// - Parameters:
@@ -416,7 +416,7 @@ public struct BASICDetokenizer: Sendable {
             return ("\"\(content)\"", 2 + length, !afterStatement, false, false)
         }
 
-        // Operator tokens ($12-$37)
+        // Operator tokens ($12-$3C)
         if let token = BASICOperatorToken(rawValue: byte) {
             // EOL marker ($16) shouldn't appear in content, but handle gracefully
             if token == .endOfLine {
@@ -429,7 +429,7 @@ public struct BASICDetokenizer: Sendable {
             return (symbol, 1, needsSpaces, needsSpaces, isColon)
         }
 
-        // Function tokens ($38-$4F)
+        // Function tokens ($3D-$54)
         if let token = BASICFunctionToken(rawValue: byte) {
             return (token.keyword, 1, !afterStatement, false, false)
         }
