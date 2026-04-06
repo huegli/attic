@@ -149,11 +149,10 @@ public struct BASICDetokenizer: Sendable {
         // Minimum line: 2 bytes line number + 1 byte line offset + 1 byte stmt offset + 1 byte EOL = 5 bytes
         guard bytes.count >= 5 else { return nil }
 
-        // Extract line number (little-endian)
+        // Extract line number (little-endian).
+        // Line 0 is valid in Atari BASIC — program boundaries are defined
+        // by STMTAB/STARP pointers, not by a line-number sentinel.
         let lineNumber = UInt16(bytes[0]) | (UInt16(bytes[1]) << 8)
-
-        // Line number 0 indicates end of program
-        guard lineNumber > 0 else { return nil }
 
         // Line 32768 is the immediate mode line buffer - skip it
         guard lineNumber != BASICLineFormat.immediateModeLine else { return nil }
@@ -204,10 +203,13 @@ public struct BASICDetokenizer: Sendable {
         var offset = 0
 
         while offset < bytes.count {
-            // Check for end-of-program marker (line number 0) or immediate mode line (32768)
+            // Skip the immediate mode line buffer (line 32768) if encountered.
+            // Line 0 is valid in Atari BASIC and must NOT be treated as an
+            // end-of-program marker — program boundaries are determined by
+            // the byte array length (STMTAB to STARP), not by a sentinel.
             if bytes.count - offset >= 2 {
                 let lineNum = UInt16(bytes[offset]) | (UInt16(bytes[offset + 1]) << 8)
-                if lineNum == 0 || lineNum == BASICLineFormat.immediateModeLine {
+                if lineNum == BASICLineFormat.immediateModeLine {
                     break
                 }
             }

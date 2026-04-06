@@ -58,13 +58,15 @@ final class BASICDetokenizerTests: XCTestCase {
         XCTAssertEqual(result?.text, "")
     }
 
-    func testDetokenizeEndOfProgram() {
-        // Line number 0 indicates end of program
+    func testDetokenizeLineNumberZero() {
+        // Line 0 is valid in Atari BASIC — it should be detokenized, not skipped.
+        // Program boundaries are defined by STMTAB/STARP pointers, not line numbers.
         let bytes = makeLineBytes(lineNumber: 0, content: [])
 
         let result = detokenizer.detokenizeLine(bytes, variables: [])
 
-        XCTAssertNil(result)
+        XCTAssertNotNil(result)
+        XCTAssertEqual(result?.lineNumber, 0)
     }
 
     func testDetokenizeInvalidBytes() {
@@ -358,6 +360,40 @@ final class BASICDetokenizerTests: XCTestCase {
         // Must have "ITEMS$(" somewhere in the output
         XCTAssertTrue(result?.text.contains("ITEMS$(") ?? false,
                       "Expected 'ITEMS$(' but got: \(result?.text ?? "nil")")
+    }
+
+    func testDetokenizeLineZero() {
+        let variables = [
+            BASICVariableName(name: "X", type: .numeric)
+        ]
+
+        // Line 0 is valid in Atari BASIC
+        let bytes = makeLineBytes(
+            lineNumber: 0,
+            content: [0x00, 0x80]  // REM + var ref (just need some content)
+        )
+
+        let result = detokenizer.detokenizeLine(bytes, variables: variables)
+
+        XCTAssertNotNil(result, "Line 0 should be detokenized, not skipped")
+        XCTAssertEqual(result?.lineNumber, 0)
+    }
+
+    func testDetokenizeProgramWithLineZero() {
+        let variables = [
+            BASICVariableName(name: "X", type: .numeric)
+        ]
+
+        // Program: line 0 followed by line 10
+        let line0 = makeLineBytes(lineNumber: 0, content: [0x20, 0x80])  // PRINT X
+        let line10 = makeLineBytes(lineNumber: 10, content: [0x20, 0x80])  // PRINT X
+
+        let programBytes = line0 + line10
+        let lines = detokenizer.detokenizeProgram(programBytes, variables: variables)
+
+        XCTAssertEqual(lines.count, 2, "Should have 2 lines but got \(lines.count)")
+        XCTAssertEqual(lines.first?.lineNumber, 0)
+        XCTAssertEqual(lines.last?.lineNumber, 10)
     }
 
     func testDetokenizeUnknownVariable() {
