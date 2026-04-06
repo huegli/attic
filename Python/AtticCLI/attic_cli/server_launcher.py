@@ -32,12 +32,14 @@ class LaunchResult:
         socket_path: Path to the Unix domain socket (if successful).
         pid: Server process ID (if launched).
         error: Error description (if failed).
+        launched: True if the CLI launched the server (vs. discovering existing).
     """
 
     success: bool
     socket_path: str = ""
     pid: int = 0
     error: str = ""
+    launched: bool = False
 
 
 def _find_rom_path() -> str | None:
@@ -177,7 +179,7 @@ def launch_server(
         time.sleep(_POLL_INTERVAL)
         if os.path.exists(sock_path):
             logger.debug("AtticServer socket ready: %s (pid %d)", sock_path, pid)
-            return LaunchResult(success=True, socket_path=sock_path, pid=pid)
+            return LaunchResult(success=True, socket_path=sock_path, pid=pid, launched=True)
 
     return LaunchResult(
         success=False,

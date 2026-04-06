@@ -63,6 +63,8 @@ locations are updated automatically or must be kept in sync:
 | `Sources/AtticGUI/Info.plist` | Must be updated to match |
 | `scripts/make-app.sh` output | Auto-injected from AtticCore.swift at build time |
 | About dialog (`AtticApp.swift`) | Reads `AtticCore.version` directly |
+| `Python/AtticCLI/attic_cli/__init__.py` | Must be updated to match |
+| `Python/AtticCLI/pyproject.toml` | Must be updated to match |
 | Git tag | Create `vX.Y.Z` tag at release commit |
 | `CHANGELOG.md` | Add new `## [X.Y.Z]` section |
 
@@ -91,7 +93,7 @@ See `docs/IMPLEMENTATION_PLAN.md` for detailed phase-by-phase progress. Summary:
 
 **Dual Launch Modes:**
 - **GUI mode**: AtticGUI launches AtticServer with AESP TCP enabled (default)
-- **Web mode**: `attic-py` launches AtticServer with `--no-aesp --websocket`; `.gui` REPL command serves the web client
+- **Web mode**: `uv run attic` launches AtticServer with `--no-aesp --websocket`; `.gui` REPL command serves the web client
 
 ## Key Files to Reference
 

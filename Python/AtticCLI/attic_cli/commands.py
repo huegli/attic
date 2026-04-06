@@ -70,14 +70,16 @@ def handle_dot_command(
     if lower == ".quit":
         try:
             client.send_raw("quit")
-        except CLIError:
+        except Exception:
+            # Server may already be down — exit silently regardless.
             pass
         return QUIT
 
     if lower == ".shutdown":
         try:
             client.send_raw("shutdown")
-        except CLIError:
+        except Exception:
+            # Server may already be down — exit silently regardless.
             pass
         return SHUTDOWN
 

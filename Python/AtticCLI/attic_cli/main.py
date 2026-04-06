@@ -1,4 +1,4 @@
-"""Click CLI entry point for attic-py.
+"""Click CLI entry point for the Attic Python CLI.
 
 Handles argument parsing, server discovery/launch, and handoff to the REPL.
 """
@@ -38,7 +38,7 @@ sound_enabled: bool = False
     type=click.Path(),
     help="Connect to a specific server socket path.",
 )
-@click.version_option(version=__version__, prog_name="attic-py")
+@click.version_option(version=__version__, prog_name="attic")
 def cli(silent: bool, sound: bool, socket_path: str | None) -> None:
     """Python CLI for the Attic Atari 800 XL emulator.
 
@@ -54,15 +54,16 @@ def cli(silent: bool, sound: bool, socket_path: str | None) -> None:
 
     client = CLISocketClient()
 
+    websocket_active = False
     if socket_path:
         # Connect to a specific socket
         _connect_to_socket(client, socket_path)
     else:
         # Discover or launch server
-        _connect_or_launch(client, silent=effective_silent)
+        websocket_active = _connect_or_launch(client, silent=effective_silent)
 
-    # Auto-start web client HTTP server
-    web_url = _start_web_client()
+    # Auto-start web client HTTP server only when WebSocket is active
+    web_url = _start_web_client() if websocket_active else None
 
     # Show banner
     _print_banner(client, web_url=web_url)
@@ -82,11 +83,14 @@ def _connect_to_socket(client: CLISocketClient, path: str) -> None:
         sys.exit(1)
 
 
-def _connect_or_launch(client: CLISocketClient, *, silent: bool) -> None:
+def _connect_or_launch(client: CLISocketClient, *, silent: bool) -> bool:
     """Discover an existing server or launch a new one, then connect.
 
     When launching a new server, AESP TCP is disabled and WebSocket is
     enabled.  The web client HTTP server is auto-started on launch.
+
+    Returns:
+        True if the server was launched by us with WebSocket enabled.
     """
     result = ensure_server_running(
         silent=silent,
@@ -112,6 +116,8 @@ def _connect_or_launch(client: CLISocketClient, *, silent: bool) -> None:
 
     if result.pid:
         console.print(f"[dim]Connected to AtticServer (pid {result.pid})[/dim]")
+
+    return result.launched
 
 
 def _start_web_client() -> str | None:
