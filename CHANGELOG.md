@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-04-06
+
+### Added
+- Built-in TUI BASIC editor with Atari color scheme
+- Web client build and bundling in make-app.sh
+
+### Fixed
+- BASIC token table corrected to match real Atari BASIC ROM — operator tokens
+  extended to $12-$3C (5 new context-dependent paren tokens for array subscripts,
+  DIM, and function calls), function tokens shifted to $3D-$54; verified against
+  actual ROM memory dumps using MCP emulator tools
+- VNT (Variable Name Table) parser fixed to handle ROM format where type suffix
+  characters ($, () are stored as part of the variable name
+- Detokenizer no longer inserts extra space after open parenthesis
+- List command no longer fails when program contains line 0
+- Keyboard case handling fixed for lowercase letter support
+- Inject keys no longer uppercases all letters after boot/reset
+- Caps Lock disabled and lowercase fixed in web client
+- Shift key inversion corrected
+- CX Stick gamepad detection fixed
+- Breakpoint write tracking preserves original bytes correctly
+
+### Changed
+- Python CLI renamed, version synced, web URL shown in banner, quit handling improved
+- WebSocket protocol detection added for client connections
+
+### Removed
+- Emacs integration support removed from project
+
 ## [0.5.0] - 2026-04-02
 
 ### Added
