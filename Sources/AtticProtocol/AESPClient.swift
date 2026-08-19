@@ -236,6 +236,11 @@ public actor AESPClient {
     /// when a `.status` response arrives.
     private var pendingStatusContinuation: CheckedContinuation<AESPMessage.StatusPayload, Never>?
 
+    /// Pending continuation for an audio-config request-response.
+    /// Set by `requestAudioConfig()` and resumed by `handleControlMessage()`
+    /// when a `.audioConfig` response arrives.
+    private var pendingAudioConfigContinuation: CheckedContinuation<AESPMessage.AudioConfig?, Never>?
+
     // =========================================================================
     // MARK: - Initialization
     // =========================================================================
@@ -593,6 +598,16 @@ public actor AESPClient {
                 await delegate?.client(self, didReceiveMessage: message)
             }
 
+        case .audioConfig:
+            // If a requestAudioConfig() call is waiting, fulfil its continuation
+            if let continuation = pendingAudioConfigContinuation {
+                pendingAudioConfigContinuation = nil
+                continuation.resume(returning: message.parseAudioConfigPayload())
+            } else {
+                // No pending request — forward to delegate
+                await delegate?.client(self, didReceiveMessage: message)
+            }
+
         case .error:
             if let (code, errorMessage) = message.parseErrorPayload() {
                 let error = AESPError.serverError(code: code, message: errorMessage)
@@ -680,6 +695,28 @@ public actor AESPClient {
     /// Subscribes to audio samples.
     public func subscribeToAudio() async {
         await sendMessage(.audioSubscribe())
+    }
+
+    /// Subscribes to audio samples and waits for the server's AUDIO_CONFIG
+    /// response describing the actual sample rate / bit depth / channel
+    /// count it will send.
+    ///
+    /// Not every AESP server matches AtticServer's own native 44100 Hz
+    /// 16-bit format -- callers must not assume it and should configure
+    /// their audio pipeline from this response instead. This is a
+    /// request-response pattern: the next `.audioConfig` message received
+    /// on the control channel fulfils this call.
+    ///
+    /// - Returns: The server's `AudioConfig`, or `nil` if the response was
+    ///   malformed (the connection stays open; callers should fall back to
+    ///   a sane default).
+    public func requestAudioConfig() async -> AESPMessage.AudioConfig? {
+        return await withCheckedContinuation { continuation in
+            pendingAudioConfigContinuation = continuation
+            Task {
+                await sendMessage(.audioSubscribe())
+            }
+        }
     }
 
     /// Unsubscribes from audio samples.

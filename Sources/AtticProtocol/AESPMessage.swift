@@ -839,7 +839,7 @@ extension AESPMessage {
     }
 
     /// Audio configuration values.
-    public struct AudioConfig {
+    public struct AudioConfig: Sendable {
         public let sampleRate: UInt32
         public let bitsPerSample: UInt8
         public let channels: UInt8

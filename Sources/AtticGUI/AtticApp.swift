@@ -448,14 +448,25 @@ class AtticViewModel: ObservableObject {
 
             try await client?.connect()
 
-            // Subscribe to video and audio streams
+            // Subscribe to video.
             await client?.subscribeToVideo()
-            await client?.subscribeToAudio()
 
-            // Configure audio engine
-            // libatari800 typically outputs 44100 Hz, 16-bit mono audio
-            let audioConfig = AudioConfiguration(sampleRate: 44100, channels: 1, sampleSize: 2)
-            audioEngine.configure(from: audioConfig)
+            // Subscribe to audio and configure the engine from the server's
+            // actual AUDIO_CONFIG response -- not every AESP server matches
+            // AtticServer's own native 44100 Hz 16-bit format (atari800-cl,
+            // for one, sends 44,744 Hz 8-bit unsigned PCM), and feeding a
+            // mismatched format through the wrong decode path produces
+            // audible noise/hum even from a genuinely silent stream. Fall
+            // back to the native default if the server doesn't answer.
+            if let serverAudioConfig = await client?.requestAudioConfig() {
+                audioEngine.configure(
+                    sampleRate: Int(serverAudioConfig.sampleRate),
+                    channels: Int(serverAudioConfig.channels),
+                    sampleSize: Int(serverAudioConfig.bitsPerSample / 8))
+            } else {
+                let audioConfig = AudioConfiguration(sampleRate: 44100, channels: 1, sampleSize: 2)
+                audioEngine.configure(from: audioConfig)
+            }
 
             // Start audio engine in a background task to avoid blocking
             // This is a workaround for AVAudioEngine sometimes blocking on start()
